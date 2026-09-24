@@ -1,0 +1,11 @@
+{
+  "name": "dar-alekram",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "دار الإكرام — نظام إدارة الحالات والصرف (static site, no build step)",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "serve": "node ../.claude/serve.js"
+  }
+}
