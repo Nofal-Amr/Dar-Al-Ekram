@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "org.daralekram.app",
+      "sha256_cert_fingerprints": ["E2:E0:FE:29:F0:B8:16:4C:8D:58:6E:04:00:CE:19:9D:1E:FA:79:C7:44:4C:3F:B9:20:43:E5:F8:2F:CC:E1:E1"]
+    }
+  }
+]
