@@ -1,6 +1,6 @@
 {
   "name": "dar-alekram",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "دار الإكرام — نظام إدارة الحالات والصرف (static site, no build step)",

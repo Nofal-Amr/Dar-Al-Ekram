@@ -1,10 +1,10 @@
 // Service worker: keeps the app shell on the device so it opens without internet.
 // Case data never goes through here — it comes live from Supabase (plus the app's own offline copy).
-const VERSION = "v1.1.0";
-const SHELL = `shell-${VERSION}`, STATIC = "static-v1";
-const APP = ["./", "index.html", "app.js", "core.js", "icons.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
+const VERSION = "v1.2.0";
+const SHELL = `shell-${VERSION}`, STATIC = "static-v2";
+const APP = ["./", "index.html", "app.js", "core.js", "icons.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 // Pinned third-party files never change at the same URL, so they can be cache-first forever.
-const PINNED = ["vendor/supabase.js", "vendor/xlsx.full.min.js", "vendor/fonts/fonts.css", "vendor/fonts/ReadexPro-arabic.woff2", "vendor/fonts/ReadexPro-latin.woff2", "vendor/fonts/Amiri-arabic.woff2", "vendor/fonts/Amiri-latin.woff2"];
+const PINNED = ["vendor/supabase.js", "vendor/xlsx.full.min.js", "vendor/fonts/fonts.css", "vendor/fonts/BalooBhaijaan2-arabic.woff2", "vendor/fonts/BalooBhaijaan2-latin.woff2"];
 
 self.addEventListener("install", e => {
   e.waitUntil(Promise.all([caches.open(SHELL).then(c => c.addAll(APP)), caches.open(STATIC).then(c => c.addAll(PINNED))]).then(() => self.skipWaiting()));

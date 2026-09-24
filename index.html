@@ -14,14 +14,14 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <!-- Everything is served from this site (no CDNs) so the app still opens when the internet drops. -->
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
-<link rel="preload" href="vendor/fonts/ReadexPro-arabic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="vendor/fonts/BalooBhaijaan2-arabic.woff2" as="font" type="font/woff2" crossorigin>
 <script src="vendor/supabase.js"></script>
 <style>
 :root{
   --paper:#F5F6F3; --card:#FFFFFF; --ink:#1E2A22; --muted:#627067; --line:#DDE3DC;
-  --green:#2A6A36; --green-soft:#E4EFE6; --brand:#A3282A; --brand-soft:#F6E2E1; --plum:#5E2A61; --plum-soft:#EFE4F0; --on:#FFFFFF; --gold:#B87D14; --gold-ink:#855A0E; --gold-soft:#F7ECD6;
-  --red:#A8322A; --red-soft:#F6E1DF; --blue:#2D5B86; --blue-soft:#E2EBF4;
-  --font:"Readex Pro","Segoe UI",Tahoma,sans-serif; --display:"Amiri","Traditional Arabic",serif;
+  --green:#235E2D; --green-soft:#E3EEE5; --brand:#962A25; --brand-soft:#F6E2E1; --plum:#532352; --plum-soft:#EFE4F0; --on:#FFFFFF; --gold:#B87D14; --gold-ink:#855A0E; --gold-soft:#F7ECD6;
+  --red:#962A25; --red-soft:#F6E1DF; --blue:#2D5B86; --blue-soft:#E2EBF4;
+  --font:"Baloo Bhaijaan 2","Segoe UI",Tahoma,sans-serif; --display:"Baloo Bhaijaan 2","Segoe UI",Tahoma,sans-serif;
   box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -195,7 +195,7 @@ body.simple .wrap{padding-bottom:40px;max-width:640px}
 .s-tiles{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .s-tile{min-height:170px;border-radius:22px;border:0;color:#fff;font-size:23px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 0 rgba(0,0,0,.12)}
 .s-tile .ic{font-size:58px;line-height:1}
-.s-tile.g{background:#2A6A36}.s-tile.b{background:#2D5B86}.s-tile.r{background:#A3282A}.s-tile.p{background:#5E2A61}
+.s-tile.g{background:#235E2D}.s-tile.b{background:#2D5B86}.s-tile.r{background:#962A25}.s-tile.p{background:#532352}
 .s-tile:active{transform:scale(.98)}
 .s-foot{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:28px}
 .s-back{display:block;width:100%;min-height:58px;border-radius:14px;border:2px solid var(--line);background:var(--card);font-size:20px;font-weight:600;margin-bottom:14px;text-align:start;padding:0 18px}
@@ -209,11 +209,11 @@ body.simple .wrap{padding-bottom:40px;max-width:640px}
 .s-ic.big{font-size:64px}
 .s-row{display:flex;gap:12px;align-items:center;background:var(--card);border:2px solid var(--line);border-radius:16px;padding:14px 16px}
 .s-row.done{background:var(--green-soft);border-color:transparent}
-.s-give{min-width:110px;min-height:64px;border-radius:14px;border:0;background:#2A6A36;color:#fff;font-size:21px;font-weight:600}
+.s-give{min-width:110px;min-height:64px;border-radius:14px;border:0;background:#235E2D;color:#fff;font-size:21px;font-weight:600}
 .s-give:disabled{opacity:.6}
 .s-ok{color:var(--green);font-weight:600;font-size:18px;white-space:nowrap}
 .s-ok.muted{color:var(--muted)}
-.s-call{min-width:110px;min-height:64px;border-radius:14px;background:#A3282A;color:#fff;font-size:20px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;padding:0 14px}
+.s-call{min-width:110px;min-height:64px;border-radius:14px;background:#962A25;color:#fff;font-size:20px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;padding:0 14px}
 .s-call.wide{width:100%;margin-top:10px}
 .s-search{font-size:20px!important;min-height:60px!important;border-radius:14px!important;border-width:2px!important;margin-bottom:12px}
 .s-count{font-size:18px;margin-bottom:12px}

@@ -1,15 +1,31 @@
 {
-  "name": "دار الإكرام — إدارة الحالات",
+  "id": "/",
+  "name": "دار الإكرام — إدارة الحالات والصرف",
   "short_name": "دار الإكرام",
+  "description": "نظام جمعية دار الإكرام للخدمات الاجتماعية: الحالات والكشوفات والتوزيع.",
   "lang": "ar",
   "dir": "rtl",
-  "start_url": "./",
+  "start_url": "./?source=app",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#F5F6F3",
-  "theme_color": "#2A6A36",
+  "orientation": "any",
+  "background_color": "#FCFBF8",
+  "theme_color": "#235E2D",
+  "categories": ["productivity", "social"],
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "تسليم مساعدة", "short_name": "تسليم", "url": "./?go=give", "icons": [{ "src": "icon-maskable-192.png", "sizes": "192x192" }] },
+    { "name": "دوّر على حالة", "short_name": "بحث", "url": "./?go=search", "icons": [{ "src": "icon-maskable-192.png", "sizes": "192x192" }] },
+    { "name": "حالة جديدة", "short_name": "حالة جديدة", "url": "./?go=add", "icons": [{ "src": "icon-maskable-192.png", "sizes": "192x192" }] }
+  ],
+  "screenshots": [
+    { "src": "screenshots/phone-helper.png", "sizes": "500x1000", "type": "image/png", "form_factor": "narrow", "label": "شاشة التوزيع البسيطة" },
+    { "src": "screenshots/phone-give.png", "sizes": "500x1000", "type": "image/png", "form_factor": "narrow", "label": "تسليم المساعدات" },
+    { "src": "screenshots/desktop-dashboard.png", "sizes": "1600x1000", "type": "image/png", "form_factor": "wide", "label": "الشاشة الرئيسية للمدير" }
   ]
 }

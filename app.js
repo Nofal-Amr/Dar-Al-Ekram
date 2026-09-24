@@ -2,7 +2,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -306,6 +306,42 @@ async function boot(){
   setWho(); render();
   await reload();
   subscribeRealtime(); flushQueue();
+  startGo(new URLSearchParams(location.search).get("go"));
+}
+// App-icon shortcuts (manifest "shortcuts") open ?go=give|search|add.
+function startGo(to){
+  if(!to) return;
+  try{ const u=new URL(location.href); u.searchParams.delete("go"); history.replaceState(null,"",u); }catch(e){}
+  if(["give","search","add"].includes(to)){
+    const ready=batches().filter(k=>k.status==="معتمد");
+    if(simple()){ sv={screen:to==="search"?"find":to==="give"?(ready.length===1?"gb:"+ready[0].id:"give"):"home"}; render(); if(to==="search") setTimeout(()=>$("#s_q")?.focus(),50); }
+    else if(to!=="add"||canWrite()) go(to);
+    return;
+  }
+  if(DEMO) demoGo(to);
+}
+
+/* ---------- install as an app ---------- */
+let installEvt=null;
+const isStandalone=()=>matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+const isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent);
+addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); installEvt=e; if(view==="settings") render(); });
+addEventListener("appinstalled",()=>{ installEvt=null; toast("التطبيق اتثبت ✓ هتلاقيه على الشاشة الرئيسية"); if(view==="settings") render(); });
+async function installApp(){ if(!installEvt) return; installEvt.prompt(); const r=await installEvt.userChoice.catch(()=>null); installEvt=null; if(r?.outcome!=="accepted") render(); }
+function installBlock(){
+  if(isStandalone()) return `<div class="note green">${ic("check")} <span>إنت فاتح التطبيق المتثبت.</span></div>`;
+  if(installEvt) return `<div class="bar"><button class="btn pri" id="installApp">${ic("download")}ثبّت التطبيق على الجهاز ده</button></div>
+    <p class="sub">هيظهر بأيقونة الجمعية على الشاشة الرئيسية ويفتح زي أي أبلكيشن، ويشتغل حتى لو النت فصل.</p>`;
+  if(isIOS()) return `<div class="note">على iPhone: افتح الموقع من <b>Safari</b> ← زرار المشاركة (المربع اللي فيه سهم) ← <b>«إضافة إلى الشاشة الرئيسية»</b>.</div>`;
+  return `<div class="note">افتح الموقع من Chrome ← القايمة (⋮) ← <b>«تثبيت التطبيق»</b> أو «إضافة إلى الشاشة الرئيسية».</div>`;
+}
+// Demo only: ?demo&go=people|batches|reports|settings|batch|person|edit opens that screen (for screenshots and walkthroughs).
+function demoGo(to){
+  if(!to) return;
+  if(["home","people","batches","reports","settings"].includes(to)){ view=to; render(); return; }
+  if(to==="batch"){ const k=batches().find(x=>x.status==="معتمد"); if(k) openBatch(k.id); }
+  if(to==="person"||to==="edit"){ const b=people().find(x=>(x.children||[]).length>1)||people()[0]; if(b) (to==="edit"?editPerson(b.id):viewPerson(b.id)); }
+  if(to==="give"&&simple()){ const k=batches().find(x=>x.status==="معتمد"); if(k){ sv={screen:"gb:"+k.id}; render(); } }
 }
 function setWho(){
   $("#who").innerHTML = `<b style="background:${navigator.onLine?"#2E9E6B":"var(--red)"}"></b>${esc((me?.full_name||"").split(" ")[0])}<br>${ROLE_AR[role]}${realRole!==role?" (معاينة)":""}`;
@@ -450,8 +486,8 @@ function vSettings(){
   ${isMgr()?(()=>{ const arch=archivedPeople(); return `<h3>الأرشيف</h3>
   <p class="sub" style="margin-top:0">الحالات المؤرشفة مش بتظهر في القوائم ولا الكشوف، بس سجلها كامل محفوظ.</p>
   ${arch.length?`<div class="list">${arch.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">اتأرشفت ${dLabel(b.archivedAt)}</span></span><button class="btn sm" data-restore="${b.id}">${ic("restore")}رجّعها</button></div>`).join("")}</div>`:`<div class="empty">الأرشيف فاضي</div>`}`; })():""}
-  <h3>التطبيق على الموبايل</h3>
-  <div class="note">افتح الموقع من Chrome على الموبايل ← القايمة (⋮) ← <b>«إضافة إلى الشاشة الرئيسية»</b> أو «تثبيت التطبيق». هيظهر أيقونة الجمعية زي أي أبلكيشن.<br>على iPhone: من Safari ← زرار المشاركة ← «إضافة إلى الشاشة الرئيسية».</div>
+  <h3>التطبيق</h3>
+  ${installBlock()}
   <h3>العرض</h3>
   <div class="bar"><button class="btn" id="bigText">${document.body.classList.contains("big")?"خط عادي":ic("text")+" تكبير الخط"}</button></div>
   <h3>الحساب</h3>
@@ -488,6 +524,7 @@ function bindView(){
   on("#qaSearch","onclick",()=>go("search"));
   on("#logout","onclick",logout);
   on("#myPin","onclick",changeMyPin);
+  on("#installApp","onclick",installApp);
   v.querySelectorAll("[data-restore]").forEach(el=>el.onclick=async()=>{ const id=el.dataset.restore; el.disabled=true;
     if(await run(sb.from("beneficiaries").update({archived_at:null,archived_by:null}).eq("id",id),"رجعت ✓")){ await logIt("beneficiary",id,"إرجاع من الأرشيف"); refreshPerson(id); } else el.disabled=false; });
 }
@@ -503,6 +540,7 @@ function go(what){
   else if(what==="turning"){ view="reports"; render(); }
   else if(what==="give"||what==="print"){
     const list=batches().filter(k=>k.status==="معتمد"||(what==="print"&&k.status==="مصروف"));
+    if(what==="give"&&list.length===1){ openBatch(list[0].id,true); return; }   // one open list on distribution day: skip the chooser
     sheet(what==="give"?"اختار الكشف اللي بتسلّمه":"اختار الكشف اللي هتطبعه", list.length?`<div class="list">${list.map(batchRow).join("")}</div>`:`<div class="empty">مفيش كشوف معتمدة لسه. المدير لازم يعتمد الكشف الأول.</div>`, s=>{
       s.querySelectorAll("[data-batch]").forEach(el=>el.onclick=()=>openBatch(el.dataset.batch, what==="give"));
     });
@@ -638,7 +676,8 @@ function bindSimple(){
     const to=el.dataset.s;
     if(to.startsWith("pr:")){ const k=K.get(to.slice(3)); if(k) doPrint(batchHTML(k)); return; }
     if(!to.startsWith("ps:")&&!(sv.screen.startsWith("ps:")&&to==="find")) sq="";
-    sv={screen:to}; render(); window.scrollTo(0,0);
+    const ready=batches().filter(k=>k.status==="معتمد");
+    sv={screen:to==="give"&&ready.length===1&&sv.screen==="home"?"gb:"+ready[0].id:to}; render(); window.scrollTo(0,0);
     if(to==="find") setTimeout(()=>$("#s_q")?.focus(),50);
   });
   v.querySelectorAll("[data-preview]").forEach(el=>el.onclick=()=>setPreview(el.dataset.preview));
@@ -1099,11 +1138,11 @@ function phoneSheet(title, rows, hasDone){
 
 /* ================= printing ================= */
 const PRINT_CSS=`
-.ps{font-family:"Readex Pro",Tahoma,sans-serif;color:#000;direction:rtl;font-size:12.5px}
-.ps .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #A3282A;padding-bottom:8px;margin-bottom:10px}
+.ps{font-family:"Baloo Bhaijaan 2",Tahoma,sans-serif;color:#000;direction:rtl;font-size:12.5px}
+.ps .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #962A25;padding-bottom:8px;margin-bottom:10px}
 .ps .orgw{display:flex;align-items:center;gap:10px}.ps .orgw img{width:62px;height:auto}
-.ps .org{font-family:"Amiri","Traditional Arabic",serif;font-size:20px;font-weight:700;line-height:1.2;color:#A3282A}
-.ps .org small{display:block;font-family:"Readex Pro",Tahoma,sans-serif;font-size:12px;font-weight:400;color:#000}
+.ps .org{font-family:"Baloo Bhaijaan 2",Tahoma,sans-serif;font-size:20px;font-weight:800;line-height:1.3;color:#962A25}
+.ps .org small{display:block;font-family:"Baloo Bhaijaan 2",Tahoma,sans-serif;font-size:12px;font-weight:400;color:#000}
 .ps h1{text-align:center;font-size:17px;margin:6px 0 2px}.ps .mo{text-align:center;margin-bottom:10px}
 .ps table{width:100%;border-collapse:collapse;margin-bottom:10px}
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
