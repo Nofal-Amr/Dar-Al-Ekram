@@ -9,7 +9,8 @@ const MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","
 const CASE_TYPES = ["أيتام","مساعدات","مرضي","أيتام ومرضي","كفالات","غير محدد"];
 const STATUSES = ["نشط","انتظار","موقوف","ملغي"];
 const MARITAL = ["أرملة","مطلقة","متزوجة","مهجورة","آنسة","أرمل","متزوج","مطلق"];
-const ROLE_AR = {manager:"مدير", worker:"موظف", viewer:"مشاهدة فقط", pending:"مستني تفعيل"};
+const ROLE_AR = {manager:"مدير", worker:"موظف", helper:"عامل", viewer:"مشاهدة فقط", pending:"مستني تفعيل"};
+const ROLE_DESC = {manager:"كل حاجة: يعتمد الكشوف ويحذف ويضيف موظفين", worker:"موظف مكتب: يضيف ويعدّل الحالات ويطبع ويشوف التقارير", helper:"شاشة بسيطة بزراير كبيرة: يسلّم ويتصل ويطبع بس", viewer:"يشوف بس من غير أي تعديل"};
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 
@@ -36,6 +37,7 @@ const norm = s => String(s||"").replace(/[أإآ]/g,"ا").replace(/ى/g,"ي").re
 const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);
 const isMgr = () => role === "manager";
 const canWrite = () => role === "manager" || role === "worker";
+const simple = () => role === "helper";
 const cleanPhone = p => { let d = String(p||"").replace(/\D/g,""); if(d.startsWith("20") && d.length===12) d = d.slice(1); if(d.length===10 && d.startsWith("1")) d = "0"+d; return d; };
 const validPhone = p => /^01[0125]\d{8}$/.test(cleanPhone(p));
 const cleanUser = u => String(u||"").trim().toLowerCase().replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[^a-z0-9._-]/g,"");
@@ -147,25 +149,28 @@ async function loginScreen(){
   try{ const { data } = await sb.functions.invoke("manage-users", { body:{action:"status"} }); hasManager = data?.hasManager !== false; }catch(e){}
   if(!hasManager) return setupScreen();
   showAuth(`<h1>دار الإكرام</h1><p class="c">سجّل دخولك</p>
-    <label class="f">رقم التليفون أو اسم المستخدم<input type="text" id="l_u" inputmode="text" autocomplete="username" dir="ltr"></label>
-    <label class="f">الرقم السري<input type="password" id="l_p" class="pin" inputmode="numeric" autocomplete="current-password" dir="ltr"></label>
-    <button class="btn pri" id="l_go">دخول</button>
+    <form id="l_f" novalidate>
+    <label class="f">رقم التليفون أو اسم المستخدم<input type="text" id="l_u" name="username" inputmode="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" dir="ltr"></label>
+    <label class="f">الرقم السري<input type="password" id="l_p" name="password" class="pin" inputmode="numeric" autocomplete="current-password" enterkeyhint="go" dir="ltr"></label>
+    <button type="submit" class="btn pri" id="l_go">دخول</button>
+    </form>
     <p class="sub" style="text-align:center;margin-top:14px">نسيت الرقم السري؟ كلّم مدير الجمعية يعملّك رقم جديد.</p>`);
-  const go = async () => {
+  $("#l_f").onsubmit = async e => {
+    e.preventDefault();
+    const btn = $("#l_go"); if(btn.disabled) return;
     const u = cleanUser($("#l_u").value), p = $("#l_p").value;
     if(!u || !p){ toast("اكتب رقم التليفون والرقم السري"); return; }
-    $("#l_go").innerHTML = `<span class="spin"></span>`;
+    btn.disabled = true; btn.innerHTML = `<span class="spin" aria-hidden="true"></span>`; btn.setAttribute("aria-busy","true");
     const { error } = await sb.auth.signInWithPassword({ email:`${u}@${DOMAIN}`, password:p });
-    if(error){ $("#l_go").textContent = "دخول"; toast(/Invalid login/i.test(error.message) ? "الرقم أو الرقم السري غلط" : errMsg(error)); return; }
+    if(error){ btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = "دخول"; toast(/Invalid login/i.test(error.message) ? "الرقم أو الرقم السري غلط" : errMsg(error)); return; }
     boot();
   };
-  $("#l_go").onclick = go; $("#l_p").onkeydown = e => { if(e.key==="Enter") go(); };
 }
 function setupScreen(){
   showAuth(`<h1>أهلاً بيك</h1><p class="c">أول مرة؟ اعمل حساب مدير الجمعية.<br>الحساب ده بس اللي هيقدر يضيف الموظفين.</p>
     <label class="f">اسمك<input type="text" id="s_n"></label>
-    <label class="f">رقم تليفونك (هتدخل بيه)<input type="text" id="s_u" inputmode="tel" dir="ltr"></label>
-    <label class="f">رقم سري (6 أرقام أو أكتر)<input type="password" id="s_p" class="pin" inputmode="numeric" dir="ltr"></label>
+    <label class="f">رقم تليفونك (هتدخل بيه)<input type="tel" id="s_u" inputmode="tel" autocomplete="username" dir="ltr"></label>
+    <label class="f">رقم سري (6 أرقام أو أكتر)<input type="password" id="s_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
     <button class="btn pri" id="s_go">إنشاء حساب المدير</button>`);
   $("#s_go").onclick = async () => {
     const n=$("#s_n").value.trim(), u=cleanUser($("#s_u").value), p=$("#s_p").value;
@@ -183,7 +188,7 @@ async function boot(){
   if(!session) return loginScreen();
   const { data:prof } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
   me = prof;
-  if(!me || !me.active || !["manager","worker","viewer"].includes(me.role)){
+  if(!me || !me.active || !["manager","worker","helper","viewer"].includes(me.role)){
     showAuth(`<h1>حسابك مش مفعّل</h1><p class="c">كلّم مدير الجمعية يفعّل حسابك.</p><button class="btn" id="lo">خروج</button>`);
     $("#lo").onclick = async () => { await sb.auth.signOut(); loginScreen(); };
     return;
@@ -205,11 +210,13 @@ window.addEventListener("offline", netBanner);
 /* ================= render ================= */
 function render(){
   if(!me) return;
+  document.body.classList.toggle("simple", simple());
+  document.body.classList.toggle("wide", innerWidth>=900);
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("act",b.dataset.v===view));
-  if(!isMgr()&&(view==="reports")) view="home";
   const v=$("#view");
   if(!loaded){ v.innerHTML=`<div class="empty"><span class="spin"></span> جاري تحميل البيانات…</div>`; return; }
-  v.innerHTML = view==="home"?vHome(): view==="people"?vPeople(): view==="batches"?vBatches(): view==="reports"?vReports(): vSettings();
+  if(simple()){ v.innerHTML=vSimple(); bindSimple(); return; }
+  v.innerHTML = view==="home"?vDash(): view==="people"?vPeople(): view==="batches"?vBatches(): view==="reports"?vReports(): vSettings();
   bindView();
 }
 function vHome(){
@@ -266,7 +273,10 @@ function vPeople(){
     ${isMgr()?`<button class="btn sm" id="pX">تنزيل Excel</button>`:""}
     ${canWrite()?`<button class="btn sm pri" id="addP">➕ حالة جديدة</button>`:""}
   </div>
-  <div class="list">${list.length?list.slice(0,500).map(b=>`
+  ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
+    ${(()=>{ const lastAny=new Map(); receipts().forEach(r=>{ const p=lastAny.get(r.bid); if(!p||r.month>p) lastAny.set(r.bid,r.month); }); return list.slice(0,800).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${b.familySize??"—"}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
+  </tbody></table></div>`:""}
+  <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,500).map(b=>`
     <button class="item" data-open="${b.id}">
       <span class="code">${esc(b.code)}</span>
       <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${b.familySize?` · ${b.familySize} أفراد`:""}</span></span>
@@ -333,10 +343,10 @@ function vSettings(){
   <h3>المستخدمين</h3>
   <p class="sub" style="margin-top:0">كل موظف بيدخل برقم تليفونه ورقم سري. إنت اللي بتعمله الحساب من هنا.</p>
   <div class="list">${users.map(u=>`<button class="item" data-user="${u.id}"><span class="grow"><span class="nm">${esc(u.full_name||"بدون اسم")}${u.id===me.id?" (إنت)":""}</span><br><span class="sub" dir="ltr">${esc(u.username||"")}</span></span>
-    <span class="chip ${u.role==="manager"?"plum":u.role==="pending"?"red":u.role==="viewer"?"grey":""}">${ROLE_AR[u.role]}</span>${!u.active?`<span class="chip red">موقوف</span>`:""}</button>`).join("")}</div>
+    <span class="chip ${u.role==="manager"?"plum":u.role==="pending"?"red":u.role==="viewer"?"grey":u.role==="helper"?"blue":""}">${ROLE_AR[u.role]}</span>${!u.active?`<span class="chip red">موقوف</span>`:""}</button>`).join("")}</div>
   <div class="bar"><button class="btn pri" id="newU">➕ إضافة موظف</button></div>
-  <div class="note green">• <b>مدير</b>: يعمل الكشوف ويعتمدها، يحذف، يعدّل أنواع المساعدات، يضيف موظفين.<br>• <b>موظف</b>: يدوّر، يضيف ويعدّل حالات، يطبع المعتمد، يسلّم، يطلّع أرقام.<br>• <b>مشاهدة فقط</b>: يشوف من غير تعديل.<br>الصلاحيات دي مقفولة من قاعدة البيانات نفسها.</div>
-  <div class="bar"><button class="btn" id="preview">${role==="manager"?"👁️ شوف الشاشة زي الموظف":"↩️ رجوع لشاشة المدير"}</button></div>
+  <div class="note green">${["manager","worker","helper","viewer"].map(r=>`• <b>${ROLE_AR[r]}</b>: ${ROLE_DESC[r]}`).join("<br>")}<br>الصلاحيات دي مقفولة من قاعدة البيانات نفسها.</div>
+  <div class="bar"><button class="btn" data-preview="worker">👁️ شوف شاشة الموظف</button><button class="btn" data-preview="helper">👁️ شوف شاشة العامل</button></div>
   <h3>أنواع المساعدات</h3>
   <div class="list">${types().map(t=>`
     <button class="item" data-type="${t.id}"><span class="grow"><span class="nm">${esc(t.name)}</span><br>
@@ -346,7 +356,7 @@ function vSettings(){
   <div class="bar"><button class="btn pri" id="newT">➕ نوع مساعدة جديد</button></div>
   <h3>نسخة احتياطية</h3>
   <p class="sub" style="margin-top:0">نزّل كل الحالات وكل الصرف في ملف Excel واحد.</p>
-  <div class="bar"><button class="btn" id="backup">⬇️ تنزيل نسخة احتياطية</button></div>`:(realRole==="manager"?`<div class="bar"><button class="btn" id="preview">↩️ رجوع لشاشة المدير</button></div>`:"")}
+  <div class="bar"><button class="btn" id="backup">⬇️ تنزيل نسخة احتياطية</button></div>`:(realRole==="manager"?`<div class="bar"><button class="btn" data-preview="manager">↩️ رجوع لشاشة المدير</button></div>`:"")}
   <h3>التطبيق على الموبايل</h3>
   <div class="note">افتح الموقع من Chrome على الموبايل ← القايمة (⋮) ← <b>«إضافة إلى الشاشة الرئيسية»</b> أو «تثبيت التطبيق». هيظهر أيقونة الجمعية زي أي أبلكيشن.<br>على iPhone: من Safari ← زرار المشاركة ← «إضافة إلى الشاشة الرئيسية».</div>
   <h3>العرض</h3>
@@ -357,6 +367,7 @@ function vSettings(){
 function bindView(){
   const v=$("#view");
   v.querySelectorAll("[data-open]").forEach(el=>el.onclick=e=>{e.preventDefault(); viewPerson(el.dataset.open);});
+  v.querySelectorAll("tr[data-open]").forEach(el=>el.onkeydown=e=>{ if(e.key==="Enter") viewPerson(el.dataset.open); });
   v.querySelectorAll("[data-batch]").forEach(el=>el.onclick=()=>openBatch(el.dataset.batch));
   v.querySelectorAll("[data-type]").forEach(el=>el.onclick=()=>openType(el.dataset.type));
   v.querySelectorAll("[data-user]").forEach(el=>el.onclick=()=>openUser(el.dataset.user));
@@ -376,9 +387,10 @@ function bindView(){
   on("#rP","onclick",()=>{const t=T.get(rep.typeId); phoneSheet(`لم يستلموا ${t.name} — آخر ${rep.months} شهر`, notReceived(t,rep.months).map(({b})=>({name:b.name,phone:b.phone,code:b.code})));});
   on("#rX","onclick",()=>{const t=T.get(rep.typeId); const rows=[["م","رقم الحالة","الاسم","الرقم القومي","التليفون","النوع","آخر استلام"]]; notReceived(t,rep.months).forEach(({b,lm},i)=>rows.push([i+1,b.code,b.name,b.nationalId||"",cleanPhone(b.phone),b.caseType||"",lm?mLabel(lm):"لم يستلم"])); xlsx({"كشف":rows},`لم يستلموا ${t.name} - آخر ${rep.months} شهر.xlsx`);});
   on("#dueP","onclick",()=>phoneSheet("حالات محتاجة مراجعة", people().filter(reviewDue).map(b=>({name:b.name,phone:b.phone,code:b.code}))));
-  on("#preview","onclick",()=>{ role=role==="manager"?"worker":"manager"; setWho(); view="home"; render(); toast(role==="worker"?"دي الشاشة اللي الموظف بيشوفها":"رجعت لشاشة المدير"); });
+  v.querySelectorAll("[data-preview]").forEach(el=>el.onclick=()=>setPreview(el.dataset.preview));
   on("#bigText","onclick",()=>{ document.body.classList.toggle("big"); try{localStorage.setItem("big",document.body.classList.contains("big")?"1":"");}catch(e){} render(); });
   on("#backup","onclick",backup);
+  on("#qaSearch","onclick",()=>go("search"));
   on("#logout","onclick",async()=>{ if(!confirm("تخرج من الحساب؟")) return; await sb.auth.signOut(); me=null; loaded=false; if(rt){ sb.removeChannel(rt); rt=null; } loginScreen(); });
   on("#myPin","onclick",changeMyPin);
 }
@@ -389,6 +401,7 @@ function go(what){
   else if(what==="batches"){ view="batches"; render(); }
   else if(what==="users"){ view="settings"; render(); }
   else if(what==="due"){ view="people"; peopleF="due"; render(); }
+  else if(what==="people-active"){ view="people"; peopleF="نشط"; render(); }
   else if(what==="turning"){ view="reports"; render(); }
   else if(what==="give"||what==="print"){
     const list=batches().filter(k=>k.status==="معتمد"||(what==="print"&&k.status==="مصروف"));
@@ -398,6 +411,146 @@ function go(what){
   }
   else if(what==="phones") phoneChooser();
 }
+
+/* ================= preview (manager sees other roles' screens) ================= */
+function setPreview(r){
+  role = r; closeSheet(); view = "home"; sv = {screen:"home"}; setWho(); render(); window.scrollTo(0,0);
+  if(r!==realRole) toast(`دي الشاشة اللي ${ROLE_AR[r]==="عامل"?"العامل":"الموظف"} بيشوفها`); else toast("رجعت لشاشتك");
+}
+
+/* ================= full dashboard (manager / staff) ================= */
+function vDash(){
+  const all=people(); const active=all.filter(b=>b.status==="نشط");
+  const approved=batches().filter(k=>k.status==="معتمد");
+  const drafts=batches().filter(k=>k.status==="مسودة");
+  const due=all.filter(reviewDue);
+  const turning=active.filter(b=>kidsTurning18(b).length);
+  const pending=[...P.values()].filter(p=>p.role==="pending"&&p.active);
+  const rs=receipts().filter(r=>r.month===curMonth);
+  const cashMonth=rs.filter(r=>r.unit==="جنيه").reduce((s,r)=>s+(+r.value||0),0);
+  const famMonth=new Set(rs.map(r=>r.bid)).size;
+  const waiting=all.filter(b=>b.status==="انتظار").length;
+  const pct=(a,b)=>b?Math.round(a/b*100):0;
+  return `
+  <div class="dash-head"><div><h2 style="margin:0">أهلاً ${esc((me.full_name||"").split(" ")[0])}</h2><p class="sub" style="margin:2px 0 0">${dLabel(today)} · ${ROLE_AR[role]}</p></div>
+    <div class="qa">
+      <button class="btn" id="qaSearch">🔍 بحث</button>
+      ${canWrite()?`<button class="btn" data-go="add">➕ حالة جديدة</button>`:""}
+      ${isMgr()?`<button class="btn pri" data-go="newbatch">📋 كشف صرف جديد</button>`:""}
+      <button class="btn" data-go="phones">📞 قائمة أرقام</button>
+    </div></div>
+  <div class="kpis">
+    <button class="kpi" data-go="people-active"><span>حالات نشطة</span><strong>${num(active.length)}</strong><small>من ${num(all.length)} · ${num(waiting)} انتظار</small></button>
+    <button class="kpi ${due.length?"warn":""}" data-go="due"><span>محتاجة مراجعة</span><strong>${num(due.length)}</strong><small>ميعادها جه أو من غير تاريخ</small></button>
+    <div class="kpi"><span>صرف ${MONTHS[now.getMonth()]}</span><strong>${num(cashMonth)} <em>ج</em></strong><small>${num(famMonth)} أسرة استفادت</small></div>
+    ${isMgr()?`<button class="kpi ${drafts.length?"warn":""}" data-go="batches"><span>مسودات مستنية اعتماد</span><strong>${num(drafts.length)}</strong><small>${num(approved.length)} كشف معتمد شغال</small></button>`:`<div class="kpi"><span>كشوف شغالة</span><strong>${num(approved.length)}</strong><small>معتمدة ولسه بتتسلّم</small></div>`}
+  </div>
+  ${pending.length&&isMgr()?`<button class="alert" data-go="users"><span>👤</span><span class="grow">${num(pending.length)} حساب مستني تفعيل</span><span>‹</span></button>`:""}
+  ${turning.length?`<button class="alert" data-go="turning"><span>🎂</span><span class="grow">${num(turning.length)} أسرة فيها ابن هيكمل 18 سنة خلال السنة</span><span>‹</span></button>`:""}
+  <div class="dash-grid">
+    <section>
+      <h3>كشوف شغالة</h3>
+      <div class="list">${approved.length?approved.map(k=>{ const rec=k.items.filter(i=>i.received).length; return `
+        <button class="item" data-batch="${k.id}"><span class="grow"><span class="nm">${esc(k.title)}</span>
+          <span class="prog" aria-label="نسبة التسليم"><i style="width:${pct(rec,k.items.length)}%"></i></span>
+          <span class="sub">استلم ${num(rec)} من ${num(k.items.length)} · ${pct(rec,k.items.length)}%</span></span>${statusChip(k.status)}</button>`;}).join(""):`<div class="empty">مفيش كشوف معتمدة حالياً</div>`}</div>
+    </section>
+    <section>
+      <h3>محتاجة مراجعة قريب</h3>
+      <div class="list">${due.slice(0,6).map(b=>`<button class="item" data-open="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">آخر مراجعة: ${dLabel(b.lastReview)}</span></span></button>`).join("")||`<div class="empty">كله متراجع ✓</div>`}
+      ${due.length>6?`<button class="item" data-go="due"><span class="grow sub">عرض الكل (${num(due.length)}) ‹</span></button>`:""}</div>
+    </section>
+  </div>`;
+}
+
+/* ================= simple UI (helpers / non-literate staff) ================= */
+let sv={screen:"home"}, sq="";
+function vSimple(){
+  const back=`<button class="s-back" data-s="home">→ رجوع</button>`;
+  const ready=batches().filter(k=>k.status==="معتمد");
+  const bCard=(k,to)=>{ const rec=k.items.filter(i=>i.received).length; return `<button class="s-card" data-s="${to}:${k.id}"><span class="s-ic">${k.template==="cash"?"💵":"📦"}</span><span class="grow"><b>${esc(k.typeName)}</b><small>${mLabel(k.month)}</small>
+    <span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span><small>استلم ${num(rec)} من ${num(k.items.length)}</small></span></button>`; };
+  const noBatches=`<div class="s-empty">😊<br>مفيش حاجة تتسلّم دلوقتي</div>`;
+  const [scr,id]=String(sv.screen).split(":");
+  if(scr==="home") return `
+    <div class="s-hello">أهلاً ${esc((me.full_name||"").split(" ")[0])} 👋</div>
+    <div class="s-tiles">
+      <button class="s-tile g" data-s="give"><span class="ic">✅</span>تسليم</button>
+      <button class="s-tile b" data-s="find"><span class="ic">🔍</span>دوّر على اسم</button>
+      <button class="s-tile r" data-s="call"><span class="ic">📞</span>اتصل</button>
+      <button class="s-tile p" data-s="print"><span class="ic">🖨️</span>اطبع</button>
+    </div>
+    <div class="s-foot">
+      ${realRole==="manager"?`<button class="btn" data-preview="manager">↩️ رجوع لشاشة المدير</button>`:""}
+      <button class="btn" id="s_big">🔠 ${document.body.classList.contains("big")?"خط أصغر":"خط أكبر"}</button>
+      <button class="btn" id="s_out">خروج</button>
+    </div>`;
+  if(scr==="give"||scr==="print"||scr==="call") return `${back}<h2 class="s-title">${scr==="give"?"✅ اختار الكشف":scr==="print"?"🖨️ اختار الكشف اللي هتطبعه":"📞 اختار الكشف"}</h2>
+    <div class="s-list">${ready.length?ready.map(k=>bCard(k, scr==="give"?"gb":scr==="print"?"pr":"cb")).join(""):noBatches}</div>`;
+  if(scr==="gb"){
+    const k=K.get(id); if(!k) return back+noBatches;
+    const qq=norm(sq); const rec=k.items.filter(i=>i.received).length;
+    const items=k.items.filter(it=>!qq||norm(it.name).includes(qq)||String(it.code)===qq).sort((a,b)=>(a.received?1:0)-(b.received?1:0));
+    return `<button class="s-back" data-s="give">→ رجوع</button>
+      <h2 class="s-title">${esc(k.typeName)} <small>${mLabel(k.month)}</small></h2>
+      <div class="s-count"><span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span>استلم <b>${num(rec)}</b> من <b>${num(k.items.length)}</b></div>
+      <input type="search" class="s-search" id="s_q" placeholder="🔍 اكتب الاسم" value="${esc(sq)}">
+      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b><small>رقم ${esc(it.code)} · ${num(it.value)} ${esc(k.unit)}</small></span>
+        ${it.received?`<span class="s-ok">✓ استلم</span>`:`<button class="s-give" data-give="${it.id}">سلّم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
+  }
+  if(scr==="cb"){
+    const k=K.get(id); if(!k) return back+noBatches;
+    const left=k.items.filter(i=>!i.received);
+    return `<button class="s-back" data-s="call">→ رجوع</button>
+      <h2 class="s-title">📞 لسه ما استلموش <small>${num(left.length)}</small></h2>
+      <div class="s-list">${left.map(it=>{ const ph=cleanPhone(it.phone||B.get(it.bid)?.phone); return `<div class="s-row"><span class="grow"><b>${esc(it.name)}</b><small dir="ltr">${esc(ph||"مفيش رقم")}</small></span>
+        ${validPhone(ph)?`<a class="s-call" href="tel:${ph}">📞 اتصل</a>`:`<span class="s-ok muted">—</span>`}</div>`;}).join("")||`<div class="s-empty">كله استلم ✓</div>`}</div>`;
+  }
+  if(scr==="find"){
+    const qq=norm(sq);
+    const res=qq.length>=2?people().filter(b=>norm(b.name).includes(qq)||String(b.code)===qq.padStart(3,"0")||(b.nationalId||"").includes(qq)).slice(0,30):[];
+    return `${back}<h2 class="s-title">🔍 دوّر على اسم</h2>
+      <input type="search" class="s-search" id="s_q" placeholder="اكتب الاسم أو رقم الحالة" value="${esc(sq)}">
+      <div class="s-list">${qq.length<2?`<div class="s-empty">اكتب أول حرفين من الاسم</div>`:res.map(b=>`<button class="s-card" data-s="ps:${b.id}"><span class="s-ic">👤</span><span class="grow"><b>${esc(b.name)}</b><small>رقم ${esc(b.code)}${b.familySize?` · ${b.familySize} أفراد`:""}</small></span></button>`).join("")||`<div class="s-empty">مفيش حد بالاسم ده</div>`}</div>`;
+  }
+  if(scr==="ps"){
+    const b=B.get(id); if(!b) return back;
+    const hist=receipts().filter(r=>r.bid===id).sort((a,c)=>c.month.localeCompare(a.month)).slice(0,8);
+    const ph=cleanPhone(b.phone);
+    return `<button class="s-back" data-s="find">→ رجوع</button>
+      <div class="s-person"><div class="s-ic big">👤</div><h2>${esc(b.name)}</h2><p>رقم الحالة <b>${esc(b.code)}</b>${b.familySize?` · <b>${b.familySize}</b> أفراد`:""}${(b.children||[]).length?` · <b>${b.children.length}</b> أطفال`:""}</p>
+        ${b.status!=="نشط"?`<p class="s-warn">⚠️ الحالة دي ${esc(b.status)}</p>`:""}
+        ${validPhone(ph)?`<a class="s-call wide" href="tel:${ph}">📞 اتصل بيها <span dir="ltr">${ph}</span></a>`:`<p class="sub">مفيش رقم تليفون</p>`}</div>
+      <h3 class="s-title">خدت إيه قبل كده؟</h3>
+      <div class="s-list">${hist.map(r=>`<div class="s-row ${r.received?"done":""}"><span class="grow"><b>${esc(r.typeName)}</b><small>${mLabel(r.month)}</small></span><span class="s-ok ${r.received?"":"muted"}">${r.received?"✓ استلم":"لسه"}</span></div>`).join("")||`<div class="s-empty">لسه ما خدتش حاجة</div>`}</div>`;
+  }
+  return back;
+}
+function bindSimple(){
+  const v=$("#view");
+  v.querySelectorAll("[data-s]").forEach(el=>el.onclick=()=>{
+    const to=el.dataset.s;
+    if(to.startsWith("pr:")){ const k=K.get(to.slice(3)); if(k) doPrint(batchHTML(k)); return; }
+    if(!to.startsWith("ps:")&&!(sv.screen.startsWith("ps:")&&to==="find")) sq="";
+    sv={screen:to}; render(); window.scrollTo(0,0);
+    if(to==="find") setTimeout(()=>$("#s_q")?.focus(),50);
+  });
+  v.querySelectorAll("[data-preview]").forEach(el=>el.onclick=()=>setPreview(el.dataset.preview));
+  const q=$("#s_q"); if(q) q.oninput=()=>{ sq=q.value; const pos=q.selectionStart; render(); const n=$("#s_q"); n.focus(); n.setSelectionRange(pos,pos); };
+  v.querySelectorAll("[data-give]").forEach(el=>el.onclick=async()=>{
+    const bid=sv.screen.split(":")[1]; const k=K.get(bid); const it=k?.items.find(x=>x.id===el.dataset.give); if(!it) return;
+    el.disabled=true; el.innerHTML=`<span class="spin"></span>`;
+    const { error } = await sb.rpc("set_received",{item_id:it.id, is_received:true});
+    if(error){ el.disabled=false; el.textContent="سلّم"; toast(errMsg(error)); return; }
+    it.received=true; it.receivedAt=new Date().toISOString();
+    if(navigator.vibrate) navigator.vibrate(40);
+    toast(`✓ ${it.name} استلم`); render();
+  });
+  const big=$("#s_big"); if(big) big.onclick=()=>{ document.body.classList.toggle("big"); try{localStorage.setItem("big",document.body.classList.contains("big")?"1":"");}catch(e){} render(); };
+  const out=$("#s_out"); if(out) out.onclick=async()=>{ if(!confirm("تخرج؟")) return; await sb.auth.signOut(); me=null; loaded=false; if(rt){ sb.removeChannel(rt); rt=null; } loginScreen(); };
+}
+let wasWide=innerWidth>=900;
+addEventListener("resize",()=>{ const w=innerWidth>=900; if(w!==wasWide){ wasWide=w; render(); } });
 
 /* ================= sheet ================= */
 let sheetRefresh=null;
@@ -614,7 +767,7 @@ function newUser(){
     <label class="f">الاسم<input type="text" id="u_n"></label>
     <label class="f">رقم التليفون (هيدخل بيه)<input type="text" id="u_u" inputmode="tel" dir="ltr"></label>
     <label class="f">رقم سري (6 أرقام أو أكتر)<input type="text" id="u_p" class="pin" inputmode="numeric" dir="ltr" value="${String(Math.floor(100000+Math.random()*900000))}"></label>
-    <label class="f">الصلاحية<select id="u_r"><option value="worker">موظف</option><option value="manager">مدير</option><option value="viewer">مشاهدة فقط</option></select></label>
+    <div class="sub" style="margin-bottom:6px">نوع الحساب</div><div class="roles">${["helper","worker","manager","viewer"].map((r,i)=>`<label class="rolec"><input type="radio" name="u_r" value="${r}" ${i===0?"checked":""}><span><b>${ROLE_AR[r]}</b><small>${ROLE_DESC[r]}</small></span></label>`).join("")}</div>
     <div class="note">ابعت للموظف رقم التليفون والرقم السري ولينك الموقع، وقوله يضيفه على الشاشة الرئيسية.</div>
     <div class="bar"><button class="btn pri" id="u_go">إنشاء الحساب</button></div>`, s=>{
     const q=x=>s.querySelector(x);
@@ -622,7 +775,7 @@ function newUser(){
       const n=q("#u_n").value.trim(), u=cleanUser(q("#u_u").value), p=q("#u_p").value.trim();
       if(!n||u.length<3||p.length<6){ toast("اكمل البيانات — الرقم السري 6 أرقام على الأقل"); return; }
       q("#u_go").disabled=true;
-      const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"create", full_name:n, username:u, password:p, role:q("#u_r").value} });
+      const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"create", full_name:n, username:u, password:p, role:s.querySelector("input[name=u_r]:checked").value} });
       if(error||data?.error){ q("#u_go").disabled=false; toast(data?.error==="exists"?"الرقم ده عليه حساب فعلاً":errMsg(error||data.error)); return; }
       const msg=`أهلاً ${n}\nده حسابك على نظام جمعية دار الإكرام:\nالرابط: ${location.origin}\nرقم الدخول: ${u}\nالرقم السري: ${p}`;
       sheet("تم إنشاء الحساب ✓",`<textarea class="phones" readonly style="min-height:150px">${esc(msg)}</textarea>
@@ -636,7 +789,7 @@ function openUser(uid){
   sheet(u.full_name||u.username,`
     <p class="sub" dir="ltr" style="text-align:end">${esc(u.username||"")}</p>
     <label class="f">الاسم<input type="text" id="e_n" value="${esc(u.full_name)}"></label>
-    <label class="f">الصلاحية<select id="e_r" ${self?"disabled":""}>${["manager","worker","viewer","pending"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${ROLE_AR[r]}</option>`).join("")}</select></label>
+    <label class="f">الصلاحية<select id="e_r" ${self?"disabled":""}>${["helper","worker","manager","viewer","pending"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${ROLE_AR[r]}${ROLE_DESC[r]?" — "+ROLE_DESC[r]:""}</option>`).join("")}</select></label>
     <label style="display:flex;gap:8px;align-items:center;margin:6px 0 14px"><input type="checkbox" id="e_a" ${u.active?"checked":""} ${self?"disabled":""} style="width:20px;height:20px"> الحساب شغال</label>
     <div class="bar"><button class="btn pri" id="e_s">💾 حفظ</button><button class="btn" id="e_pin">🔑 رقم سري جديد</button></div>
     ${self?`<p class="sub">مينفعش تغيّر صلاحية حسابك أو توقفه بنفسك.</p>`:""}`, s=>{
@@ -653,8 +806,8 @@ function openUser(uid){
   });
 }
 function changeMyPin(){
-  sheet("تغيير الرقم السري",`<label class="f">الرقم السري الجديد (6 أرقام أو أكتر)<input type="password" id="m_p" class="pin" inputmode="numeric" dir="ltr"></label>
-    <label class="f">اكتبه تاني<input type="password" id="m_p2" class="pin" inputmode="numeric" dir="ltr"></label><div class="bar"><button class="btn pri" id="m_go">حفظ</button></div>`, s=>{
+  sheet("تغيير الرقم السري",`<label class="f">الرقم السري الجديد (6 أرقام أو أكتر)<input type="password" id="m_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
+    <label class="f">اكتبه تاني<input type="password" id="m_p2" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label><div class="bar"><button class="btn pri" id="m_go">حفظ</button></div>`, s=>{
     s.querySelector("#m_go").onclick=async()=>{ const a=s.querySelector("#m_p").value,b=s.querySelector("#m_p2").value; if(a.length<6){toast("6 أرقام على الأقل");return;} if(a!==b){toast("الرقمين مش زي بعض");return;}
       const { error } = await sb.auth.updateUser({password:a}); if(error){ toast(errMsg(error)); return; } closeSheet(); toast("اتغيّر ✓"); };
   });
