@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.2";
+export const VERSION = "1.3.3";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -258,7 +258,7 @@ function whyLine(x, t, unit){
 }
 /* ---------- calls ----------
    Every tap on «ردّت / ماردتش / رقم غلط» is one row in `calls`. The latest one colours the row. */
-const CALL_RES = { "رد":{cls:"ok",label:"ردّت ✓"}, "مردش":{cls:"no",label:"ماردتش"}, "رقم غلط":{cls:"bad",label:"رقم غلط"} };
+const CALL_RES = { "رد":{cls:"ok",label:"ردّت ✓"}, "مردش":{cls:"no",label:"ماردتش"}, "رقم غلط":{cls:"bad",label:"رقم غلط"}, "مش هييجي":{cls:"away",label:"مش هيعرف ييجي"} };
 const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ for(const key of [c.bid+"|"+(c.batchId||""), c.bid+"|*"]){ const p=m.get(key); if(!p||c.at>p.at) m.set(key,c); } } return m; });
 // Inside a list: the latest call for that list. Elsewhere: the latest call in the last 3 days.
 function lastCall(bid, batchId){ const c=callIndex().get(bid+"|"+(batchId||"*")); if(!c) return null; if(!batchId && c.at<addDays(today,-3)) return null; return c; }
@@ -268,9 +268,11 @@ function callCell(bid, phone, batchId, big){
   const chip=c?`<span class="cchip ${CALL_RES[c.result].cls}">${CALL_RES[c.result].label}<small>${c.at.slice(0,10)===today?"النهارده":dLabel(c.at)}</small></span>`:"";
   if(!validPhone(ph)) return `<span class="ccell">${chip}<span class="sub">مفيش رقم</span></span>`;
   const canLog=role!=="viewer";
+  // If this number didn't work, the family's second number is one tap away.
+  const b=B.get(bid), alt=[b?.phone,b?.phone2].map(cleanPhone).find(x=>validPhone(x)&&x!==ph);
   return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}</span>`
     :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>`:""}
-    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a></span>`;
+    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل بالرقم التاني ${alt}">${ic("phone")}رقم تاني</a>`:""}</span>`;
 }
 const rowCallCls = (bid,batchId) => { const c=lastCall(bid,batchId); return c?"c-"+CALL_RES[c.result].cls:""; };
 function bindCalls(root, redraw){
@@ -933,7 +935,7 @@ function viewPerson(id){
       ${b.grade?`<span class="chip gold">تقدير ${esc(b.grade)}</span>`:""}${reviewDue(b)?`<span class="chip red">محتاجة مراجعة</span>`:""}
       ${(b.tags||[]).map(t=>`<span class="chip blue">${esc(t)}</span>`).join("")}
     </div>
-    <div class="callbar">${callCell(b.id,b.phone,null,true)}${validPhone(b.phone2)?callCell(b.id,b.phone2,null,true):""}</div>
+    <div class="callbar">${callCell(b.id,validPhone(b.phone)?b.phone:b.phone2,null,true)}</div>
     <div class="bar">
       ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button>`:""}
       ${isMgr()?`<button class="btn gold" id="v_single">${ic("cash")}صرف فردي</button>`:""}
@@ -1374,7 +1376,7 @@ function openBatch(id, giveMode){
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      <button class="btn" id="b_print">${ic("printer")}طباعة</button><button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      <button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -1406,6 +1408,8 @@ function openBatch(id, giveMode){
     });
     const bq=q("#b_q"); bq.oninput=()=>{ q_=bq.value; const pos=bq.selectionStart; refreshSheet(); const n=$("#b_q"); if(n){n.focus(); n.setSelectionRange(pos,pos);} };
     q("#b_print").onclick=()=>doPrint(batchHTML(K.get(id)),K.get(id).title);
+    // e.g. a list given over two Saturdays: the second week's paper has only the families that haven't collected yet
+    if(q("#b_printLeft")) q("#b_printLeft").onclick=()=>{ const k=K.get(id); doPrint(batchHTML({...k, items:k.items.filter(i=>!i.received), left:true}),k.title); };
     q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
     q("#b_xlsx").onclick=()=>batchXlsx(K.get(id));
   };
@@ -1497,7 +1501,7 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1><div class="mo">${k.distDate?`يوم ${dayLabel(k.distDate)} ${k.distDate.slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
+  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.distDate?`يوم ${dayLabel(k.distDate)} ${k.distDate.slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th><th>التوقيع</th></tr></thead><tbody>
     ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td><td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td><td>${num(total)}</td><td></td></tr></tfoot></table>

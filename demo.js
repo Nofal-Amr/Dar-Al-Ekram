@@ -51,7 +51,7 @@ function makeData(){
     const scored = rnd() < 0.16, score = scored ? int(42, 84) : null;
     beneficiaries.push({
       id: uuid(), code: pad(i, 3), name: `${pick(WOMEN)} ${pick(MEN)} ${pick(MEN)} ${pick(MEN)}`, national_id: nid(b.y, b.m, b.d, true),
-      phone: rnd() < 0.9 ? "01" + pick(["0","1","2","5"]) + String(int(10000000, 99999999)) : "", phone2: "",
+      phone: rnd() < 0.9 ? "01" + pick(["0","1","2","5"]) + String(int(10000000, 99999999)) : "", phone2: rnd() < 0.25 ? "0101" + String(int(1000000, 9999999)) : "",
       birth: b.iso, case_type: type, grade: scored ? (score >= 81 ? "A" : score >= 61 ? "B" : "C") : "", score,
       project: rnd() < 0.5 ? "مشروع المرأة المعيلة" : "", area: pick(AREAS), address: "", marital: pick(["أرملة","أرملة","مطلقة","متزوجة","مهجورة"]),
       job: pick(JOBS), income: rnd() < 0.5 ? String(int(3, 20) * 100) : "", pension: rnd() < 0.4 ? String(int(5, 30) * 100) : "", housing: pick(HOUSING),
