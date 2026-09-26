@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, latinDigits, parseNID
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.21";
+export const VERSION = "1.3.22";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -706,7 +706,7 @@ function bindView(){
   on("#pf","onchange",e=>{peopleF=e.target.value; peopleLimit=PAGE; render();});
   on("#ps","onchange",e=>{peopleSort=e.target.value; peopleLimit=PAGE; render();});
   on("#pMore","onclick",()=>{ peopleLimit+=PAGE; render(); });
-  on("#pDocs","onchange",e=>{ const fs=[...e.target.files]; e.target.value=""; if(fs.length) bulkDocs(fs); });
+  on("#pDocs","onchange",async e=>{ const fs=[...e.target.files]; if(!fs.length) return; toast("بنجهز الملفات…"); const gs=await Promise.all(fs.map(grabFile)); e.target.value=""; bulkDocs(gs); });
   on("#addP","onclick",()=>editPerson(null));
   on("#pPhones","onclick",()=>phoneSheet("الحالات المعروضة", filteredPeople().map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
@@ -1231,32 +1231,50 @@ function bindDocs(root, bid){
   root.querySelectorAll("[data-dcheck]").forEach(el=>el.onclick=()=>checkDoc(bid, B.get(bid).docs[+el.dataset.dcheck]));
   root.querySelectorAll("[data-dmanual]").forEach(el=>el.onclick=()=>manualCheck(bid, B.get(bid).docs[+el.dataset.dmanual]));
   const up=root.querySelector("#v_doc"); if(up) up.onchange=async()=>{
-    const f=up.files?.[0]; up.value=""; if(!f) return;
-    if(f.size>15*1024*1024){ toast("الملف أكبر من 15 ميجا"); return; }
+    const f0=up.files?.[0]; if(!f0) return; const g=await grabFile(f0); up.value=""; if(g.err){ toast(g.err); return; } const f=g.f;
     // make sure the file is this family's: its name should carry her name, national ID or case number
     const b=B.get(bid), m=matchFileName(f.name, people());
     if(m.b && m.b.id!==bid){ if(!await ask(`اسم الملف «${f.name}» شبه حالة تانية: ${m.b.code} — ${m.b.name}.\nترفعه على ${b.name} برضو؟`,{title:"الملف ده بتاع مين؟",ok:"أيوه، ارفعه هنا",cancel:"لأ",danger:true})) return; }
     else if(!m.b){ if(!await ask(`اسم الملف «${f.name}» مافيهوش اسم ${b.name} ولا رقمها القومي ولا رقم الحالة.\nمتأكد إنه ملفها؟`,{title:"اتأكد من الملف",ok:"أيوه، ارفعه",cancel:"رجوع"})) return; }
     toast(m.b?.id===bid?"اسم الملف مطابق للحالة ✓ — بنرفع…":"بنرفع الملف…");
-    const ext=/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)?"pdf":(f.type.split("/")[1]||"jpg"), path=`${bid}/${Date.now()}.${ext}`;
-    const r=await sb.storage.from("docs").upload(path, f, { contentType:f.type||"application/pdf" }); if(r.error){ toast(errMsg(r.error)); return; }
-    docBlobs.set(path, f);
+    const path=`${bid}/${Date.now()}.${g.ext}`;
+    const err=await putDoc(path, g); if(err){ toast(err); return; }
+    docBlobs.set(path, g.blob);
     const d={ path, name:f.name, at:new Date().toISOString(), by:me.id, nameOk:m.b?.id===bid };
     if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ مع الحالة ✓ — تقدر تراجعه بعدين")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
   };
 }
+/* Phones hand over picked files (from WhatsApp, Drive, the files app) as a temporary link that can stop being readable,
+   and a flaky connection drops big uploads. So: copy the bytes into memory right when they're picked, name the type from the
+   extension when the phone doesn't, retry twice, and say why when it still fails. */
+const DOC_TYPES={pdf:"application/pdf",jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png"};
+const docExt=f=>{ const e=(/\.([a-z0-9]+)$/i.exec(f.name||"")?.[1]||"").toLowerCase(); return DOC_TYPES[e]?(e==="jpeg"?"jpg":e):/pdf/i.test(f.type)?"pdf":/png/i.test(f.type)?"png":/jpe?g/i.test(f.type)?"jpg":""; };
+async function grabFile(f){
+  const ext=docExt(f); if(!ext) return { f, err:"نوع الملف مش مدعوم — PDF أو صورة JPG/PNG بس" };
+  if(f.size>15*1024*1024) return { f, err:"أكبر من 15 ميجا" };
+  try{ const buf=await f.arrayBuffer(); if(!buf.byteLength) return { f, err:"الملف فاضي أو لسه ماتنزلش على الموبايل" };
+    return { f, ext, blob:new Blob([buf],{ type:DOC_TYPES[ext] }) }; }
+  catch(e){ return { f, err:"الموبايل مش قادر يقرا الملف — لو من واتساب أو درايف نزّله على الموبايل الأول وبعدين ارفعه" }; }
+}
+async function putDoc(path, g){
+  let last=null;
+  for(let i=0;i<3;i++){ const r=await sb.storage.from("docs").upload(path, g.blob, { contentType:DOC_TYPES[g.ext] });
+    if(!r.error||(i&&/exists|duplicate/i.test(r.error.message||""))) return null; last=r.error; if(!isNetErr(r.error)) break; await new Promise(z=>setTimeout(z,1500*(i+1))); }
+  return isNetErr(last)?"النت فصل أثناء الرفع — جرّب تاني على واي فاي":errMsg(last);
+}
 /* Many case files at once (e.g. a folder of scans): each file goes to the case its name points to
    (national ID, name, or case number). Files that can't be placed are listed to pick the case by hand. */
-function bulkDocs(files){
+function bulkDocs(grabbed){
+  const files=grabbed.map(g=>g.f);
   const all=people(), label=b=>`${b.code} — ${b.name}`, byLabel=new Map(all.map(b=>[label(b),b]));
-  const rows=files.map(f=>{ const m=matchFileName(f.name, all); return { f, b:m.b, how:m.how, on:!!m.b && f.size<=15*1024*1024, big:f.size>15*1024*1024 }; });
+  const rows=grabbed.map(g=>{ const m=matchFileName(g.f.name, all); return { f:g.f, g, b:m.b, how:m.how, on:!!m.b && !g.err, big:!!g.err, err:g.err||"" }; });
   const HOW={nid:"بالرقم القومي",name:"بالاسم",name3:"بالاسم",code:"برقم الحالة"};
   const draw=()=>{ const ok=rows.filter(r=>r.on&&r.b).length, un=rows.filter(r=>!r.b).length;
     return `<div class="note">${ic("info")} <span>${num(files.length)} ملف — <b>${num(rows.filter(r=>r.b).length)}</b> عرفنا حالتهم من اسم الملف${un?`، و<b>${num(un)}</b> اختار حالتهم بإيدك`:""}.</span></div>
     <datalist id="bd_list">${all.map(b=>`<option value="${esc(label(b))}">`).join("")}</datalist>
     <div class="list">${rows.map((r,i)=>`<div class="item col"><div class="row" style="width:100%"><input type="checkbox" data-on="${i}" ${r.on?"checked":""} ${r.b&&!r.big?"":"disabled"} style="width:20px;height:20px">
-        <span class="grow"><span class="nm">${esc(r.f.name)}</span><br><span class="sub">${r.big?"أكبر من 15 ميجا — مش هيترفع":r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
-      ${!r.b&&!r.big?`<input type="search" list="bd_list" data-pick="${i}" placeholder="اكتب اسم الحالة أو رقمها واختار" style="margin-top:6px">`:""}</div>`).join("")}</div>
+        <span class="grow"><span class="nm">${esc(r.f.name)}</span><br><span class="sub">${r.err?`${r.b?esc(label(r.b))+" · ":""}<b style="color:var(--red)">${esc(r.err)}</b>`:r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
+      ${!r.b&&!r.err?`<input type="search" list="bd_list" data-pick="${i}" placeholder="اكتب اسم الحالة أو رقمها واختار" style="margin-top:6px">`:""}</div>`).join("")}</div>
     <div class="bar"><button class="btn pri" id="bd_go" ${ok?"":"disabled"}>${ic("plus")}ارفع ${num(ok)} ملف</button></div>`; };
   const mount=s=>{ const re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
     s.querySelectorAll("[data-on]").forEach(el=>el.onchange=()=>{ rows[+el.dataset.on].on=el.checked; re(); });
@@ -1265,12 +1283,16 @@ function bulkDocs(files){
       const go=s.querySelector("#bd_go"); go.disabled=true; const todo=rows.filter(r=>r.on&&r.b); let done=0, failed=0;
       const byCase=new Map();
       for(const r of todo){ go.innerHTML=`<span class="spin"></span> ${num(done+1)} من ${num(todo.length)}`;
-        const ext=/pdf$/i.test(r.f.type)||/\.pdf$/i.test(r.f.name)?"pdf":(r.f.type.split("/")[1]||"jpg"), path=`${r.b.id}/${Date.now()}-${done}.${ext}`;
-        const u=await sb.storage.from("docs").upload(path, r.f, { contentType:r.f.type||"application/pdf" });
-        if(u.error){ failed++; continue; } docBlobs.set(path, r.f);
+        const path=`${r.b.id}/${Date.now()}-${done+failed}.${r.g.ext}`;
+        const err=await putDoc(path, r.g);
+        if(err){ failed++; r.err=err; r.on=false; continue; } docBlobs.set(path, r.g.blob); r.done=true;
         (byCase.get(r.b.id)||byCase.set(r.b.id,[]).get(r.b.id)).push({ path, name:r.f.name, at:new Date().toISOString(), by:me.id, nameOk:r.how!=="hand" }); done++; }
       for(const [bid,ds] of byCase){ if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), ...ds] }).eq("id",bid))){ await logIt("beneficiary",bid,`رفع ${ds.length} ملف: ${ds.map(d=>d.name).join("، ")}`); await refreshPerson(bid); } }
-      toast(`اترفع ${num(done)} ملف ✓${failed?` · ${num(failed)} ماترفعوش`:""}`); closeSheet(); view="people"; peopleF="docs"; render();
+      if(!failed){ toast(`اترفع ${num(done)} ملف ✓`); closeSheet(); view="people"; peopleF="docs"; render(); return; }
+      // keep the sheet open: what went up is gone from the list, what failed shows why and can be tried again
+      for(let i=rows.length-1;i>=0;i--) if(rows[i].done) rows.splice(i,1);
+      rows.forEach(r=>{ if(r.err&&r.g.blob){ r.big=false; } }); re();
+      toast(`${done?`اترفع ${num(done)} ملف ✓ · `:""}${num(failed)} ماترفعوش — السبب مكتوب جنب كل ملف`);
     };
   };
   sheet("رفع ملفات حالات", draw(), mount);
