@@ -145,3 +145,13 @@ export function planShares(sorted, basis, { total = null, count = null } = {}){
 
 /* ---------- passwords ---------- */
 export const minPin = role => role === "manager" ? 8 : 6;
+
+/* ---------- distribution days ----------
+   Lists can be for a single day of the month (e.g. every Saturday). A month has 4 or 5 of each weekday. */
+export const DAYS = ["الأحد","الاتنين","التلات","الأربع","الخميس","الجمعة","السبت"];
+export function weekdaysOf(month, dow = 6){
+  const [y, m] = String(month).split("-").map(Number); const out = [];
+  for(let d = 1; d <= 31; d++){ const x = new Date(Date.UTC(y, m-1, d)); if(x.getUTCMonth() !== m-1) break; if(x.getUTCDay() === dow) out.push(x.toISOString().slice(0,10)); }
+  return out;
+}
+export const dayLabel = iso => { if(!iso) return ""; const x = new Date(iso + "T00:00:00Z"); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()} ${MONTHS[x.getUTCMonth()]}`; };

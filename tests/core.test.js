@@ -125,3 +125,12 @@ test("priority orders", () => {
   assert.deepEqual(sortPool(P,"wait",false).map(x=>x.b.code), ["2","3","1"]);
   assert.equal(minPin("manager"), 8); assert.equal(minPin("worker"), 6);
 });
+
+import { weekdaysOf, dayLabel } from "../core.js";
+test("Saturdays of a month: 4 or 5, never a fixed 5", () => {
+  assert.deepEqual(weekdaysOf("2026-08"), ["2026-08-01","2026-08-08","2026-08-15","2026-08-22","2026-08-29"]);
+  assert.equal(weekdaysOf("2026-10").length, 5);
+  assert.equal(weekdaysOf("2026-09").length, 4);
+  assert.equal(weekdaysOf("2026-02").length, 4);
+  assert.equal(dayLabel("2026-10-03"), "السبت 3 أكتوبر");
+});
