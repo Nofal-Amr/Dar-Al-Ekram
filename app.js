@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.6";
+export const VERSION = "1.3.7";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1488,14 +1488,16 @@ function phoneChooser(){
   });
 }
 function phoneSheet(title, rows, hasDone, batchId){
-  let onlyPending=!!hasDone;
-  const build=()=>{ const list=rows.filter(r=>!onlyPending||!r.done); const ok=list.filter(r=>validPhone(r.phone)); const bad=list.filter(r=>!validPhone(r.phone)); return {ok,bad,text:`${title}\n\n`+ok.map((r,i)=>`${i+1}- ${r.name}: ${cleanPhone(r.phone)}`).join("\n")}; };
+  let onlyPending=!!hasDone, mode="call";   // "wa": every list / file below uses the WhatsApp numbers (for making a group)
+  const build=()=>{ const list=rows.filter(r=>!onlyPending||!r.done).map(r=>mode==="wa"&&r.bid?{...r, phone:waNum(B.get(r.bid))||r.phone}:r); const ok=list.filter(r=>validPhone(r.phone)); const bad=list.filter(r=>!validPhone(r.phone)); return {ok,bad,text:`${title}\n\n`+ok.map((r,i)=>`${i+1}- ${r.name}: ${cleanPhone(r.phone)}`).join("\n")}; };
   const draw=()=>{ const {ok,bad,text}=build(); return `
+    <div class="seg" role="group" aria-label="أنهي أرقام"><button class="${mode==="call"?"on":""}" data-mode="call">${ic("phone")} أرقام الاتصال</button><button class="${mode==="wa"?"on":""}" data-mode="wa">${ic("chat")} أرقام الواتساب</button></div>
+    ${mode==="wa"?`<div class="note">${ic("info")} <span><b>عشان تعمل جروب واتساب:</b> اضغط «تسجيل الأرقام على الموبايل (.vcf)» تحت، وافتح الملف على الموبايل ← «استيراد». الأرقام هتتسجل باسم «دار الإكرام - …». بعدها في واتساب: جروب جديد ← اكتب «دار الإكرام» وعلّم عليهم.</span></div>`:""}
     <div class="note green">${num(ok.length)} رقم صالح${bad.length?` · <b>${num(bad.length)}</b> بدون رقم أو رقم غلط (تحت)`:""}</div>
     ${hasDone?`<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="ph_p" ${onlyPending?"checked":""} style="width:20px;height:20px"> اللي لسه ما استلموش بس</label>`:""}
     <p class="sub" style="margin-top:0">اضغط ${ic("phone")} يفتحلك الاتصال على طول — مش محتاج تسجّل الأرقام. لما تخلص اختار: ردّت / ماردتش / رقم غلط، والصف بيتلوّن.</p>
     <div class="list calls">${ok.map(r=>`<div class="item ${r.bid?rowCallCls(r.bid,batchId):""}"><span class="code">${esc(r.code)}</span><span class="grow"><span class="nm">${esc(r.name)}</span><br><span class="sub" dir="ltr" style="text-align:end;display:block">${esc(cleanPhone(r.phone))}</span></span>${r.bid?callCell(r.bid,r.phone,batchId)+waBtn(B.get(r.bid)):`<a class="cdial" href="tel:${cleanPhone(r.phone)}">${ic("phone")}</a>`}</div>`).join("")||`<div class="empty">مفيش أرقام</div>`}</div>
-    <details style="margin-top:14px"><summary class="sub">نسخ القائمة / واتساب / Excel / تسجيل الأرقام على الموبايل</summary>
+    <details style="margin-top:14px" ${mode==="wa"?"open":""}><summary class="sub">نسخ القائمة / واتساب / Excel / تسجيل الأرقام على الموبايل</summary>
     <div class="bar">
       <button class="btn" id="ph_copy">${ic("copy")} نسخ القائمة</button>
       <a class="btn" id="ph_wa" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center">${ic("chat")}إرسال واتساب</a>
@@ -1507,11 +1509,12 @@ function phoneSheet(title, rows, hasDone, batchId){
   const mount=s=>{
     const q=x=>s.querySelector(x); const {ok,text}=build();
     if(q("#ph_p")) q("#ph_p").onchange=e=>{ onlyPending=e.target.checked; q(".sh-body").innerHTML=draw(); mount(s); };
+    s.querySelectorAll("[data-mode]").forEach(el=>el.onclick=()=>{ mode=el.dataset.mode; q(".sh-body").innerHTML=draw(); mount(s); });
     bindCalls(s, ()=>{ const b=q(".sh-body"); if(b){ const sc=b.scrollTop; b.innerHTML=draw(); mount(s); b.scrollTop=sc; } });
     q("#ph_wa").href="https://wa.me/?text="+encodeURIComponent(text.length>6000?text.slice(0,6000)+"\n…":text);
     q("#ph_copy").onclick=async()=>{ try{ await navigator.clipboard.writeText(text); toast("اتنسخت ✓ الصقها في واتساب"); }catch(e){ const ta=q("#ph_t"); ta.focus(); ta.select(); try{ document.execCommand("copy"); toast("اتنسخت ✓"); }catch(_){ toast("علّم النص واضغط نسخ"); } } };
-    q("#ph_vcf").onclick=()=>{ const v=ok.map(r=>`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:دار الإكرام - ${r.name}\r\nN:${r.name};دار الإكرام;;;\r\nTEL;TYPE=CELL:${cleanPhone(r.phone)}\r\nNOTE:حالة رقم ${r.code}\r\nEND:VCARD`).join("\r\n"); saveFile(`${title}.vcf`, new Blob([v],{type:"text/vcard"})); };
-    q("#ph_x").onclick=()=>{ const rs=[["م","رقم الحالة","الاسم","التليفون"]]; ok.forEach((r,i)=>rs.push([i+1,r.code,r.name,cleanPhone(r.phone)])); xlsx({"أرقام":rs},`أرقام ${title}.xlsx`,[5,10,32,16]); };
+    q("#ph_vcf").onclick=()=>{ const v=ok.map(r=>`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:دار الإكرام - ${r.name}\r\nN:${r.name};دار الإكرام;;;\r\nTEL;TYPE=CELL:${cleanPhone(r.phone)}\r\nNOTE:حالة رقم ${r.code}\r\nEND:VCARD`).join("\r\n"); saveFile(`${mode==="wa"?"واتساب ":""}${title}.vcf`, new Blob([v],{type:"text/vcard"})); };
+    q("#ph_x").onclick=()=>{ const rs=[["م","رقم الحالة","الاسم",mode==="wa"?"واتساب":"التليفون"]]; ok.forEach((r,i)=>rs.push([i+1,r.code,r.name,cleanPhone(r.phone)])); xlsx({"أرقام":rs},`أرقام ${title}.xlsx`,[5,10,32,16]); };
   };
   sheet(title, draw(), mount);
 }
