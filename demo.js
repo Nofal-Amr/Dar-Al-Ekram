@@ -57,9 +57,10 @@ function makeData(){
       job: pick(JOBS), income: rnd() < 0.5 ? String(int(3, 20) * 100) : "", pension: rnd() < 0.4 ? String(int(5, 30) * 100) : "", housing: pick(HOUSING),
       family_size: kidsN + 1 + (rnd() < 0.3 ? 1 : 0), status: rnd() < 0.88 ? "نشط" : pick(["انتظار","موقوف","ملغي"]),
       last_review: rnd() < 0.6 ? `2025-${pad(int(1, 12))}-${pad(int(1, 28))}` : null, next_review: null, notes: "",
-      children, tags: rnd() < 0.7 ? [pick(["بنك الطعام موسمي","بنك الطعام شهري","مصر الخير","لحوم الأضاحي"])] : [], photos: {}, source: "بيانات تجريبية", created_at: "2026-01-01T09:00:00Z", updated_at: "2026-01-01T09:00:00Z", created_by: managerId, archived_at: null, archived_by: null,
+      children, whatsapp: null, tags: rnd() < 0.7 ? [pick(["بنك الطعام موسمي","بنك الطعام شهري","مصر الخير","لحوم الأضاحي"])] : [], photos: {}, source: "بيانات تجريبية", created_at: "2026-01-01T09:00:00Z", updated_at: "2026-01-01T09:00:00Z", created_by: managerId, archived_at: null, archived_by: null,
     });
   }
+  beneficiaries.forEach(b => { b.whatsapp = b.phone || null; });
   const batches = [], batch_items = [];
   const addBatch = (t, month, status, n, receivedShare) => {
     const id = uuid(); batches.push({ id, title: `كشف ${t.name} — ${month}`, type_id: t.id, type_name: t.name, unit: t.unit, template: t.template, month, status, single: false, cooldown: t.cooldown,

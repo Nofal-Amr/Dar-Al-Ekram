@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.5";
+export const VERSION = "1.3.6";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -83,10 +83,10 @@ async function run(promise, okMsg){
 async function logIt(entity, id, text){ if(!canWrite() || !text) return; await sb.from("activity_log").insert({entity, entity_id:id, text}); logCache.delete(entity+id); }
 
 /* ================= mapping ================= */
-const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
+const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", whatsapp:r.whatsapp||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
   familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{} });
-const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
+const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
@@ -260,6 +260,10 @@ function whyLine(x, t, unit){
 }
 /* ---------- calls ----------
    Every tap on «ردّت / ماردتش / رقم غلط» is one row in `calls`. The latest one colours the row. */
+// WhatsApp can be on a different number than the one she answers calls on.
+const waNum = b => { const w=cleanPhone(b?.whatsapp); return validPhone(w) ? w : ""; };
+const waLink = (n, text="") => `https://wa.me/2${n}${text?`?text=${encodeURIComponent(text)}`:""}`;
+const waBtn = (b, cls="cdial wa") => { const n=waNum(b); return n?`<a class="${cls}" href="${waLink(n)}" target="_blank" rel="noopener" aria-label="واتساب ${n}">${ic("chat")}واتساب</a>`:""; };
 const PHONE_OWNERS = ["جوزها","ابنها","بنتها","أخوها","أختها","ابن أخوها","بنت أختها","أمها","أبوها","حماتها","جارتها","رقم تاني ليها"];
 // "رقم جوزها" — says whose phone the family's second number is.
 const phone2Name = b => b?.phone2Owner ? (b.phone2Owner.startsWith("رقم") ? b.phone2Owner : "رقم "+b.phone2Owner) : "رقم تاني";
@@ -779,7 +783,7 @@ function vSimple(){
     return `<button class="s-back" data-s="find">→ رجوع</button>
       <div class="s-person"><div class="s-ic big">${ic("user")}</div><h2>${esc(b.name)}</h2><p>رقم الحالة <b>${esc(b.code)}</b>${b.familySize?` · <b>${b.familySize}</b> أفراد`:""}${(b.children||[]).length?` · <b>${b.children.length}</b> أطفال`:""}</p>
         ${b.status!=="نشط"?`<p class="s-warn">${ic("alert")}الحالة دي ${esc(b.status)}</p>`:""}
-        <div style="margin-top:10px">${callCell(b.id,b.phone,null,true)}</div></div>
+        <div style="margin-top:10px">${callCell(b.id,b.phone,null,true)} ${waBtn(b,"cdial wa big")}</div></div>
       <h3 class="s-title">خدت إيه قبل كده؟</h3>
       <div class="s-list">${hist.map(r=>`<div class="s-row ${r.received?"done":""}"><span class="grow"><b>${esc(r.typeName)}</b><small>${mLabel(r.month)}</small></span><span class="s-ok ${r.received?"":"muted"}">${r.received?"✓ استلم":"لسه"}</span></div>`).join("")||`<div class="s-empty">لسه ما خدتش حاجة</div>`}</div>`;
   }
@@ -851,6 +855,7 @@ async function editPerson(id){
       <label class="f">الرقم القومي<input type="text" inputmode="numeric" id="p_nid" value="${esc(b.nationalId)}" dir="ltr" maxlength="20" autocomplete="off" aria-describedby="p_nidHint"><span class="hint" id="p_nidHint" aria-live="polite"></span></label>
       <label class="f">تاريخ الميلاد (بيتحسب من الرقم القومي)<input type="date" id="p_birth" value="${esc(b.birth)}"></label>
       <label class="f">التليفون<input type="text" inputmode="tel" id="p_phone" value="${esc(b.phone)}" dir="ltr"></label>
+      <label class="f">رقم الواتساب (لو غير رقم التليفون)<input type="text" inputmode="tel" id="p_wa" value="${esc(b.whatsapp||"")}" dir="ltr" placeholder="نفس رقم التليفون"></label>
       <label class="f">تليفون تاني<input type="text" inputmode="tel" id="p_phone2" value="${esc(b.phone2)}" dir="ltr"></label>
       <label class="f">التليفون التاني ده رقم مين؟<input type="text" id="p_phone2o" list="p_owners" value="${esc(b.phone2Owner||"")}" placeholder="مثال: جوزها، ابن أخوها"><datalist id="p_owners">${PHONE_OWNERS.map(o=>`<option value="${o}">`).join("")}</datalist></label>
       <label class="f">نوع الحالة<select id="p_type"><option value="">غير محدد</option>${CASE_TYPES.filter(c=>c!=="غير محدد").map(c=>`<option ${b.caseType===c?"selected":""}>${c}</option>`).join("")}</select></label>
@@ -913,7 +918,7 @@ async function editPerson(id){
     q("#cancelP").onclick=()=>{ clearDraft(draftKey); id?viewPerson(id):closeSheet(); };
     q("#saveP").onclick=async()=>{
       const g=x=>q(x).value.trim(); const prev=id?B.get(id):null;
-      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), phone2Owner:g("#p_phone2o"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name),
+      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), phone2Owner:g("#p_phone2o"), whatsapp:g("#p_wa")||g("#p_phone"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name),
         tags:[...new Set([...[...s.querySelectorAll("#p_tags input:checked")].map(i=>i.value), g("#p_newtag")].filter(Boolean))]};
       if(!rec.name){ toast("اكتب الاسم الأول"); q("#p_name").focus(); return; }
       const nid=parseNID(rec.nationalId); if(nid.ok) rec.nationalId=nid.nid;
@@ -942,7 +947,7 @@ function viewPerson(id){
       ${b.grade?`<span class="chip gold">تقدير ${esc(b.grade)}</span>`:""}${reviewDue(b)?`<span class="chip red">محتاجة مراجعة</span>`:""}
       ${(b.tags||[]).map(t=>`<span class="chip blue">${esc(t)}</span>`).join("")}
     </div>
-    <div class="callbar">${callCell(b.id,validPhone(b.phone)?b.phone:b.phone2,null,true)}</div>
+    <div class="callbar">${callCell(b.id,validPhone(b.phone)?b.phone:b.phone2,null,true)}${waBtn(b,"cdial wa big")}</div>
     <div class="bar">
       ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button>`:""}
       ${isMgr()?`<button class="btn gold" id="v_single">${ic("cash")}صرف فردي</button>`:""}
@@ -951,7 +956,7 @@ function viewPerson(id){
     </div>
     ${(()=>{ const ts=openTasks().filter(t=>t.bid===b.id); return ts.length?`<div class="list tasks" style="margin-bottom:12px">${ts.map(t=>`<div class="task ${t.due&&t.due<today?"late":""}"><button class="tick" data-done="${t.id}" aria-label="خلصت"></button><button class="grow tbody" data-task="${t.id}"><span class="nm">${esc(t.title)}</span><br><span class="sub">${t.due?dLabel(t.due):""}</span></button></div>`).join("")}</div>`:""; })()}
     <div class="facts">
-      ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f(b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2)}
+      ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f(b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2)}${waNum(b)&&waNum(b)!==cleanPhone(b.phone)?f("واتساب",waNum(b)):""}
       ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize||(famSize(b)?famSize(b)+" (من عدد الأبناء)":""))}${f("عدد الأبناء",(b.children||[]).length||"")}
       ${f("المشروع",b.project)}${f("المنطقة",b.area)}${f("العمل",b.job)}${f("الدخل",b.income)}${f("المعاش",b.pension)}${f("السكن",b.housing)}
       ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?b.score+"%":"")}
@@ -1489,7 +1494,7 @@ function phoneSheet(title, rows, hasDone, batchId){
     <div class="note green">${num(ok.length)} رقم صالح${bad.length?` · <b>${num(bad.length)}</b> بدون رقم أو رقم غلط (تحت)`:""}</div>
     ${hasDone?`<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="ph_p" ${onlyPending?"checked":""} style="width:20px;height:20px"> اللي لسه ما استلموش بس</label>`:""}
     <p class="sub" style="margin-top:0">اضغط ${ic("phone")} يفتحلك الاتصال على طول — مش محتاج تسجّل الأرقام. لما تخلص اختار: ردّت / ماردتش / رقم غلط، والصف بيتلوّن.</p>
-    <div class="list calls">${ok.map(r=>`<div class="item ${r.bid?rowCallCls(r.bid,batchId):""}"><span class="code">${esc(r.code)}</span><span class="grow"><span class="nm">${esc(r.name)}</span><br><span class="sub" dir="ltr" style="text-align:end;display:block">${esc(cleanPhone(r.phone))}</span></span>${r.bid?callCell(r.bid,r.phone,batchId):`<a class="cdial" href="tel:${cleanPhone(r.phone)}">${ic("phone")}</a>`}</div>`).join("")||`<div class="empty">مفيش أرقام</div>`}</div>
+    <div class="list calls">${ok.map(r=>`<div class="item ${r.bid?rowCallCls(r.bid,batchId):""}"><span class="code">${esc(r.code)}</span><span class="grow"><span class="nm">${esc(r.name)}</span><br><span class="sub" dir="ltr" style="text-align:end;display:block">${esc(cleanPhone(r.phone))}</span></span>${r.bid?callCell(r.bid,r.phone,batchId)+waBtn(B.get(r.bid)):`<a class="cdial" href="tel:${cleanPhone(r.phone)}">${ic("phone")}</a>`}</div>`).join("")||`<div class="empty">مفيش أرقام</div>`}</div>
     <details style="margin-top:14px"><summary class="sub">نسخ القائمة / واتساب / Excel / تسجيل الأرقام على الموبايل</summary>
     <div class="bar">
       <button class="btn" id="ph_copy">${ic("copy")} نسخ القائمة</button>
@@ -1549,7 +1554,7 @@ function caseHTML(b,logs){
   const kv=pairs=>`<table class="kv"><tbody>${pairs.reduce((rows,p,i)=>{ if(i%2===0) rows.push([p]); else rows[rows.length-1].push(p); return rows; },[]).map(r=>`<tr>${r.map(([l,v])=>`<td>${l}</td><td class="l">${esc(v??"")}</td>`).join("")}${r.length<2?"<td></td><td></td>":""}</tr>`).join("")}</tbody></table>`;
   return `<div class="ps">${hdr()}<h1>ملف حالة رقم ${esc(b.code)}</h1><div class="mo">${esc(b.status)} · ${esc(b.caseType||"غير محدد")}</div>
     <h2>البيانات الأساسية</h2>
-    ${kv([["الاسم",b.name],["الرقم القومي",b.nationalId],["تاريخ الميلاد",b.birth],["السن",age(b.birth)],["التليفون",cleanPhone(b.phone)],[b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2],["الحالة الاجتماعية",b.marital],["المشروع",b.project],["العمل",b.job],["الدخل",b.income],["المعاش",b.pension],["السكن",b.housing],["أفراد الأسرة",b.familySize],["التقدير",b.grade],["آخر مراجعة",b.lastReview],["المراجعة الجاية",b.nextReview]])}
+    ${kv([["الاسم",b.name],["الرقم القومي",b.nationalId],["تاريخ الميلاد",b.birth],["السن",age(b.birth)],["التليفون",cleanPhone(b.phone)],["واتساب",waNum(b)],[b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2],["الحالة الاجتماعية",b.marital],["المشروع",b.project],["العمل",b.job],["الدخل",b.income],["المعاش",b.pension],["السكن",b.housing],["أفراد الأسرة",b.familySize],["التقدير",b.grade],["آخر مراجعة",b.lastReview],["المراجعة الجاية",b.nextReview]])}
     ${kv([["العنوان",b.address||b.area],["ملاحظات",b.notes]])}
     <h2>الأبناء</h2><table><thead><tr><th>م</th><th>الاسم</th><th>النوع</th><th>تاريخ الميلاد</th><th>السن</th><th>المرحلة الدراسية</th></tr></thead><tbody>
     ${(b.children||[]).map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(k.name)}</td><td>${esc(k.gender)}</td><td>${esc(k.birth)}</td><td>${age(k.birth)}</td><td>${esc(k.school)}</td></tr>`).join("")||`<tr><td colspan="6">لا يوجد</td></tr>`}</tbody></table>
@@ -1569,8 +1574,8 @@ function batchXlsx(k){
   xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,12,14,7,30,16]);
 }
 function peopleRows(list){
-  const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
-  list.forEach(b=>rows.push([b.code,b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),b.phone2||"",b.phone2Owner||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
+  const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","واتساب","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
+  list.forEach(b=>rows.push([b.code,b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),waNum(b),b.phone2||"",b.phone2Owner||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
   return rows;
 }
 function backup(){
