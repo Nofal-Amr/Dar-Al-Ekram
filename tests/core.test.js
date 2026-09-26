@@ -176,3 +176,22 @@ test("reads an office Excel list and matches people", () => {
   // no header row at all: any 14 digits = ID, longest Arabic text = name
   assert.deepEqual(rowsFromSheet([["", "هبه محمد عبده السيد", "29601311400145"]]).map(r => r.nid), ["29601311400145"]);
 });
+
+import { crossCheck } from "../core.js";
+test("PDF cross-check against the case on the site", () => {
+  const b = { name:"نورا عرفه سليمان", nationalId:"29903201401304", phone:"01098945258", phone2:"", whatsapp:"01098945258", familySize:4,
+    children:[{ name:"رودينا ياسر", nid:"31706200200021" }, { name:"فريدة ياسر", nid:"" }] };
+  const text = `نموذج انضمام   إسم الأم رباعي: نورا عرفه سليمان عبدالنعيم   رقم البطاقة : ٢٩٩٠٣٢٠١٤٠١٣٠٤
+    رقم التليفون : 01098945258 / 01123456789   اجمالي عدد أفراد الأسرة : 5
+    أسماء الأطفال: رودينا ياسر 31706200200021 ، معاذ ياسر 32308260200015`;
+  const r = crossCheck(text, b, new Date("2026-09-26"));
+  assert.ok(r.readable);
+  assert.ok(r.ok.some(x => x.includes("29903201401304")));
+  assert.ok(r.ok.some(x => x.includes("الاسم")));
+  assert.ok(r.ok.some(x => x.includes("رودينا")));
+  assert.ok(r.diff.some(x => x.includes("عدد الأفراد: الملف 5")));
+  assert.ok(r.diff.some(x => x.includes("فريدة")));                // on the site, not in the file
+  assert.ok(r.extra.some(x => x.includes("01123456789")));
+  assert.ok(r.extra.some(x => x.includes("32308260200015")));       // a child in the file, not on the site
+  assert.equal(crossCheck("   ", b).readable, false);               // a scanned image has no text
+});

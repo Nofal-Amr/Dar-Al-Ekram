@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num,
-  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.14";
+export const VERSION = "1.3.15";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -88,7 +88,7 @@ async function logIt(entity, id, text){ if(!canWrite() || !text) return; await s
 /* ================= mapping ================= */
 const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", whatsapp:r.whatsapp||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
-  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{} });
+  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{}, docs:r.docs||[] });
 const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
@@ -983,6 +983,10 @@ function viewPerson(id){
     ${b.notes?`<div class="note">${esc(b.notes)}</div>`:""}
     <h3>الصور</h3>
     <div class="photos">${photoTile(b.id,"mother","الأم")}${photoTile(b.id,"idcard","البطاقة")}${(b.children||[]).map((k,i)=>photoTile(b.id,"k"+i,k.name||"ابن / ابنة")).join("")}</div>
+    <h3>ملفات الحالة (PDF)</h3>
+    ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span></span>
+      <button class="btn sm" data-dopen="${i}">${ic("eye")}افتح</button>${/pdf$/i.test(d.path)?`<button class="btn sm pri" data-dcheck="${i}">${ic("check")}قارن بالموقع</button>`:""}</div>`).join("")}</div>`:`<p class="sub">مفيش ملفات. ارفع ملف الحالة PDF وهيتقارن بالبيانات اللي هنا.</p>`}
+    ${canWrite()?`<label class="btn" style="cursor:pointer">${ic("plus")}ارفع ملف PDF<input type="file" id="v_doc" accept="application/pdf,image/*" hidden></label>`:""}
     <h3>الأبناء</h3>
     ${(b.children||[]).length?`<div class="tbl"><table><thead><tr><th>الاسم</th><th>السن</th><th>المرحلة الدراسية</th><th>شهادة القيد ${syLabel(SY)}</th></tr></thead><tbody>${b.children.map((k,i)=>{const a=age(k.birth), st=stageOf(k); return `<tr><td>${esc(k.name)}${k.nid?`<div class="why" dir="ltr" style="text-align:end">${esc(k.nid)}</div>`:""}</td><td class="n">${a===""?"—":a}${a!==""&&a>=18?` <span class="chip red">فوق 18</span>`:a!==""&&a>=17?` <span class="chip gold">قرب 18</span>`:""}</td>
       <td>${esc(st||"—")}${st&&!STAGES.includes(st)?` <span class="chip gold" title="اختارها من القايمة في «تعديل»">مكتوبة بإيد</span>`:""}</td>
@@ -1006,7 +1010,7 @@ function viewPerson(id){
     s.querySelectorAll("[data-task]").forEach(el=>el.onclick=()=>taskSheet(el.dataset.task));
     s.querySelectorAll("[data-done]").forEach(el=>el.onclick=()=>doneTask(el.dataset.done,el));
     s.querySelectorAll("[data-cert]").forEach(el=>el.onclick=()=>certDialog(id,+el.dataset.cert));
-    bindCalls(s, redraw); bindPhotos(s, id, redraw);
+    bindCalls(s, redraw); bindPhotos(s, id, redraw); bindDocs(s, id);
     if(q("#v_del")) q("#v_del").onclick=async()=>{
       if(!await ask("الحالة هتختفي من القوائم والكشوف الجديدة، بس سجلها وكل اللي صرفته يفضل محفوظ.\nتقدر ترجّعها في أي وقت من «الإعدادات ← الأرشيف».",{title:"أرشفة الحالة؟",ok:"أرشفة"})) return;
       if(await run(sb.from("beneficiaries").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشفت ✓")){ await logIt("beneficiary",id,"أرشفة الحالة"); closeSheet(); refreshPerson(id); }
@@ -1105,6 +1109,69 @@ function bindPhotos(root, bid, redraw){
     else patch={photos:{...(b.photos||{}), [slot]:path}};
     if(await run(sb.from("beneficiaries").update(patch).eq("id",bid),"الصورة اتحفظت ✓")){ await logIt("beneficiary",bid,"رفع صورة"); await refreshPerson(bid); redraw(); }
   });
+}
+
+/* ================= case documents (PDF) =================
+   The paper file, kept with the case in the private «docs» bucket. «قارن بالموقع» reads the PDF's text (pdf.js, served
+   from this site) and checks it against what's entered here. Scanned pages have no text — those are compared by eye. */
+let pdfLoading=null;
+const loadPdf=()=>window.pdfjsLib?Promise.resolve():(pdfLoading||=new Promise((res,rej)=>{ const sc=document.createElement("script"); sc.src="vendor/pdfjs/pdf.min.js";
+  sc.onload=()=>{ window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdfjs/pdf.worker.min.js"; res(); }; sc.onerror=()=>{ pdfLoading=null; rej(new Error("pdf")); }; document.head.appendChild(sc); }));
+async function pdfText(blob){
+  await loadPdf();
+  const doc=await window.pdfjsLib.getDocument({ data:new Uint8Array(await blob.arrayBuffer()), cMapUrl:"vendor/pdfjs/cmaps/", cMapPacked:true }).promise;
+  // Rebuild each line from the glyphs' positions: Arabic lines read right-to-left, whatever order the PDF stored them in.
+  // NFKC turns Arabic presentation forms (ﻧ ﺟ ﻼ …) back into plain letters so names can be matched.
+  let out="";
+  for(let p=1;p<=Math.min(doc.numPages,20);p++){
+    const c=await (await doc.getPage(p)).getTextContent(), lines=new Map();
+    for(const it of c.items){ if(!it.str) continue; const y=Math.round(it.transform[5]/3); (lines.get(y)||lines.set(y,[]).get(y)).push(it); }
+    for(const y of [...lines.keys()].sort((a,b)=>b-a)){
+      const L=lines.get(y), rtl=L.filter(i=>i.dir==="rtl").length>=L.filter(i=>/\S/.test(i.str)&&i.dir==="ltr").length;
+      L.sort((a,b)=>rtl?b.transform[4]-a.transform[4]:a.transform[4]-b.transform[4]);
+      out+=L.map(i=>i.str).join("").replace(/\s+/g," ").trim()+"\n";
+    }
+  }
+  return out.normalize("NFKC");
+}
+const docBlobs=new Map();
+async function docBlob(path){ if(docBlobs.has(path)) return docBlobs.get(path); const { data, error } = await sb.storage.from("docs").download(path); if(error||!data) throw error||new Error("download"); docBlobs.set(path,data); return data; }
+function bindDocs(root, bid){
+  root.querySelectorAll("[data-dopen]").forEach(el=>el.onclick=async()=>{ const d=B.get(bid).docs[+el.dataset.dopen]; el.disabled=true;
+    try{ const blob=await docBlob(d.path); if(/Android|iPhone|iPad/i.test(navigator.userAgent)) await saveFile(d.name||"ملف.pdf", blob); else window.open(URL.createObjectURL(blob),"_blank"); }catch(e){ toast(errMsg(e)); } el.disabled=false; });
+  root.querySelectorAll("[data-dcheck]").forEach(el=>el.onclick=()=>checkDoc(bid, B.get(bid).docs[+el.dataset.dcheck]));
+  const up=root.querySelector("#v_doc"); if(up) up.onchange=async()=>{
+    const f=up.files?.[0]; up.value=""; if(!f) return;
+    if(f.size>15*1024*1024){ toast("الملف أكبر من 15 ميجا"); return; }
+    toast("بنرفع الملف…");
+    const ext=/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)?"pdf":(f.type.split("/")[1]||"jpg"), path=`${bid}/${Date.now()}.${ext}`;
+    const r=await sb.storage.from("docs").upload(path, f, { contentType:f.type||"application/pdf" }); if(r.error){ toast(errMsg(r.error)); return; }
+    docBlobs.set(path, f);
+    const d={ path, name:f.name, at:new Date().toISOString(), by:me.id };
+    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ ✓")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); if(ext==="pdf") checkDoc(bid, d); }
+  };
+}
+async function checkDoc(bid, d){
+  const b=B.get(bid); let text="";
+  sheet(`مقارنة الملف — ${b.name}`,`<div class="empty"><span class="spin"></span> بنقرا الملف…</div>`);
+  try{ text=await pdfText(await docBlob(d.path)); }catch(e){ const body=$("#scrim .sh-body"); if(body) body.innerHTML=`<div class="note red">${ic("alert")} مقدرناش نقرا الملف ده.</div>`; return; }
+  const r=crossCheck(text, b, now);
+  const li=(arr,cls,icn)=>arr.map(x=>`<li class="${cls}">${ic(icn)} <span>${esc(x)}</span>${cls==="ex"&&/رقم قومي في الملف/.test(x)&&canWrite()?` <button class="btn sm" data-addkid="${esc(x.match(/\d{14}/)[0])}">${ic("plus")}ضيفه ابن/بنت</button>`:""}${cls==="ex"&&/تليفون في الملف/.test(x)&&canWrite()&&!b.phone2?` <button class="btn sm" data-addph="${esc(x.match(/01\d{9}/)[0])}">حطه تليفون تاني</button>`:""}</li>`).join("");
+  const body=$("#scrim .sh-body"); if(!body) return;
+  body.innerHTML=!r.readable
+    ?`<div class="note">${ic("info")} <span>الملف ده <b>صورة (سكانر)</b> — مفيهوش كلام يتقري أوتوماتيك. افتحه وقارنه بعينك بالبيانات اللي في ملف الحالة.</span></div><div class="bar"><button class="btn pri" id="cx_open">${ic("eye")}افتح الملف</button></div>`
+    :`<p class="sub" style="margin-top:0">${esc(d.name||"")}</p>
+      ${r.diff.length?`<h3>مختلف (${num(r.diff.length)})</h3><ul class="cx">${li(r.diff,"df","alert")}</ul>`:`<div class="note green">${ic("check")} مفيش اختلافات في اللي قدرنا نقراه.</div>`}
+      ${r.extra.length?`<h3>في الملف ومش على الموقع (${num(r.extra.length)})</h3><ul class="cx">${li(r.extra,"ex","plus")}</ul>`:""}
+      ${r.ok.length?`<h3>مطابق (${num(r.ok.length)})</h3><ul class="cx">${li(r.ok,"okk","check")}</ul>`:""}
+      <details><summary class="sub">الكلام اللي اتقرا من الملف</summary><pre class="pdftxt">${esc(text.slice(0,4000))}</pre></details>
+      <p class="sub">البرنامج بيقارن الأرقام القومية والتليفونات والأسامي وعدد الأفراد. باقي الخانات راجعها بعينك.</p>`;
+  const o=$("#cx_open"); if(o) o.onclick=async()=>{ const blob=await docBlob(d.path); if(/Android|iPhone|iPad/i.test(navigator.userAgent)) saveFile(d.name||"ملف.pdf", blob); else window.open(URL.createObjectURL(blob),"_blank"); };
+  body.querySelectorAll("[data-addkid]").forEach(el=>el.onclick=async()=>{ const p=parseNID(el.dataset.addkid,now); if(!p.ok) return; el.disabled=true;
+    const kids=[...(B.get(bid).children||[]), { name:"", nid:p.nid, birth:p.birth, gender:p.gender==="ذكر"?"ولد":"بنت", school:"" }];
+    if(await run(sb.from("beneficiaries").update({children:kids}).eq("id",bid),"اتضاف ✓ — اكتب اسمه من «تعديل»")){ await logIt("beneficiary",bid,`إضافة ابن/بنت من ملف PDF: ${p.nid}`); await refreshPerson(bid); el.textContent="اتضاف ✓"; } else el.disabled=false; });
+  body.querySelectorAll("[data-addph]").forEach(el=>el.onclick=async()=>{ el.disabled=true;
+    if(await run(sb.from("beneficiaries").update({phone2:el.dataset.addph}).eq("id",bid),"اتحفظ ✓")){ await logIt("beneficiary",bid,`تليفون تاني من ملف PDF: ${el.dataset.addph}`); await refreshPerson(bid); el.textContent="اتحفظ ✓"; } else el.disabled=false; });
 }
 
 /* ================= tasks ================= */

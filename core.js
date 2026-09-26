@@ -213,3 +213,35 @@ export function matchPerson(row, people){
   if(k3.split(" ").length === 3){ const m = people.filter(p => norm(p.name).split(" ").slice(0,3).join(" ") === k3); if(m.length === 1) return { b:m[0], how:"name3" }; }
   return { b:null, how:"" };
 }
+
+/* ---------- checking a case's PDF against the site ----------
+   Takes the text read out of the PDF and the case as it is on the site; reports what matches, what's different,
+   and what's in the file but not on the site (e.g. a child's national ID that was never entered). */
+export function crossCheck(text, b, today = new Date()){
+  text = String(text || "").normalize("NFKC");
+  const t = latinDigits(text), n = norm(text);
+  const digits = t.replace(/(\d)[  ](?=\d)/g, "$1");            // «2 9 9 0 3 …» typed in boxes
+  const nids = [...new Set((digits.match(/\d{14}/g) || []).filter(x => parseNID(x, today).ok))];
+  const phones = [...new Set((digits.match(/(?:^|\D)(0?1[0125]\d{8})(?!\d)/g) || []).map(x => cleanPhone(x.replace(/^\D/,""))))].filter(validPhone);
+  const has = s => s && n.includes(norm(s));
+  const out = { ok:[], diff:[], extra:[], readable: n.replace(/\s/g,"").length > 30 };
+  if(!out.readable) return out;
+  // the case herself
+  if(b.nationalId){ if(nids.includes(b.nationalId)) out.ok.push(`الرقم القومي ${b.nationalId}`); else out.diff.push(`الرقم القومي اللي على الموقع (${b.nationalId}) مش موجود في الملف`); }
+  const words = norm(b.name).split(" ").filter(w => w.length > 1), found = words.filter(w => n.includes(w));
+  if(words.length){ if(found.length === words.length) out.ok.push(`الاسم «${b.name}»`); else out.diff.push(`الاسم: في الملف لقيت ${found.length} من ${words.length} أسامي («${words.filter(w => !found.includes(w)).join(" ")}» مش موجود)`); }
+  const sitePhones = [...new Set([b.phone, b.phone2, b.whatsapp].map(cleanPhone).filter(validPhone))];
+  sitePhones.forEach(p => phones.includes(p) ? out.ok.push(`التليفون ${p}`) : out.diff.push(`التليفون ${p} اللي على الموقع مش موجود في الملف`));
+  phones.filter(p => !sitePhones.includes(p)).forEach(p => out.extra.push(`تليفون في الملف مش على الموقع: ${p}`));
+  const fm = /اجمال[يى]\s*عدد\s*(?:افراد\s*)?الاسر[هة]\s*:?\s*(\d{1,2})/.exec(latinDigits(n));
+  if(fm){ const f = +fm[1]; if(+b.familySize === f) out.ok.push(`عدد الأفراد ${f}`); else out.diff.push(`عدد الأفراد: الملف ${f} — الموقع ${b.familySize || "مش متسجل"}`); }
+  // children
+  const kids = b.children || [], kidNids = kids.map(k => k.nid).filter(Boolean);
+  kids.forEach(k => {
+    if(k.nid){ nids.includes(k.nid) ? out.ok.push(`رقم ${k.name}`) : out.diff.push(`رقم ${k.name} القومي (${k.nid}) مش موجود في الملف`); }
+    else if(k.name && !has(norm(k.name).split(" ")[0])) out.diff.push(`${k.name} (ابن/بنت على الموقع) مش مذكور في الملف`);
+  });
+  nids.filter(x => x !== b.nationalId && !kidNids.includes(x)).forEach(x => { const p = parseNID(x, today);
+    out.extra.push(`رقم قومي في الملف مش على الموقع: ${x} — ${p.gender}، مواليد ${p.birth}`); });
+  return out;
+}
