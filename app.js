@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.19";
+export const VERSION = "1.3.20";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -23,7 +23,10 @@ const sb = DEMO ? (await import("./demo.js")).createDemoClient()
 /* ================= state ================= */
 let me = null;              // {id, full_name, username, role, active}
 let role = "worker", realRole = "worker";
-const B = new Map(), T = new Map(), K = new Map(), P = new Map(), C = new Map(), TK = new Map();   // beneficiaries, types, batches(with items), profiles, calls, tasks
+const B = new Map(), T = new Map(), K = new Map(), P = new Map(), C = new Map(), TK = new Map();
+// money & stock: donors, stock items, donations, ledger (accounts), stock moves — kept as the rows the database returns
+const DN = new Map(), IT = new Map(), DO = new Map(), LG = new Map(), SM = new Map();
+const MONEY_TABLES = { donors:DN, items:IT, donations:DO, ledger:LG, stock_moves:SM };   // beneficiaries, types, batches(with items), profiles, calls, tasks
 let loaded = false, view = "home", peopleQ = "", peopleF = "all", peopleSort = "code", peopleLimit = 100;
 const PAGE = 100;   // rows drawn at a time — keeps the Windows 7 PC responsive
 const logCache = new Map();
@@ -44,6 +47,8 @@ const age = d => ageAt(d, now);
 const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);
 const isMgr = () => role === "manager";
 const canWrite = () => role === "manager" || role === "worker";
+const canMoney = () => canWrite();                                   // record donations, entries, stock
+const seeMoney = () => canWrite() || role === "viewer";
 // Office staff make and edit lists as drafts; only the manager approves, closes or archives them.
 const canDraft = () => canWrite();
 const canEditList = k => isMgr() || (role === "worker" && k.status === "مسودة" && !k.archivedAt);
@@ -92,9 +97,9 @@ const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_i
 const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
-const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
+const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemId:r.item_id||null, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
-  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
+  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
 const fromI = r => ({ id:r.id, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
 const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||null, result:r.result, at:r.at, by:r.by });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
@@ -114,6 +119,7 @@ let renderTimer = null;
 function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(() => { render(); refreshSheet(); }, 60); }
 function memo(fn){ let v = -1, out; return () => { if(v !== dataVer){ out = fn(); v = dataVer; } return out; }; }
 
+function setMoney(m = {}){ for(const [t,map] of Object.entries(MONEY_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } }
 function setAll(bs, ts, ks, is, ps, cs = [], tk = []){
   B.clear(); bs.forEach(r => B.set(r.id, fromB(r)));
   T.clear(); ts.forEach(r => T.set(r.id, fromT(r)));
@@ -129,12 +135,14 @@ async function reload(){
   if(reloading) return reloading;
   reloading = (async () => {
     try{
-      const [bs, ts, ks, is, ps, cs, tk] = await Promise.all([fetchAll("beneficiaries"), fetchAll("aid_types"), fetchAll("batches"), fetchAll("batch_items"), fetchAll("profiles"), fetchAll("calls").catch(() => []), fetchAll("tasks").catch(() => [])]);
-      setAll(bs, ts, ks, is, ps, cs, tk); snapRaw = { bs, ts, ks, is, ps, cs, tk };
+      const [bs, ts, ks, is, ps, cs, tk, ...mm] = await Promise.all([fetchAll("beneficiaries"), fetchAll("aid_types"), fetchAll("batches"), fetchAll("batch_items"), fetchAll("profiles"), fetchAll("calls").catch(() => []), fetchAll("tasks").catch(() => []),
+        ...Object.keys(MONEY_TABLES).map(t => seeMoney() ? fetchAll(t).catch(() => []) : Promise.resolve([]))]);
+      const money = Object.fromEntries(Object.keys(MONEY_TABLES).map((t,i) => [t, mm[i]]));
+      setAll(bs, ts, ks, is, ps, cs, tk); setMoney(money); snapRaw = { bs, ts, ks, is, ps, cs, tk, money };
       loaded = true; loadError = null; fromSnapshot = null; dataVer++; render(); refreshSheet(); saveSnapshotSoon();
     }catch(e){
       loadError = e;
-      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
+      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); setMoney(snap.money); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
       render(); netBanner(); if(loaded) toast(errMsg(e));
     }
     finally{ reloading = null; }
@@ -162,13 +170,14 @@ function applyChange(table, p){
   }
   else if(table === "calls"){ if(row){ C.set(row.id, fromC(row)); upsertRaw("cs", row); } }
   else if(table === "tasks"){ if(row){ TK.set(row.id, fromTk(row)); upsertRaw("tk", row); } }
+  else if(MONEY_TABLES[table]){ if(row) MONEY_TABLES[table].set(row.id, row); }
   overlayQueue(); logCache.clear(); changed();
 }
 let rt = null;
 function subscribeRealtime(){
   if(rt) return;
   rt = sb.channel("all-changes");
-  ["beneficiaries","batches","batch_items","aid_types","calls","tasks"].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
+  ["beneficiaries","batches","batch_items","aid_types","calls","tasks",...Object.keys(MONEY_TABLES)].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
   rt.subscribe();
 }
 
@@ -442,6 +451,7 @@ function demoGo(to){
 function setWho(){
   $("#who").innerHTML = `<b style="background:${navigator.onLine?"#2E9E6B":"var(--red)"}"></b>${esc((me?.full_name||"").split(" ")[0])}<br>${ROLE_AR[role]}${realRole!==role?" (معاينة)":""}`;
   document.querySelectorAll("[data-mgr]").forEach(b => b.hidden = !isMgr());
+  document.querySelectorAll("[data-money]").forEach(b => b.hidden = !seeMoney());
 }
 function netBanner(){
   const q = readQ().length, off = !navigator.onLine;
@@ -462,7 +472,7 @@ function render(){
   const v=$("#view");
   if(!loaded){ v.innerHTML=loadError?`<div class="state">${ic("offline","big")}<h2>مقدرناش نحمّل البيانات</h2><p class="sub">${esc(errMsg(loadError))}</p><button class="btn pri" id="retry">${ic("refresh")}جرّب تاني</button></div>`:`<div class="empty" role="status"><span class="spin" aria-hidden="true"></span> جاري تحميل البيانات…</div>`; const r=$("#retry"); if(r) r.onclick=()=>{ loadError=null; render(); reload(); }; return; }
   if(simple()){ v.innerHTML=vSimple(); bindSimple(); return; }
-  v.innerHTML = view==="home"?vDash(): view==="people"?vPeople(): view==="batches"?vBatches(): view==="reports"?vReports(): vSettings();
+  v.innerHTML = view==="home"?vDash(): view==="people"?vPeople(): view==="batches"?vBatches(): view==="reports"?vReports(): view==="money"?vMoney(): vSettings();
   bindView();
 }
 function batchRow(k){
@@ -701,6 +711,7 @@ function bindView(){
   on("#logout","onclick",logout);
   on("#myPin","onclick",changeMyPin);
   on("#installApp","onclick",installApp);
+  if(view==="money") bindMoney(v);
   v.querySelectorAll("[data-restorek]").forEach(el=>el.onclick=async()=>{ const id=el.dataset.restorek; el.disabled=true;
     if(await run(sb.from("batches").update({archived_at:null,archived_by:null}).eq("id",id),"الكشف رجع ✓")){ await logIt("batch",id,"إرجاع من الأرشيف"); refreshBatch(id); } else el.disabled=false; });
   v.querySelectorAll("[data-restoret]").forEach(el=>el.onclick=async()=>{ el.disabled=true;
@@ -1426,6 +1437,7 @@ function openType(id){
       <label class="f">الوحدة<input type="text" id="t_unit" value="${esc(t.unit)}" list="units"><datalist id="units"><option value="جنيه"><option value="شنطة"><option value="كجم"><option value="قطعة"><option value="وجبة"></datalist></label>
       <label class="f">القيمة الافتراضية للحالة<input type="number" id="t_amt" value="${t.amount}"></label>
       <label class="f">لا يتكرر لنفس الحالة خلال (شهر)<input type="number" min="0" id="t_cd" value="${t.cooldown}"></label>
+      <label class="f">الصنف في المخزن (للعيني)<select id="t_item"><option value="">— مش مربوط —</option>${items().map(i=>`<option value="${i.id}" ${t.itemId===i.id?"selected":""}>${esc(i.name)}</option>`).join("")}</select></label>
       <label class="f">شكل الكشف<select id="t_tpl"><option value="cash" ${t.template==="cash"?"selected":""}>نقدي: رقم قومي + مبلغ + توقيع</option><option value="kind" ${t.template==="kind"?"selected":""}>عيني: أفراد الأسرة + كمية + توقيع</option></select></label>
     </div>
     <div class="sub">مين يدخل في النوع ده؟ (لو ما اخترتش حاجة، كل الحالات النشطة)</div>
@@ -1434,7 +1446,7 @@ function openType(id){
     <div class="bar"><button class="btn pri" id="t_save">${ic("save")}حفظ</button>${id?`<button class="btn danger" id="t_del">${ic("archive")}أرشفة النوع</button>`:""}</div>`, s=>{
     s.querySelector("#t_save").onclick=async()=>{
       const name=s.querySelector("#t_name").value.trim(); if(!name){toast("اكتب اسم النوع"); return;}
-      const rec={id:id||("t"+Date.now().toString(36)),name,unit:s.querySelector("#t_unit").value.trim()||"جنيه",amount:+s.querySelector("#t_amt").value||0,cooldown:Math.max(0,+s.querySelector("#t_cd").value||0),template:s.querySelector("#t_tpl").value,case_types:[...s.querySelectorAll(".checks input:checked")].map(i=>i.value),sort:t.order??99};
+      const rec={id:id||("t"+Date.now().toString(36)),name,unit:s.querySelector("#t_unit").value.trim()||"جنيه",amount:+s.querySelector("#t_amt").value||0,cooldown:Math.max(0,+s.querySelector("#t_cd").value||0),template:s.querySelector("#t_tpl").value,item_id:s.querySelector("#t_item").value||null,case_types:[...s.querySelectorAll(".checks input:checked")].map(i=>i.value),sort:t.order??99};
       if(await run(sb.from("aid_types").upsert(rec),"تم الحفظ ✓")){ closeSheet(); refreshTable("aid_types"); }
     };
     const d=s.querySelector("#t_del"); if(d) d.onclick=async()=>{ if(await ask("النوع هيختفي من الكشوف الجديدة، والكشوف القديمة بتاعته تفضل زي ما هي.",{title:"أرشفة نوع المساعدة؟",ok:"أرشفة"})&&await run(sb.from("aid_types").update({archived_at:new Date().toISOString()}).eq("id",id),"اتأرشف ✓")){ closeSheet(); refreshTable("aid_types"); } };
@@ -1744,7 +1756,7 @@ function openBatch(id, giveMode){
   const mount=s=>{
     const q=x=>s.querySelector(x);
     if(q("#b_ok")) q("#b_ok").onclick=async()=>{ if(!isMgr()&&!await ask("بعد الاعتماد مش هتقدر تعدّل الأسامي أو الكميات — التعديل هيبقى للمدير بس.",{title:"اعتماد الكشف؟",ok:"اعتماد"})) return; upd({status:"معتمد",approved_at:new Date().toISOString(),approved_by:me.id},`اعتماد الكشف${isMgr()?"":` (${me.full_name||"موظف"})`}`,"اتعتمد ✓"); };
-    if(q("#b_paid")) q("#b_paid").onclick=()=>upd({status:"مصروف",paid_at:new Date().toISOString()},"إغلاق الكشف — تم الصرف","تمام ✓");
+    if(q("#b_paid")) q("#b_paid").onclick=async()=>{ await upd({status:"مصروف",paid_at:new Date().toISOString()},"إغلاق الكشف — تم الصرف","تمام ✓"); await settleBatch(K.get(id)); };
     if(q("#b_back")) q("#b_back").onclick=()=>upd({status:"مسودة"},"إرجاع لمسودة");
     s.querySelectorAll("[data-only]").forEach(el=>el.onclick=()=>{ only=el.dataset.only; refreshSheet(); });
     bindCalls(s, ()=>refreshSheet());
@@ -1885,6 +1897,260 @@ function phoneSheet(title, rows, hasDone, batchId){
     q("#ph_x").onclick=()=>{ const rs=[["م","رقم الحالة","الاسم",mode==="wa"?"واتساب":"التليفون"]]; ok.forEach((r,i)=>rs.push([i+1,r.code,r.name,cleanPhone(r.phone)])); xlsx({"أرقام":rs},`أرقام ${title}.xlsx`,[5,10,32,16]); };
   };
   sheet(title, draw(), mount);
+}
+
+/* ================= المخزن والحسابات =================
+   Donations, accounts (ledger) and stock. A cash donation goes into the ledger by itself, an in-kind one into stock;
+   closing a list («تم الصرف») records its money or stock going out. Nothing is deleted — a wrong entry is cancelled. */
+const ACCOUNTS=["الخزينة","البنك"];
+const CATS_IN=["تبرعات","اشتراكات","منح","رصيد أول المدة","أخرى"], CATS_OUT=["مساعدات نقدية","كفالات","شراء مواد","إيجار","كهرباء ومياه","مرتبات","نثريات","أخرى"];
+const METHODS=["كاش","تحويل بنكي","شيك","فودافون كاش","إنستاباي"];
+let mv={ tab:"donations", month:curMonth, q:"" };
+const live = r => !r.cancelled_at && !r.archived_at;
+const balances = memo(() => { const o={}; ACCOUNTS.forEach(a=>o[a]=0); for(const r of LG.values()) if(live(r)){ o[r.account]=(o[r.account]||0)+(r.direction==="in"?1:-1)*(+r.amount); } return o; });
+const stockOf = memo(() => { const m=new Map(); for(const r of SM.values()) if(live(r)) m.set(r.item_id,(m.get(r.item_id)||0)+(+r.qty)); return m; });
+const items = () => [...IT.values()].filter(i=>!i.archived_at).sort((a,b)=>a.name.localeCompare(b.name,"ar"));
+const donors = () => [...DN.values()].filter(d=>!d.archived_at).sort((a,b)=>a.name.localeCompare(b.name,"ar"));
+const lowStock = memo(() => items().filter(i=>(stockOf().get(i.id)||0) < (+i.min_qty||0)));
+const money = n => `${num(Math.round(n*100)/100)} ج`;
+const byDate = (a,b) => (b.date||"").localeCompare(a.date||"") || (b.created_at||"").localeCompare(a.created_at||"");
+async function ins(table, row){ const { data, error } = await sb.from(table).insert(row).select().single(); if(error) throw error; MONEY_TABLES[table].set(data.id, data); return data; }
+async function cancelRow(table, id){ const { data, error } = await sb.from(table).update({ cancelled_at:new Date().toISOString(), cancelled_by:me.id }).eq("id",id).select().single(); if(error) throw error; MONEY_TABLES[table].set(id, data); }
+
+function vMoney(){
+  const tabs=[["donations","التبرعات"],["accounts","الحسابات"],["stock","المخزن"],["donors","المتبرعين"]];
+  const bal=balances(), low=lowStock();
+  return `<h2>المخزن والحسابات</h2>
+  <div class="bal">${ACCOUNTS.map(a=>`<div class="${bal[a]<0?"neg":""}"><span>رصيد ${a}</span><strong>${money(bal[a]||0)}</strong></div>`).join("")}
+    <div><span>أصناف في المخزن</span><strong>${num(items().length)}</strong></div><div class="${low.length?"neg":""}"><span>أصناف قربت تخلص</span><strong>${num(low.length)}</strong></div></div>
+  <div class="seg">${tabs.map(([k,l])=>`<button class="${mv.tab===k?"on":""}" data-mtab="${k}">${l}</button>`).join("")}</div>
+  ${mv.tab==="donations"?vDonations():mv.tab==="accounts"?vAccounts():mv.tab==="stock"?vStock():vDonors()}`;
+}
+const monthPick = () => `<input type="month" id="m_month" value="${mv.month}" style="flex:0 0 180px" aria-label="الشهر">`;
+function vDonations(){
+  const list=[...DO.values()].filter(d=>(d.date||"").startsWith(mv.month)).sort(byDate);
+  const cash=list.filter(d=>live(d)&&d.kind==="نقدي").reduce((a,d)=>a+(+d.amount),0), kindN=list.filter(d=>live(d)&&d.kind==="عيني").length;
+  return `<div class="row" style="margin:10px 0">${monthPick()}<span class="sub grow">${num(list.filter(live).length)} تبرع · نقدي ${money(cash)} · عيني ${num(kindN)}</span>
+    ${canMoney()?`<button class="btn pri" id="m_newDon">${ic("plus")}تبرع جديد</button>`:""}<button class="btn sm" id="m_xDon">Excel</button></div>
+  <div class="tbl"><table><thead><tr><th>إيصال</th><th>التاريخ</th><th>المتبرع</th><th>النوع</th><th>القيمة</th><th>لـ</th><th></th></tr></thead><tbody>
+  ${list.map(d=>`<tr class="${live(d)?"":"cancel"}"><td class="n">${d.receipt_no}</td><td class="n">${dLabel(d.date)}</td><td>${esc(d.donor_name||"فاعل خير")}</td><td>${d.kind}</td>
+    <td class="n">${d.kind==="نقدي"?money(+d.amount)+` <span class="sub">${esc(d.method)}</span>`:`${num(+d.qty)} ${esc(IT.get(d.item_id)?.unit||"")} ${esc(IT.get(d.item_id)?.name||"")}`}</td><td>${esc(d.purpose||"")}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-rcpt="${d.id}">${ic("printer")}إيصال</button>${live(d)&&isMgr()?`<button class="btn sm danger" data-cdon="${d.id}" aria-label="إلغاء">×</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="empty">مفيش تبرعات في ${mLabel(mv.month)}</td></tr>`}
+  </tbody></table></div>`;
+}
+function vAccounts(){
+  const all=[...LG.values()].filter(r=>(r.date||"").startsWith(mv.month)).sort(byDate), L=all.filter(live);
+  const inT=L.filter(r=>r.direction==="in").reduce((a,r)=>a+(+r.amount),0), outT=L.filter(r=>r.direction==="out").reduce((a,r)=>a+(+r.amount),0);
+  const byCat=dir=>{ const m={}; L.filter(r=>r.direction===dir&&r.category!=="تحويل").forEach(r=>m[r.category||"أخرى"]=(m[r.category||"أخرى"]||0)+(+r.amount)); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+  return `<div class="row" style="margin:10px 0">${monthPick()}<span class="grow"></span>
+    ${canMoney()?`<button class="btn pri" id="m_in">${ic("plus")}داخل</button><button class="btn" id="m_out">${ic("plus")}خارج</button><button class="btn" id="m_tr">تحويل بين الخزينة والبنك</button>`:""}<button class="btn sm" id="m_xLg">Excel</button></div>
+  <div class="facts"><div><span>داخل ${mLabel(mv.month)}</span><strong>${money(inT)}</strong></div><div><span>خارج</span><strong>${money(outT)}</strong></div><div><span>الصافي</span><strong>${money(inT-outT)}</strong></div></div>
+  <div class="dash-grid"><section><h4>الداخل حسب البند</h4><div class="tbl"><table><tbody>${byCat("in").map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n in">${money(v)}</td></tr>`).join("")||`<tr><td class="empty">—</td></tr>`}</tbody></table></div></section>
+    <section><h4>الخارج حسب البند</h4><div class="tbl"><table><tbody>${byCat("out").map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n out">${money(v)}</td></tr>`).join("")||`<tr><td class="empty">—</td></tr>`}</tbody></table></div></section></div>
+  <h4>كل الحركات</h4>
+  <div class="tbl"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من / لـ</th><th>الحساب</th><th>داخل</th><th>خارج</th><th>ملاحظة</th><th></th></tr></thead><tbody>
+  ${all.map(r=>`<tr class="${live(r)?"":"cancel"}"><td class="n">${dLabel(r.date)}</td><td>${esc(r.category)}</td><td>${esc(r.party)}</td><td>${esc(r.account)}</td>
+    <td class="n in">${r.direction==="in"?money(+r.amount):""}</td><td class="n out">${r.direction==="out"?money(+r.amount):""}</td><td class="why">${esc(r.note)}${r.donation_id?" · من تبرع":""}${r.batch_id?" · من كشف":""}</td>
+    <td>${live(r)&&isMgr()&&!r.donation_id?`<button class="btn sm danger" data-clg="${r.id}" aria-label="إلغاء">×</button>`:""}</td></tr>`).join("")||`<tr><td colspan="8" class="empty">مفيش حركات في ${mLabel(mv.month)}</td></tr>`}
+  </tbody></table></div>`;
+}
+function vStock(){
+  const st=stockOf();
+  return `<div class="row" style="margin:10px 0"><span class="grow"></span>${canMoney()?`<button class="btn pri" id="m_move">${ic("plus")}حركة مخزن</button><button class="btn" id="m_item">${ic("plus")}صنف جديد</button>`:""}</div>
+  <div class="tbl"><table><thead><tr><th>الصنف</th><th>الموجود</th><th>أقل كمية</th><th></th><th></th></tr></thead><tbody>
+  ${items().map(i=>{ const q=st.get(i.id)||0, low=q<(+i.min_qty||0); return `<tr><td><b>${esc(i.name)}</b></td><td class="n ${low?"out":""}">${num(q)} ${esc(i.unit)}</td><td class="n">${num(+i.min_qty)}</td>
+    <td>${low?`<span class="chip red">قرب يخلص</span>`:`<span class="chip">كفاية</span>`}</td><td><button class="btn sm" data-item="${i.id}">الحركات</button></td></tr>`; }).join("")||`<tr><td colspan="5" class="empty">مفيش أصناف</td></tr>`}
+  </tbody></table></div>
+  <p class="sub">التبرع العيني بيدخل المخزن لوحده، ولما كشف عيني يتقفل «تم الصرف» الكمية اللي اتسلمت بتخرج لوحدها.</p>`;
+}
+function donorStats(d){
+  const ds=[...DO.values()].filter(x=>live(x)&&(x.donor_id===d.id||(!x.donor_id&&norm(x.donor_name)===norm(d.name))));
+  const lists=batches().filter(k=>k.donor&&norm(k.donor)===norm(d.name));
+  return { ds, cash:ds.filter(x=>x.kind==="نقدي").reduce((a,x)=>a+(+x.amount),0), kind:ds.filter(x=>x.kind==="عيني"), lists,
+    fams:new Set(lists.flatMap(k=>k.items.filter(i=>i.received).map(i=>i.bid))).size };
+}
+function vDonors(){
+  return `<div class="row" style="margin:10px 0"><span class="grow"></span>${canMoney()?`<button class="btn pri" id="m_donor">${ic("plus")}متبرع جديد</button>`:""}</div>
+  <div class="list">${donors().map(d=>{ const x=donorStats(d); return `<button class="item" data-donor="${d.id}"><span class="grow"><span class="nm">${esc(d.name)}</span> <span class="chip ${d.kind==="جهة"?"blue":""}">${d.kind}</span><br>
+    <span class="sub">${num(x.ds.length)} تبرع${x.cash?` · نقدي ${money(x.cash)}`:""}${x.kind.length?` · ${num(x.kind.length)} عيني`:""}${x.lists.length?` · ${num(x.lists.length)} كشف · ${num(x.fams)} أسرة استلمت`:""}</span></span><span aria-hidden="true">‹</span></button>`; }).join("")||`<div class="empty">مفيش متبرعين لسه — بيتضافوا لوحدهم مع أول تبرع</div>`}</div>`;
+}
+function bindMoney(v){
+  const on=(sel,fn)=>{ const el=v.querySelector(sel); if(el) el.onclick=fn; };
+  v.querySelectorAll("[data-mtab]").forEach(el=>el.onclick=()=>{ mv.tab=el.dataset.mtab; render(); });
+  const mm=v.querySelector("#m_month"); if(mm) mm.onchange=()=>{ if(mm.value){ mv.month=mm.value; render(); } };
+  on("#m_newDon",()=>donationSheet()); on("#m_in",()=>entrySheet("in")); on("#m_out",()=>entrySheet("out")); on("#m_tr",()=>transferSheet());
+  on("#m_move",()=>moveSheet()); on("#m_item",()=>itemSheet()); on("#m_donor",()=>donorSheet());
+  v.querySelectorAll("[data-rcpt]").forEach(el=>el.onclick=()=>doPrint(receiptHTML(DO.get(el.dataset.rcpt))));
+  v.querySelectorAll("[data-item]").forEach(el=>el.onclick=()=>itemHistory(el.dataset.item));
+  v.querySelectorAll("[data-donor]").forEach(el=>el.onclick=()=>donorView(el.dataset.donor));
+  v.querySelectorAll("[data-cdon]").forEach(el=>el.onclick=async()=>{ const d=DO.get(el.dataset.cdon);
+    if(!await ask(`إيصال ${d.receipt_no} (${d.donor_name||"فاعل خير"}) هيتلغي، ومعاه ${d.kind==="نقدي"?"الفلوس اللي دخلت الحسابات":"الكمية اللي دخلت المخزن"}. هيفضل في السجل مشطوب.`,{title:"إلغاء التبرع؟",ok:"إلغاء التبرع",danger:true})) return;
+    try{ await cancelRow("donations",d.id); for(const r of LG.values()) if(r.donation_id===d.id&&live(r)) await cancelRow("ledger",r.id); for(const r of SM.values()) if(r.donation_id===d.id&&live(r)) await cancelRow("stock_moves",r.id); changed(); toast("اتلغى ✓"); }catch(e){ toast(errMsg(e)); } });
+  v.querySelectorAll("[data-clg]").forEach(el=>el.onclick=async()=>{ if(!await ask("الحركة دي هتتلغي وتفضل في السجل مشطوبة.",{title:"إلغاء الحركة؟",ok:"إلغاء",danger:true})) return; try{ await cancelRow("ledger",el.dataset.clg); changed(); }catch(e){ toast(errMsg(e)); } });
+  on("#m_xDon",()=>{ const rows=[["إيصال","التاريخ","المتبرع","النوع","المبلغ","الصنف","الكمية","طريقة الدفع","الحساب","لـ","ملاحظات","ملغي"]];
+    [...DO.values()].filter(d=>(d.date||"").startsWith(mv.month)).sort(byDate).forEach(d=>rows.push([d.receipt_no,d.date,d.donor_name,d.kind,d.kind==="نقدي"?+d.amount:"",IT.get(d.item_id)?.name||"",d.kind==="عيني"?+d.qty:"",d.method,d.account,d.purpose,d.notes,d.cancelled_at?"ملغي":""]));
+    xlsx({"التبرعات":rows},`التبرعات ${mLabel(mv.month)}.xlsx`); });
+  on("#m_xLg",()=>{ const rows=[["التاريخ","البند","من / لـ","الحساب","داخل","خارج","ملاحظة","ملغي"]];
+    [...LG.values()].filter(r=>(r.date||"").startsWith(mv.month)).sort(byDate).forEach(r=>rows.push([r.date,r.category,r.party,r.account,r.direction==="in"?+r.amount:"",r.direction==="out"?+r.amount:"",r.note,r.cancelled_at?"ملغي":""]));
+    xlsx({"الحسابات":rows},`الحسابات ${mLabel(mv.month)}.xlsx`); });
+}
+function donationSheet(){
+  const its=items();
+  sheet("تبرع جديد",`
+    <div class="grid2">
+      <label class="f">اسم المتبرع (فاضي = فاعل خير)<input type="text" id="d_name" list="d_donors" autocomplete="off"><datalist id="d_donors">${donors().map(d=>`<option value="${esc(d.name)}">`).join("")}</datalist></label>
+      <label class="f">فرد ولا جهة<select id="d_dk"><option>فرد</option><option>جهة</option></select></label>
+      <label class="f">التاريخ<input type="date" id="d_date" value="${today}"></label>
+      <label class="f">نوع التبرع<select id="d_kind"><option>نقدي</option><option>عيني</option></select></label>
+    </div>
+    <div id="d_cash" class="grid2">
+      <label class="f">المبلغ (جنيه)<input type="number" id="d_amt" min="0" step="any"></label>
+      <label class="f">طريقة الدفع<select id="d_meth">${METHODS.map(m=>`<option>${m}</option>`).join("")}</select></label>
+      <label class="f">يدخل على<select id="d_acc">${ACCOUNTS.map(a=>`<option>${a}</option>`).join("")}</select></label>
+    </div>
+    <div id="d_kindbox" class="grid2" hidden>
+      <label class="f">الصنف<select id="d_item">${its.map(i=>`<option value="${i.id}">${esc(i.name)} (${esc(i.unit)})</option>`).join("")}<option value="__new">+ صنف جديد…</option></select></label>
+      <label class="f">الكمية<input type="number" id="d_qty" min="0" step="any"></label>
+      <label class="f" id="d_newitem" hidden>اسم الصنف الجديد ووحدته<input type="text" id="d_inm" placeholder="مثال: زيت — زجاجة"></label>
+    </div>
+    <label class="f">التبرع ده لـ (اختياري)<input type="text" id="d_purpose" list="d_purp" placeholder="مثال: كفالة أيتام، شنط رمضان"><datalist id="d_purp">${[...types().map(t=>t.name),"عام"].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></label>
+    <label class="f">ملاحظات<input type="text" id="d_notes"></label>
+    <div class="bar"><button class="btn pri" id="d_save">${ic("save")}حفظ</button><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="d_print" checked style="width:20px;height:20px"> اطبع الإيصال</label></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#d_kind").onchange=()=>{ const k=q("#d_kind").value==="عيني"; q("#d_cash").hidden=k; q("#d_kindbox").hidden=!k; };
+    q("#d_item").onchange=()=>{ q("#d_newitem").hidden=q("#d_item").value!=="__new"; };
+    q("#d_name").oninput=()=>{ const d=donors().find(x=>x.name===q("#d_name").value.trim()); if(d) q("#d_dk").value=d.kind; };
+    q("#d_save").onclick=async()=>{
+      const kind=q("#d_kind").value, name=q("#d_name").value.trim(), amount=+q("#d_amt").value||0, qty=+q("#d_qty").value||0;
+      if(kind==="نقدي"&&amount<=0){ toast("اكتب المبلغ"); return; } if(kind==="عيني"&&qty<=0){ toast("اكتب الكمية"); return; }
+      q("#d_save").disabled=true;
+      try{
+        let donor=name?donors().find(x=>norm(x.name)===norm(name)):null;
+        if(name&&!donor) donor=await ins("donors",{ name, kind:q("#d_dk").value, created_by:me.id });
+        let itemId=null;
+        if(kind==="عيني"){ itemId=q("#d_item").value;
+          if(itemId==="__new"){ const [nm,un]=q("#d_inm").value.split(/[—\-–]/).map(x=>x.trim()); if(!nm){ toast("اكتب اسم الصنف"); q("#d_save").disabled=false; return; } itemId=(await ins("items",{ name:nm, unit:un||"قطعة" })).id; } }
+        const d=await ins("donations",{ date:q("#d_date").value||today, donor_id:donor?.id||null, donor_name:name||"فاعل خير", kind, amount:kind==="نقدي"?amount:0, item_id:itemId, qty:kind==="عيني"?qty:0,
+          method:q("#d_meth").value, account:q("#d_acc").value, purpose:q("#d_purpose").value.trim(), notes:q("#d_notes").value.trim(), created_by:me.id });
+        if(kind==="نقدي") await ins("ledger",{ date:d.date, direction:"in", amount, account:d.account, category:"تبرعات", party:d.donor_name, donation_id:d.id, note:[d.purpose,d.method].filter(Boolean).join(" · "), created_by:me.id });
+        else await ins("stock_moves",{ item_id:itemId, date:d.date, qty, reason:"تبرع", donation_id:d.id, note:d.donor_name, created_by:me.id });
+        changed(); closeSheet(); toast(`اتسجل ✓ إيصال رقم ${d.receipt_no}`); if(q("#d_print").checked) doPrint(receiptHTML(d));
+      }catch(e){ q("#d_save").disabled=false; toast(errMsg(e)); }
+    };
+  });
+}
+function entrySheet(dir){
+  const cats=dir==="in"?CATS_IN:CATS_OUT;
+  sheet(dir==="in"?"فلوس داخلة":"فلوس خارجة",`
+    <div class="grid2">
+      <label class="f">المبلغ (جنيه)<input type="number" id="e_amt" min="0" step="any"></label>
+      <label class="f">التاريخ<input type="date" id="e_date" value="${today}"></label>
+      <label class="f">البند<input type="text" id="e_cat" list="e_cats" value="${cats[0]}"><datalist id="e_cats">${[...new Set([...cats,...[...LG.values()].filter(r=>r.direction===dir).map(r=>r.category)])].map(c=>`<option value="${esc(c)}">`).join("")}</datalist></label>
+      <label class="f">${dir==="in"?"من":"لـ"}<input type="text" id="e_party" placeholder="${dir==="in"?"مثال: منحة الوزارة":"مثال: مورد الشنط"}"></label>
+      <label class="f">الحساب<select id="e_acc">${ACCOUNTS.map(a=>`<option>${a}</option>`).join("")}</select></label>
+    </div>
+    <label class="f">ملاحظة<input type="text" id="e_note"></label>
+    <div class="bar"><button class="btn pri" id="e_save">${ic("save")}حفظ</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#e_save").onclick=async()=>{ const amount=+q("#e_amt").value||0; if(amount<=0){ toast("اكتب المبلغ"); return; }
+      if(dir==="out"&&amount>(balances()[q("#e_acc").value]||0)&&!await ask(`الرصيد في ${q("#e_acc").value} ${money(balances()[q("#e_acc").value]||0)} بس.`,{title:"الرصيد مش مكفي",ok:"سجّل برضو"})) return;
+      q("#e_save").disabled=true;
+      try{ await ins("ledger",{ date:q("#e_date").value||today, direction:dir, amount, account:q("#e_acc").value, category:q("#e_cat").value.trim()||"أخرى", party:q("#e_party").value.trim(), note:q("#e_note").value.trim(), created_by:me.id }); changed(); closeSheet(); toast("اتسجل ✓"); }
+      catch(e){ q("#e_save").disabled=false; toast(errMsg(e)); } };
+  });
+}
+function transferSheet(){
+  sheet("تحويل بين الخزينة والبنك",`<div class="grid2"><label class="f">من<select id="t_from">${ACCOUNTS.map(a=>`<option>${a}</option>`).join("")}</select></label><label class="f">المبلغ<input type="number" id="t_amt" min="0" step="any"></label>
+    <label class="f">التاريخ<input type="date" id="t_date" value="${today}"></label></div><div class="bar"><button class="btn pri" id="t_go">تحويل</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#t_go").onclick=async()=>{ const amount=+q("#t_amt").value||0, from=q("#t_from").value, to=ACCOUNTS.find(a=>a!==from); if(amount<=0){ toast("اكتب المبلغ"); return; }
+      q("#t_go").disabled=true; const date=q("#t_date").value||today;
+      try{ await ins("ledger",{ date, direction:"out", amount, account:from, category:"تحويل", party:to, note:`تحويل لـ${to}`, created_by:me.id });
+        await ins("ledger",{ date, direction:"in", amount, account:to, category:"تحويل", party:from, note:`تحويل من ${from}`, created_by:me.id }); changed(); closeSheet(); toast("اتحول ✓"); }
+      catch(e){ q("#t_go").disabled=false; toast(errMsg(e)); } };
+  });
+}
+function itemSheet(){
+  sheet("صنف جديد في المخزن",`<div class="grid2"><label class="f">اسم الصنف<input type="text" id="i_n" placeholder="مثال: زيت"></label><label class="f">الوحدة<input type="text" id="i_u" list="units" value="قطعة"></label>
+    <label class="f">نبّهني لما يقل عن<input type="number" id="i_min" min="0" value="0"></label><label class="f">الموجود دلوقتي (جرد أول مرة)<input type="number" id="i_q" min="0" value="0"></label></div>
+    <div class="bar"><button class="btn pri" id="i_go">${ic("save")}حفظ</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#i_go").onclick=async()=>{ const name=q("#i_n").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } q("#i_go").disabled=true;
+      try{ const it=await ins("items",{ name, unit:q("#i_u").value.trim()||"قطعة", min_qty:+q("#i_min").value||0 }); const q0=+q("#i_q").value||0;
+        if(q0) await ins("stock_moves",{ item_id:it.id, qty:q0, reason:"جرد", note:"رصيد أول مدة", created_by:me.id }); changed(); closeSheet(); toast("اتضاف ✓"); }
+      catch(e){ q("#i_go").disabled=false; toast(errMsg(e)); } };
+  });
+}
+function moveSheet(itemId){
+  const its=items(); if(!its.length){ toast("ضيف صنف الأول"); return; }
+  sheet("حركة مخزن",`<div class="grid2">
+      <label class="f">الصنف<select id="s_it">${its.map(i=>`<option value="${i.id}" ${i.id===itemId?"selected":""}>${esc(i.name)} — موجود ${num(stockOf().get(i.id)||0)} ${esc(i.unit)}</option>`).join("")}</select></label>
+      <label class="f">داخل ولا خارج<select id="s_dir"><option value="in">داخل المخزن</option><option value="out">خارج من المخزن</option></select></label>
+      <label class="f">الكمية<input type="number" id="s_q" min="0" step="any"></label>
+      <label class="f">السبب<select id="s_r"><option>شراء</option><option>تبرع</option><option>صرف</option><option>تالف</option><option>جرد (تصحيح)</option></select></label>
+      <label class="f">التاريخ<input type="date" id="s_d" value="${today}"></label>
+      <label class="f" id="s_costbox">تكلفة الشراء (اختياري — بتتسجل مصروف)<input type="number" id="s_cost" min="0" step="any"></label>
+    </div><label class="f">ملاحظة<input type="text" id="s_note"></label><div class="bar"><button class="btn pri" id="s_go">${ic("save")}حفظ</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    const sync=()=>{ q("#s_costbox").hidden=!(q("#s_dir").value==="in"&&q("#s_r").value==="شراء"); }; q("#s_dir").onchange=()=>{ q("#s_r").value=q("#s_dir").value==="in"?"شراء":"صرف"; sync(); }; q("#s_r").onchange=sync; sync();
+    q("#s_go").onclick=async()=>{ const n=+q("#s_q").value||0; if(n<=0){ toast("اكتب الكمية"); return; }
+      const it=IT.get(q("#s_it").value), out=q("#s_dir").value==="out", have=stockOf().get(it.id)||0;
+      if(out&&n>have&&!await ask(`الموجود ${num(have)} ${it.unit} بس.`,{title:"الكمية مش موجودة",ok:"سجّل برضو"})) return;
+      q("#s_go").disabled=true; const date=q("#s_d").value||today, cost=+q("#s_cost").value||0;
+      try{ await ins("stock_moves",{ item_id:it.id, date, qty:out?-n:n, reason:q("#s_r").value, note:q("#s_note").value.trim(), created_by:me.id });
+        if(!out&&q("#s_r").value==="شراء"&&cost>0) await ins("ledger",{ date, direction:"out", amount:cost, account:"الخزينة", category:"شراء مواد", party:"", note:`${num(n)} ${it.unit} ${it.name}`, created_by:me.id });
+        changed(); closeSheet(); toast("اتسجل ✓"); }catch(e){ q("#s_go").disabled=false; toast(errMsg(e)); } };
+  });
+}
+function itemHistory(id){
+  const it=IT.get(id), moves=[...SM.values()].filter(m=>m.item_id===id).sort(byDate);
+  sheet(`${it.name} — موجود ${num(stockOf().get(id)||0)} ${it.unit}`,`
+    ${canMoney()?`<div class="bar"><button class="btn pri" id="h_mv">${ic("plus")}حركة</button></div>`:""}
+    <div class="tbl"><table><thead><tr><th>التاريخ</th><th>داخل</th><th>خارج</th><th>السبب</th><th>ملاحظة</th></tr></thead><tbody>
+    ${moves.map(m=>`<tr class="${live(m)?"":"cancel"}"><td class="n">${dLabel(m.date)}</td><td class="n in">${+m.qty>0?num(+m.qty):""}</td><td class="n out">${+m.qty<0?num(-m.qty):""}</td><td>${esc(m.reason)}</td><td class="why">${esc(m.note)}${m.batch_id&&K.get(m.batch_id)?` · ${esc(K.get(m.batch_id).title)}`:""}</td></tr>`).join("")||`<tr><td colspan="5" class="empty">مفيش حركات</td></tr>`}
+    </tbody></table></div>`, s=>{ const b=s.querySelector("#h_mv"); if(b) b.onclick=()=>moveSheet(id); });
+}
+function donorSheet(){
+  sheet("متبرع جديد",`<div class="grid2"><label class="f">الاسم<input type="text" id="o_n"></label><label class="f">فرد ولا جهة<select id="o_k"><option>فرد</option><option>جهة</option></select></label>
+    <label class="f">التليفون<input type="text" id="o_p" inputmode="tel" dir="ltr"></label></div><label class="f">ملاحظات<input type="text" id="o_notes"></label><div class="bar"><button class="btn pri" id="o_go">${ic("save")}حفظ</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#o_go").onclick=async()=>{ const name=q("#o_n").value.trim(); if(!name){ toast("اكتب الاسم"); return; } q("#o_go").disabled=true;
+      try{ await ins("donors",{ name, kind:q("#o_k").value, phone:q("#o_p").value.trim()||null, notes:q("#o_notes").value.trim(), created_by:me.id }); changed(); closeSheet(); toast("اتضاف ✓"); }catch(e){ q("#o_go").disabled=false; toast(errMsg(e)); } };
+  });
+}
+// A donor's report: what they gave, and what was handed out from the lists carrying their name (totals only, no family names).
+function donorView(id){
+  const d=DN.get(id), x=donorStats(d);
+  const body=`<div class="facts"><div><span>عدد التبرعات</span><strong>${num(x.ds.length)}</strong></div><div><span>نقدي</span><strong>${money(x.cash)}</strong></div><div><span>كشوف باسمه</span><strong>${num(x.lists.length)}</strong></div><div><span>أسر استلمت</span><strong>${num(x.fams)}</strong></div></div>
+    <h4>التبرعات</h4><div class="tbl"><table><thead><tr><th>التاريخ</th><th>إيصال</th><th>القيمة</th><th>لـ</th></tr></thead><tbody>${x.ds.sort(byDate).map(v=>`<tr><td class="n">${dLabel(v.date)}</td><td class="n">${v.receipt_no}</td><td class="n">${v.kind==="نقدي"?money(+v.amount):`${num(+v.qty)} ${esc(IT.get(v.item_id)?.unit||"")} ${esc(IT.get(v.item_id)?.name||"")}`}</td><td>${esc(v.purpose)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">—</td></tr>`}</tbody></table></div>
+    <h4>اتوزع إيه</h4><div class="tbl"><table><thead><tr><th>الكشف</th><th>أسر استلمت</th><th>الكمية</th></tr></thead><tbody>${x.lists.map(k=>{ const r=k.items.filter(i=>i.received); return `<tr><td>${esc(k.title)}</td><td class="n">${num(r.length)} من ${num(k.items.length)}</td><td class="n">${num(r.reduce((a,i)=>a+(+i.value||0),0))} ${esc(k.unit)}</td></tr>`; }).join("")||`<tr><td colspan="3" class="empty">مفيش كشوف مكتوب عليها اسمه (اكتب اسمه في «الجهة المتبرعة» في الكشف)</td></tr>`}</tbody></table></div>
+    <div class="bar"><button class="btn" id="dv_print">${ic("printer")}طباعة تقرير المتبرع</button></div>`;
+  sheet(d.name, body, s=>{ s.querySelector("#dv_print").onclick=()=>doPrint(`<div class="ps">${hdr()}<h1>تقرير المتبرع: ${esc(d.name)}</h1><div class="mo">حتى ${dLabel(today)}</div>${body.replace(/<div class="bar">[\s\S]*$/,"")}${signsHTML()}</div>`); });
+}
+function receiptHTML(d){
+  const it=IT.get(d.item_id);
+  return `<div class="ps">${hdr()}<h1>إيصال استلام تبرع رقم ${d.receipt_no}</h1><div class="mo">${dLabel(d.date)}${d.cancelled_at?" — <b>ملغي</b>":""}</div>
+    <table class="kv"><tbody><tr><td>استلمنا من</td><td class="l">${esc(d.donor_name||"فاعل خير")}</td></tr>
+    <tr><td>${d.kind==="نقدي"?"مبلغ وقدره":"تبرع عيني"}</td><td class="l"><b>${d.kind==="نقدي"?`${num(+d.amount)} جنيه (${esc(d.method)})`:`${num(+d.qty)} ${esc(it?.unit||"")} ${esc(it?.name||"")}`}</b></td></tr>
+    ${d.purpose?`<tr><td>وذلك لـ</td><td class="l">${esc(d.purpose)}</td></tr>`:""}${d.notes?`<tr><td>ملاحظات</td><td class="l">${esc(d.notes)}</td></tr>`:""}</tbody></table>
+    <p style="margin-top:14px">جزاكم الله خيرًا وجعله في ميزان حسناتكم.</p>
+    <div class="signs"><div>المستلم<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div><div>أمين الصندوق<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div></div></div>`;
+}
+/* Closing a list: record what went out — cash lists into the accounts, in-kind lists out of their stock item. Only what was received. */
+async function settleBatch(k){
+  if(k.settledAt||!canMoney()) return;
+  const got=k.items.filter(i=>i.received), total=got.reduce((a,i)=>a+(+i.value||0),0), t=T.get(k.typeId), item=t?.itemId?IT.get(t.itemId):null;
+  if(!total) return;
+  const cash=k.template==="cash"||k.unit==="جنيه";
+  const msg=cash?`هيتسجل في الحسابات: خروج ${money(total)} من الخزينة (${got.length} أسرة استلمت).`:item?`هيخرج من المخزن: ${num(total)} ${item.unit} ${item.name} (${got.length} أسرة استلمت).`:"";
+  if(!msg) return;
+  if(!await ask(msg,{title:"نسجّل الصرف؟",ok:"سجّل",cancel:"مش دلوقتي"})) return;
+  try{
+    if(cash) await ins("ledger",{ date:today, direction:"out", amount:total, account:"الخزينة", category:t?.name||k.typeName, party:k.title, batch_id:k.id, note:`${got.length} أسرة`, created_by:me.id });
+    else await ins("stock_moves",{ item_id:item.id, date:today, qty:-total, reason:"صرف كشف", batch_id:k.id, note:`${got.length} أسرة`, created_by:me.id });
+    await sb.from("batches").update({ settled_at:new Date().toISOString() }).eq("id",k.id); await logIt("batch",k.id,cash?`تسجيل الصرف في الحسابات: ${money(total)}`:`خروج من المخزن: ${num(total)} ${item.unit}`);
+    await refreshBatch(k.id); toast("اتسجل ✓");
+  }catch(e){ toast(errMsg(e)); }
 }
 
 /* ================= printing ================= */

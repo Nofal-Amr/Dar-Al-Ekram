@@ -326,6 +326,10 @@ pre.pdftxt{white-space:pre-wrap;direction:rtl;font-family:var(--font);font-size:
 .mc-row.ok{border-color:var(--green);background:var(--green-soft)}.mc-row.bad{border-color:var(--gold);background:var(--gold-soft)}
 .mc-row input{margin-top:6px}.mc-btns{display:flex;gap:6px}.mc-btns .cr{min-width:44px;font-size:18px}.mc-btns .cr.on.ok{background:var(--green);color:var(--on)}.mc-btns .cr.on.bad{background:var(--gold);color:#fff;border-color:var(--gold)}
 .pbar{display:block;height:8px;border-radius:4px;background:var(--line);overflow:hidden}.pbar i{display:block;height:100%;background:var(--green);border-radius:inherit}
+.bal{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.bal div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;border-top:3px solid var(--green)}
+.bal div.neg{border-top-color:var(--red)}.bal span{display:block;font-size:12.5px;color:var(--muted)}.bal strong{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+td.in{color:var(--green);font-weight:600}td.out{color:var(--red);font-weight:600}tr.cancel td{text-decoration:line-through;opacity:.55}
 .addbox{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px 12px 10px;margin-bottom:10px}
 .addbox summary{font-weight:600;color:var(--green);display:flex;align-items:center;gap:6px}
 </style>
@@ -348,6 +352,7 @@ pre.pdftxt{white-space:pre-wrap;direction:rtl;font-family:var(--font);font-size:
   <button data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>الرئيسية</button>
   <button data-v="people"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.6c2.6.1 4.4 1.8 5 4.9"/></svg>الحالات</button>
   <button data-v="batches"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>الكشوفات</button>
+  <button data-v="money" data-money><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>المخزن والحسابات</button>
   <button data-v="reports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>التقارير</button>
   <button data-v="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 4.9V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4z"/></svg>الإعدادات</button>
 </nav>

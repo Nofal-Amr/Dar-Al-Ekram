@@ -80,7 +80,19 @@ function makeData(){
     { id: uuid(), title: "نتصل بمدرسة أولاد حالة 012 عشان شهادات القيد", notes: "", due: "2026-09-28", beneficiary_id: beneficiaries[11].id, assignee: workerId, done_at: null, done_by: null, created_at: "2026-09-20T09:00:00Z", created_by: managerId, archived_at: null },
     { id: uuid(), title: "نستلم كرتونة البيض من بنك الطعام", notes: "", due: "2026-09-22", beneficiary_id: null, assignee: null, done_at: null, done_by: null, created_at: "2026-09-18T09:00:00Z", created_by: managerId, archived_at: null },
   ];
-  return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks, ids: { manager: managerId, worker: workerId, helper: helperId } };
+  const items = [
+    { id: uuid(), name: "كرتونة بيض", unit: "كرتونة", min_qty: 5, created_at: "2026-01-01T09:00:00Z" },
+    { id: uuid(), name: "شنطة رمضان", unit: "شنطة", min_qty: 20, created_at: "2026-01-01T09:00:00Z" },
+    { id: uuid(), name: "لحمة", unit: "كجم", min_qty: 10, created_at: "2026-01-01T09:00:00Z" },
+  ];
+  aid_types.find(t => t.id === "ramadan").item_id = items[1].id;
+  aid_types.find(t => t.id === "meat").item_id = items[2].id;
+  const stock_moves = [
+    { id: uuid(), item_id: items[0].id, date: "2026-09-01", qty: 12, reason: "جرد", note: "رصيد أول مدة", cancelled_at: null, created_at: "2026-09-01T09:00:00Z" },
+    { id: uuid(), item_id: items[1].id, date: "2026-09-01", qty: 40, reason: "جرد", note: "رصيد أول مدة", cancelled_at: null, created_at: "2026-09-01T09:00:00Z" },
+  ];
+  return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks,
+    donors: [], items, donations: [], ledger: [], stock_moves, ids: { manager: managerId, worker: workerId, helper: helperId } };
 }
 
 export function createDemoClient(){
@@ -104,7 +116,7 @@ export function createDemoClient(){
           if(table === "beneficiaries" && r.national_id && rows().some(x => x.national_id === r.national_id && x.id !== r.id)) throw { message: "duplicate key value violates unique constraint national_id" };
           const i = r.id ? rows().findIndex(x => x.id === r.id) : -1;
           if(i >= 0){ Object.assign(rows()[i], r); return rows()[i]; }
-          const row = { id: r.id || (table === "activity_log" ? rows().length + 1 : uuid()), created_at: now, ...(table === "activity_log" || table === "calls" ? { at: now, by: session.user.id } : {}), ...(table === "beneficiaries" ? { archived_at: null, tags: [], photos: {} } : {}), ...r };
+          const row = { id: r.id || (table === "activity_log" ? rows().length + 1 : uuid()), created_at: now, ...(table === "activity_log" || table === "calls" ? { at: now, by: session.user.id } : {}), ...(table === "beneficiaries" ? { archived_at: null, tags: [], photos: {} } : {}), ...(["donations","ledger","stock_moves"].includes(table) ? { date: now.slice(0, 10), cancelled_at: null } : {}), ...(table === "donations" ? { receipt_no: rows().length + 1 } : {}), ...r };
           rows().push(row); return row;
         });
         return { data: st.single ? out[0] : out, error: null };
