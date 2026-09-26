@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.11";
+export const VERSION = "1.3.12";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1395,6 +1395,33 @@ function newBatch(){
 }
 
 /* ================= batch detail ================= */
+// A new draft from an old list: same aid, same families and amounts — everyone, or only those who didn't collect.
+function copyBatch(id){
+  const k=K.get(id); if(!k||!canDraft()) return;
+  const left=k.items.filter(i=>!i.received).length, all=k.items.length;
+  sheet("نسخة جديدة من الكشف",`
+    <p class="sub" style="margin-top:0">من: <b>${esc(k.title)}</b></p>
+    <label class="f">اسم الكشف الجديد<input type="text" id="c_t" value="${esc(k.title.replace(/\s*\(نسخة\)$/,""))} (نسخة)"></label>
+    <label class="f">عن شهر<input type="month" id="c_m" value="${curMonth}"></label>
+    <div class="modes">
+      <label class="rolec"><input type="radio" name="c_w" value="all" checked><span><b>كل الأسماء (${num(all)})</b><small>نفس الأسر ونفس الكميات</small></span></label>
+      <label class="rolec"><input type="radio" name="c_w" value="left" ${left?"":"disabled"}><span><b>اللي ماستلموش بس (${num(left)})</b><small>عشان تكمّلهم في كشف تاني</small></span></label>
+    </div>
+    <div class="bar"><button class="btn pri" id="c_go">${ic("copy")}اعمل النسخة (مسودة)</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#c_go").onclick=async()=>{
+      const onlyLeft=s.querySelector("input[name=c_w]:checked").value==="left", src=k.items.filter(i=>!onlyLeft||!i.received);
+      q("#c_go").disabled=true; q("#c_go").innerHTML=`<span class="spin"></span>`;
+      const nk=await run(sb.from("batches").insert({title:q("#c_t").value.trim()||k.title+" (نسخة)",type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
+        donor:k.donor||"",basis:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
+      if(!nk){ q("#c_go").disabled=false; return; }
+      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid); return toI(b?itemFor(b,it.value,"منسوخ من: "+k.title,it.students):{...it, received:false, reason:"منسوخ من: "+k.title},nk.id,i); });
+      for(let i=0;i<rows.length;i+=500){ if(!await run(sb.from("batch_items").insert(rows.slice(i,i+500)))) break; }
+      await logIt("batch",nk.id,`نسخة من «${k.title}» (${rows.length} أسرة${onlyLeft?"، اللي ماستلموش بس":""})`);
+      toast("اتعملت النسخة ✓"); await refreshBatch(nk.id); openBatch(nk.id);
+    };
+  });
+}
 // Rename a list, change its donor, and tick the days it's given on (any weekday, this month and the next).
 function editBatch(id){
   const k=K.get(id); if(!k||!canEditList(k)) return;
@@ -1430,7 +1457,10 @@ function basisText(k){
   return [how&&"النصيب: "+how, b.total!=null&&b.total!==undefined?`من ${num(b.total)} ${u} متاحين`:"", b.by&&"الأولوية: "+(b.missedFirst?"اللي ماجاش المرة اللي فاتت، بعدين ":"")+(PRIORITY[b.by]||"")].filter(Boolean).join(" · ");
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all";
+  let q_="", logs=null, only="all", addQ="", addOpen=false;
+  // Families taken off this list (from its log), so they can be put back with one tap.
+  const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
+    for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
   const draw=()=>{
     const k=K.get(id); if(!k) return "";
     const items=k.items; const total=items.reduce((s,i)=>s+(+i.value||0),0); const rec=items.filter(i=>i.received).length; const draft=k.status==="مسودة";
@@ -1444,10 +1474,14 @@ function openBatch(id, giveMode){
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
+    ${canEditList(k)&&k.status!=="مصروف"?`<details class="addbox" ${addOpen?"open":""}><summary>${ic("plus")} ضيف حالة للكشف (أو رجّع حد اتشال)</summary>
+      <input type="search" id="b_add" placeholder="اكتب الاسم أو الرقم القومي أو رقم الحالة" value="${esc(addQ)}" autocomplete="off">
+      ${removedNames(k).length?`<div class="sub" style="margin:6px 0">اتشالوا من الكشف ده قبل كده:</div><div class="list">${removedNames(k).map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm" data-addb="${b.id}">${ic("undo")}رجّعها</button></div>`).join("")}</div>`:""}
+      <div id="b_addRes"></div></details>`:""}
     ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
       <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
@@ -1468,7 +1502,7 @@ function openBatch(id, giveMode){
     s.querySelectorAll("[data-only]").forEach(el=>el.onclick=()=>{ only=el.dataset.only; refreshSheet(); });
     bindCalls(s, ()=>refreshSheet());
     if(q("#b_del")) q("#b_del").onclick=async()=>{ const kk=K.get(id); if(await ask(kk.status==="مسودة"?"المسودة هتختفي من القوايم، وتفضل محفوظة في الأرشيف.":"الكشف هيختفي من القوايم، وماحدش هيتحسب إنه استلمه منه لحد ما ترجّعه.\nتلاقيه في «الإعدادات ← الأرشيف» وترجّعه في أي وقت.",{title:"أرشفة الكشف؟",ok:"أرشفة"})&&await run(sb.from("batches").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشف ✓")){ await logIt("batch",id,"أرشفة الكشف"); closeSheet(); refreshBatch(id); } };
-    s.querySelectorAll("[data-rm]").forEach(el=>el.onclick=async()=>{ const it=K.get(id).items.find(x=>x.id===el.dataset.rm); if(K.get(id).status!=="مسودة"&&!await ask(`${it.name} هتتشال من الكشف ده.`,{title:"شيل من الكشف؟",ok:"شيل",danger:true})) return; if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); refreshBatch(id); } });
+    s.querySelectorAll("[data-rm]").forEach(el=>el.onclick=async()=>{ const it=K.get(id).items.find(x=>x.id===el.dataset.rm); if(K.get(id).status!=="مسودة"&&!await ask(`${it.name} هتتشال من الكشف ده.`,{title:"شيل من الكشف؟",ok:"شيل",danger:true})) return; if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); logs=await loadLog("batch",id); refreshBatch(id); } });
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
       if(!v&&!await ask(`${it.name} هيرجع «ماستلمش».`,{title:"إلغاء الاستلام؟",ok:"إلغاء الاستلام",danger:true})) return;
@@ -1478,6 +1512,18 @@ function openBatch(id, giveMode){
     const bq=q("#b_q"); bq.oninput=()=>{ q_=bq.value; const pos=bq.selectionStart; refreshSheet(); const n=$("#b_q"); if(n){n.focus(); n.setSelectionRange(pos,pos);} };
     q("#b_print").onclick=()=>doPrint(batchHTML(K.get(id)),K.get(id).title);
     if(q("#b_edit")) q("#b_edit").onclick=()=>editBatch(id);
+    if(q("#b_copy")) q("#b_copy").onclick=()=>copyBatch(id);
+    const box=s.querySelector(".addbox"); if(box) box.ontoggle=()=>{ addOpen=box.open; };
+    const addTo=async bid=>{ const k=K.get(id), b=B.get(bid); if(!b||k.items.some(i=>i.bid===bid)) return;
+      const stu=studentsOf(b), v=k.basis?shareFor(k.basis,famSize(b),stu.n):(k.items[0]?.value??T.get(k.typeId)?.amount??1);
+      const pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
+      if(await run(sb.from("batch_items").insert(toI(itemFor(b,v,"إضافة بإيدك",stu.src==="none"?null:stu.n),id,pos)),`${b.name} اتضافت ✓`)){ await logIt("batch",id,`إضافة ${b.name}`); logs=await loadLog("batch",id); addQ=""; await refreshBatch(id); } };
+    s.querySelectorAll("[data-addb]").forEach(el=>el.onclick=()=>{ el.disabled=true; addTo(el.dataset.addb); });
+    const ab=q("#b_add"); if(ab){ const res=()=>{ const qq=norm(addQ); const k=K.get(id), inIt=new Set(k.items.map(i=>i.bid));
+        const r=qq.length<2?[]:people().filter(b=>!inIt.has(b.id)&&(norm(b.name).includes(qq)||(b.nationalId||"").includes(qq)||b.code===qq.padStart(3,"0"))).slice(0,8);
+        q("#b_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${r.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span>${b.status!=="نشط"?` <span class="chip red">${esc(b.status)}</span>`:""}</span><button class="btn sm pri" data-addb="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة في الكشف أصلاً</div>`}</div>`;
+        q("#b_addRes").querySelectorAll("[data-addb]").forEach(el=>el.onclick=()=>{ el.disabled=true; addTo(el.dataset.addb); }); };
+      ab.oninput=()=>{ addQ=ab.value; res(); }; if(addQ) res(); }
     // e.g. a list given over two Saturdays: the second week's paper has only the families that haven't collected yet
     if(q("#b_printLeft")) q("#b_printLeft").onclick=()=>{ const k=K.get(id); doPrint(batchHTML({...k, items:k.items.filter(i=>!i.received), left:true}),k.title); };
     q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
