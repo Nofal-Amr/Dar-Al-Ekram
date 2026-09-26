@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, age, mIdx, mLabel, toNumber } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, age, mIdx, mLabel, toNumber } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -218,4 +218,18 @@ test("phoneIssue flags missing and broken numbers", () => {
   assert.equal(phoneIssue("0101234567"), "bad");
   assert.equal(phoneIssue("010123456789"), "bad");
   assert.equal(phoneIssue("01812345678"), "bad");
+});
+
+test("jpegsToPdf builds a PDF whose xref points at every object", () => {
+  const jpeg = new Uint8Array([0xFF,0xD8,0xFF,0xD9]);
+  const pdf = jpegsToPdf([{ jpeg, w:10, h:20, pw:595.28, ph:841.89 }, { jpeg, w:5, h:5, pw:100, ph:100 }]);
+  const txt = Buffer.from(pdf).toString("latin1");
+  assert.ok(txt.startsWith("%PDF-1.4"));
+  assert.ok(txt.trimEnd().endsWith("%%EOF"));
+  assert.match(txt, /\/Count 2/);
+  const startx = +/startxref\n(\d+)/.exec(txt)[1];
+  assert.equal(txt.slice(startx, startx + 4), "xref");
+  const offs = [...txt.slice(startx).matchAll(/^(\d{10}) 00000 n $/gm)].map(m => +m[1]);
+  assert.equal(offs.length, 8);
+  offs.forEach((o, i) => assert.equal(txt.slice(o, o + String(i + 1).length + 6), `${i + 1} 0 obj`));
 });

@@ -262,3 +262,26 @@ export function matchFileName(fileName, people){
   if(code){ const b = people.find(p => String(p.code) === code.padStart(3, "0") || String(p.code) === code); if(b) return { b, how:"code" }; }
   return { b:null, how:"" };
 }
+
+/* A minimal PDF made of one JPEG per page (used to shrink big scans before upload).
+   pages: [{ jpeg:Uint8Array, w, h (pixels), pw, ph (page size in points) }] → Uint8Array */
+export function jpegsToPdf(pages){
+  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
+  const put = x => { const b = typeof x === "string" ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body, stream) => { offs[n] = len; put(`${n} 0 obj\n${body}\n`); if(stream){ put("stream\n"); put(stream); put("\nendstream\n"); } put("endobj\n"); };
+  const n = pages.length, kids = pages.map((_, i) => `${3 + i*3} 0 R`).join(" ");
+  put("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${n} >>`);
+  pages.forEach((p, i) => {
+    const pg = 3 + i*3, im = pg + 1, ct = pg + 2, pw = +p.pw.toFixed(2), ph = +p.ph.toFixed(2);
+    const content = enc.encode(`q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`);
+    obj(pg, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${ct} 0 R >>`);
+    obj(im, `<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>`, p.jpeg);
+    obj(ct, `<< /Length ${content.length} >>`, content);
+  });
+  const total = 3 + n*3, xref = len;
+  put(`xref\n0 ${total}\n0000000000 65535 f \n` + offs.slice(1, total).map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
+  put(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  const out = new Uint8Array(len); let at = 0; for(const b of parts){ out.set(b, at); at += b.length; } return out;
+}

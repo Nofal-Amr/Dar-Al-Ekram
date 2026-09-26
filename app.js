@@ -1,9 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
+import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.23";
+export const VERSION = "1.3.24";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1237,11 +1237,12 @@ function bindDocs(root, bid){
     if(m.b && m.b.id!==bid){ if(!await ask(`اسم الملف «${f.name}» شبه حالة تانية: ${m.b.code} — ${m.b.name}.\nترفعه على ${b.name} برضو؟`,{title:"الملف ده بتاع مين؟",ok:"أيوه، ارفعه هنا",cancel:"لأ",danger:true})) return; }
     else if(!m.b){ if(!await ask(`اسم الملف «${f.name}» مافيهوش اسم ${b.name} ولا رقمها القومي ولا رقم الحالة.\nمتأكد إنه ملفها؟`,{title:"اتأكد من الملف",ok:"أيوه، ارفعه",cancel:"رجوع"})) return; }
     toast(m.b?.id===bid?"اسم الملف مطابق للحالة ✓ — بنرفع…":"بنرفع الملف…");
+    const g2=await shrinkDoc(g, t=>toast(t+"…")); if(g2.blob.size>15*MB){ toast(`الملف حتى بعد التصغير ${(g2.blob.size/MB).toFixed(1)} ميجا — أكبر من 15`); return; } Object.assign(g,g2);
     const path=`${bid}/${Date.now()}.${g.ext}`;
     let lastPct=-1; const err=await putDoc(path, g, f=>{ const pc=Math.round(f*100); if(pc>=lastPct+10){ lastPct=pc; toast(`بنرفع الملف… ${pc}%`); } }); if(err){ toast(err); return; }
     docBlobs.set(path, g.blob);
-    const d={ path, name:f.name, at:new Date().toISOString(), by:me.id, nameOk:m.b?.id===bid };
-    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ مع الحالة ✓ — تقدر تراجعه بعدين")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
+    const d={ path, name:f.name, size:g.blob.size, at:new Date().toISOString(), by:me.id, nameOk:m.b?.id===bid };
+    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),`الملف اتحفظ مع الحالة ✓${g.was?` (اتصغّر من ${(g.was/MB).toFixed(1)} لـ ${(g.blob.size/MB).toFixed(1)} ميجا)`:""} — تقدر تراجعه بعدين`)){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
   };
 }
 /* Phones hand over picked files (from WhatsApp, Drive, the files app) as a temporary link that can stop being readable,
@@ -1251,7 +1252,7 @@ const DOC_TYPES={pdf:"application/pdf",jpg:"image/jpeg",jpeg:"image/jpeg",png:"i
 const docExt=f=>{ const e=(/\.([a-z0-9]+)$/i.exec(f.name||"")?.[1]||"").toLowerCase(); return DOC_TYPES[e]?(e==="jpeg"?"jpg":e):/pdf/i.test(f.type)?"pdf":/png/i.test(f.type)?"png":/jpe?g/i.test(f.type)?"jpg":""; };
 async function grabFile(f){
   const ext=docExt(f); if(!ext) return { f, err:"نوع الملف مش مدعوم — PDF أو صورة JPG/PNG بس" };
-  if(f.size>15*1024*1024) return { f, err:"أكبر من 15 ميجا" };
+  if(f.size>120*1024*1024) return { f, err:"أكبر من 120 ميجا — كبير جداً" };
   try{ const buf=await f.arrayBuffer(); if(!buf.byteLength) return { f, err:"الملف فاضي أو لسه ماتنزلش على الموبايل" };
     return { f, ext, blob:new Blob([buf],{ type:DOC_TYPES[ext] }) }; }
   catch(e){ return { f, err:"الموبايل مش قادر يقرا الملف — لو من واتساب أو درايف نزّله على الموبايل الأول وبعدين ارفعه" }; }
@@ -1270,6 +1271,28 @@ function xhrUpload(path, g, onProg){
     x.onerror=()=>{ clearTimeout(stall); res({ net:true, message:"network error" }); };
     kick(); x.send(g.blob);
   });
+}
+/* Big scans are shrunk on the phone before upload: every PDF page is redrawn as a ~150 DPI JPEG (handwriting stays
+   readable) and put back into a PDF; big photos are scaled down. Small files, and anything that doesn't get smaller, go as they are. */
+const MB=1048576, canvasJpeg=(c,q)=>new Promise(r=>c.toBlob(r,"image/jpeg",q));
+async function shrinkDoc(g, onStep){
+  try{
+    if(g.ext==="pdf"&&g.blob.size>3*MB){
+      await loadPdf(); const doc=await window.pdfjsLib.getDocument({ data:new Uint8Array(await g.blob.arrayBuffer()) }).promise, pages=[];
+      for(let i=1;i<=doc.numPages;i++){ onStep?.(`بنصغّر الملف — صفحة ${num(i)} من ${num(doc.numPages)}`);
+        const page=await doc.getPage(i), v1=page.getViewport({ scale:1 }), v=page.getViewport({ scale:Math.min(2.5,1750/Math.max(v1.width,v1.height)) });
+        const c=document.createElement("canvas"); c.width=Math.round(v.width); c.height=Math.round(v.height); const x=c.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,c.width,c.height);
+        await page.render({ canvasContext:x, viewport:v }).promise; const jb=await canvasJpeg(c,0.62);
+        pages.push({ jpeg:new Uint8Array(await jb.arrayBuffer()), w:c.width, h:c.height, pw:v1.width, ph:v1.height }); page.cleanup(); c.width=c.height=0; }
+      doc.destroy?.(); const out=new Blob([jpegsToPdf(pages)],{ type:"application/pdf" });
+      if(out.size<g.blob.size*0.9) return { ...g, blob:out, was:g.blob.size };
+    } else if(g.ext!=="pdf"&&g.blob.size>1.5*MB){
+      onStep?.("بنصغّر الصورة"); const bm=await createImageBitmap(g.blob), k=Math.min(1,2200/Math.max(bm.width,bm.height));
+      const c=document.createElement("canvas"); c.width=Math.round(bm.width*k); c.height=Math.round(bm.height*k); c.getContext("2d").drawImage(bm,0,0,c.width,c.height);
+      const out=await canvasJpeg(c,0.72); if(out&&out.size<g.blob.size) return { ...g, blob:out, ext:"jpg", was:g.blob.size };
+    }
+  }catch(e){ /* can't redraw it (locked PDF, odd format): upload the original */ }
+  return g;
 }
 async function putDoc(path, g, onProg){
   let last=null;
@@ -1292,22 +1315,26 @@ function bulkDocs(grabbed){
     return `<div class="note">${ic("info")} <span>${num(files.length)} ملف — <b>${num(rows.filter(r=>r.b).length)}</b> عرفنا حالتهم من اسم الملف${un?`، و<b>${num(un)}</b> اختار حالتهم بإيدك`:""}.</span></div>
     <datalist id="bd_list">${all.map(b=>`<option value="${esc(label(b))}">`).join("")}</datalist>
     <div class="list">${rows.map((r,i)=>`<div class="item col"><div class="row" style="width:100%"><input type="checkbox" data-on="${i}" ${r.on?"checked":""} ${r.b&&!r.big?"":"disabled"} style="width:20px;height:20px">
-        <span class="grow"><span class="nm">${esc(r.f.name)}</span> <span class="sub">(${(r.f.size/1048576).toFixed(1)} ميجا)</span><br><span class="sub">${r.err?`${r.b?esc(label(r.b))+" · ":""}<b style="color:var(--red)">${esc(r.err)}</b>`:r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
+        <span class="grow"><span class="nm">${esc(r.f.name)}</span> <span class="sub">(${(r.f.size/1048576).toFixed(1)} ميجا${r.f.size>3*MB&&!r.err?" — هيتصغّر قبل الرفع":""})</span><br><span class="sub">${r.err?`${r.b?esc(label(r.b))+" · ":""}<b style="color:var(--red)">${esc(r.err)}</b>`:r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
       ${!r.b&&!r.err?`<input type="search" list="bd_list" data-pick="${i}" placeholder="اكتب اسم الحالة أو رقمها واختار" style="margin-top:6px">`:""}</div>`).join("")}</div>
     <div class="bar"><button class="btn pri" id="bd_go" ${ok?"":"disabled"}>${ic("plus")}ارفع ${num(ok)} ملف</button></div>`; };
   const mount=s=>{ const re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
     s.querySelectorAll("[data-on]").forEach(el=>el.onchange=()=>{ rows[+el.dataset.on].on=el.checked; re(); });
     s.querySelectorAll("[data-pick]").forEach(el=>el.onchange=()=>{ const b=byLabel.get(el.value); if(b){ const r=rows[+el.dataset.pick]; r.b=b; r.how="hand"; r.on=true; re(); } });
     s.querySelector("#bd_go").onclick=async()=>{
-      const go=s.querySelector("#bd_go"); go.disabled=true; const todo=rows.filter(r=>r.on&&r.b); let done=0, failed=0;
+      const go=s.querySelector("#bd_go"); go.disabled=true; const todo=rows.filter(r=>r.on&&r.b); let done=0, failed=0; const saved=[0,0];
       const byCase=new Map();
       for(const r of todo){ go.innerHTML=`<span class="spin"></span> ${num(done+failed+1)} من ${num(todo.length)}`;
+        r.g=await shrinkDoc(r.g, t=>{ go.innerHTML=`<span class="spin"></span> ${num(done+failed+1)} من ${num(todo.length)} — ${t}`; });
+        if(r.g.blob.size>15*MB){ failed++; r.err=`حتى بعد التصغير ${(r.g.blob.size/MB).toFixed(1)} ميجا — أكبر من 15`; r.on=false; continue; }
         const path=`${r.b.id}/${Date.now()}-${done+failed}.${r.g.ext}`;
         const err=await putDoc(path, r.g, f=>{ go.innerHTML=`<span class="spin"></span> ${num(done+failed+1)} من ${num(todo.length)} — ${Math.round(f*100)}%`; });
         if(err){ failed++; r.err=err; r.on=false; continue; } docBlobs.set(path, r.g.blob); r.done=true;
-        (byCase.get(r.b.id)||byCase.set(r.b.id,[]).get(r.b.id)).push({ path, name:r.f.name, at:new Date().toISOString(), by:me.id, nameOk:r.how!=="hand" }); done++; }
+        (byCase.get(r.b.id)||byCase.set(r.b.id,[]).get(r.b.id)).push({ path, name:r.f.name, size:r.g.blob.size, at:new Date().toISOString(), by:me.id, nameOk:r.how!=="hand" }); done++;
+        if(r.g.was){ saved[0]+=r.g.was; saved[1]+=r.g.blob.size; } }
       for(const [bid,ds] of byCase){ if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), ...ds] }).eq("id",bid))){ await logIt("beneficiary",bid,`رفع ${ds.length} ملف: ${ds.map(d=>d.name).join("، ")}`); await refreshPerson(bid); } }
-      if(!failed){ toast(`اترفع ${num(done)} ملف ✓`); closeSheet(); view="people"; peopleF="docs"; render(); return; }
+      const sv=saved[0]?` (اتصغّروا من ${(saved[0]/MB).toFixed(1)} لـ ${(saved[1]/MB).toFixed(1)} ميجا)`:"";
+      if(!failed){ toast(`اترفع ${num(done)} ملف ✓${sv}`); closeSheet(); view="people"; peopleF="docs"; render(); return; }
       // keep the sheet open: what went up is gone from the list, what failed shows why and can be tried again
       for(let i=rows.length-1;i>=0;i--) if(rows[i].done) rows.splice(i,1);
       rows.forEach(r=>{ if(r.err&&r.g.blob){ r.big=false; } }); re();
