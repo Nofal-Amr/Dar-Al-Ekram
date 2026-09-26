@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.8";
+export const VERSION = "1.3.9";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -15,7 +15,7 @@ const CASE_TYPES = ["أيتام","مساعدات","مرضي","أيتام ومر�
 const STATUSES = ["نشط","انتظار","موقوف","ملغي"];
 const MARITAL = ["أرملة","مطلقة","متزوجة","مهجورة","آنسة","أرمل","متزوج","مطلق"];
 const ROLE_AR = {manager:"مدير", worker:"موظف", helper:"عامل", viewer:"مشاهدة فقط", pending:"مستني تفعيل"};
-const ROLE_DESC = {manager:"كل حاجة: يعتمد الكشوف ويحذف ويضيف موظفين", worker:"موظف مكتب: يضيف ويعدّل الحالات ويطبع ويشوف التقارير", helper:"شاشة بسيطة بزراير كبيرة: يسلّم ويتصل ويطبع بس", viewer:"يشوف بس من غير أي تعديل"};
+const ROLE_DESC = {manager:"كل حاجة: يعتمد الكشوف ويحذف ويضيف موظفين", worker:"موظف مكتب: يضيف ويعدّل الحالات، ويعمل كشوف (مسودة والمدير يعتمدها)، ويطبع ويشوف التقارير", helper:"شاشة بسيطة بزراير كبيرة: يسلّم ويتصل ويطبع بس", viewer:"يشوف بس من غير أي تعديل"};
 
 const sb = DEMO ? (await import("./demo.js")).createDemoClient()
   : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -44,6 +44,9 @@ const age = d => ageAt(d, now);
 const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);
 const isMgr = () => role === "manager";
 const canWrite = () => role === "manager" || role === "worker";
+// Office staff make and edit lists as drafts; only the manager approves, closes or archives them.
+const canDraft = () => canWrite();
+const canEditList = k => isMgr() || (role === "worker" && k.status === "مسودة" && !k.archivedAt);
 const simple = () => role === "helper";
 const cleanUser = u => latinDigits(u).trim().toLowerCase().replace(/[^a-z0-9._-]/g,"");
 const who = id => id ? (P.get(id)?.full_name || P.get(id)?.username || "مستخدم") : "";
@@ -520,7 +523,7 @@ function vPeople(){
 function vBatches(){
   const list=batches();
   return `
-  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${isMgr()?`<button class="btn pri" id="newK">${ic("list")}كشف جديد</button>`:""}</div>
+  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${canDraft()?`<button class="btn pri" id="newK">${ic("list")}كشف جديد</button>`:""}</div>
   <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${isMgr()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>
   ${isMgr()?(()=>{ const n=[...K.values()].filter(k=>k.archivedAt).length; return `<div class="bar"><button class="btn sm" data-go="archive">${ic("archive")}الكشوف المؤرشفة (${num(n)})</button></div>`; })():""}`;
 }
@@ -705,7 +708,7 @@ function vDash(){
     <div class="qa">
       <button class="btn" id="qaSearch">${ic("search")}بحث</button>
       ${canWrite()?`<button class="btn" data-go="add">${ic("plus")}حالة جديدة</button>`:""}
-      ${isMgr()?`<button class="btn pri" data-go="newbatch">${ic("list")}كشف صرف جديد</button>`:""}
+      ${canDraft()?`<button class="btn pri" data-go="newbatch">${ic("list")}كشف صرف جديد</button>`:""}
       <button class="btn" data-go="phones">${ic("phone")}قائمة أرقام</button>
     </div></div>
   <div class="kpis">
@@ -1268,7 +1271,7 @@ function changeMyPin(){
    Everything recalculates as you type: who's in, how much each family gets, how far the quantity goes, and why. */
 const DONORS = ["مصر الخير","بنك الطعام","أهل الخير","صدقات","إسلام زوهير","أبلة لبنى"];
 function newBatch(){
-  if(!isMgr()) return;
+  if(!canDraft()) return;
   const ts=types(); if(!ts.length){ toast("أضف نوع مساعدة الأول من الإعدادات"); return; }
   const t0=ts[0];
   const st={ typeId:t0.id, month:curMonth, week:"", dow:6, donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
@@ -1396,7 +1399,7 @@ function newBatch(){
 /* ================= batch detail ================= */
 // Rename a list, change its donor, and tick the days it's given on (any weekday, this month and the next).
 function editBatch(id){
-  const k=K.get(id); if(!k||!isMgr()) return;
+  const k=K.get(id); if(!k||!canEditList(k)) return;
   const [y,m]=k.month.split("-").map(Number), next=`${m===12?y+1:y}-${String(m===12?1:m+1).padStart(2,"0")}`;
   let dow=k.days?.length?new Date(k.days[0]+"T00:00:00Z").getUTCDay():6, days=new Set(k.days||[]);
   const autoTitle=()=>{ const ds=[...days].sort(), d=q_("#e_d").value.trim(); return `كشف ${k.typeName}${d?` (${d})`:""} — ${ds.length?`${daysText(ds)} ${ds[ds.length-1].slice(0,4)}`:mLabel(k.month)}`; };
@@ -1439,11 +1442,11 @@ function openBatch(id, giveMode){
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
-    ${draft?`<div class="note">المسودة مش بتتحسب في سجل المساعدات، والموظفين مش شايفينها. راجع الأسماء واضغط «اعتماد».</div>`:""}
+    ${draft?`<div class="note">${isMgr()?"المسودة مش بتتحسب في سجل المساعدات، والمساعدين مش شايفينها. راجع الأسماء واضغط «اعتماد».":"دي مسودة: تقدر تعدّلها وتشيل وتضيف، والمدير هو اللي بيعتمدها."}</div>`:""}
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      ${isMgr()?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -1454,7 +1457,7 @@ function openBatch(id, giveMode){
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
     :`<div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>${k.template==="cash"?"الرقم القومي":"أفراد"}</th><th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
-      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td><td class="n">${esc(k.template==="cash"?it.nationalId:it.familySize)}</td><td class="n">${num(it.value)}</td><td>${isMgr()?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
+      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td><td class="n">${esc(k.template==="cash"?it.nationalId:it.familySize)}</td><td class="n">${num(it.value)}</td><td>${canEditList(k)?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`}
     ${logs&&logs.length?`<h3>سجل الكشف</h3><ul class="log">${logs.slice(0,20).map(l=>`<li><b>${dLabel(l.at)}</b> — ${esc(l.text)}${l.by?` (${esc(who(l.by))})`:""}</li>`).join("")}</ul>`:""}`;
   };
