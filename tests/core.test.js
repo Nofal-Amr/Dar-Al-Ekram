@@ -63,3 +63,60 @@ test("toNumber reads messy money strings", () => {
   assert.equal(toNumber("٢٠٠ ج"), 200);
   assert.equal(toNumber("لا يوجد"), null);
 });
+
+import { normalizeStage, nextStage, inSchool, schoolYear, STAGES, famSize, shareFor, sortPool, planShares, minPin } from "../core.js";
+
+test("school stages from the old sheets are read into the fixed list", () => {
+  const cases = { "1 اع":"أولى إعدادي", "اول اعدادي":"أولى إعدادي", "ثاث اعدادي":"تالتة إعدادي", "4ابت":"رابعة ابتدائي", "السادس الابتددائي":"سادسة ابتدائي",
+    "رابعه ابتدائى":"رابعة ابتدائي", "2 ث ص":"تانية ثانوي صناعي", "2ث ع":"تانية ثانوي عام", "2ث أز":"تانية ثانوي أزهري", "ثالثة ثانوي عام":"تالتة ثانوي عام", "3 ثانوي صناعي":"تالتة ثانوي صناعي",
+    "الاول الثنوي":"أولى ثانوي عام", "اولى معهد تمريض":"أولى معهد", "2 ك تربية":"تانية جامعة", "تحت السن  يتيمة":"تحت السن", "ت السن":"تحت السن", "حاصلة على دبلوم":"خلص دبلوم",
+    "خلصت كلية تجارة انتساب":"خلص جامعة", "خارج التعليم":"خارج التعليم", "أولى إعدادي":"أولى إعدادي" };
+  for(const [raw, want] of Object.entries(cases)) assert.equal(normalizeStage(raw), want, raw);
+  for(const raw of ["اولى ثانوي فني","معهد","-","متزوجة","كلة تربية نوعية"]) assert.equal(normalizeStage(raw), "", raw);
+  for(const [raw] of Object.entries(cases)) assert.ok(!normalizeStage(raw) || STAGES.includes(normalizeStage(raw)));
+});
+
+test("next stage after the yearly certificate", () => {
+  assert.equal(nextStage("تالتة ابتدائي"), "رابعة ابتدائي");
+  assert.equal(nextStage("سادسة ابتدائي"), "أولى إعدادي");
+  assert.equal(nextStage("تالتة إعدادي"), "");            // family picks the ثانوي track
+  assert.equal(nextStage("تانية ثانوي تجاري"), "تالتة ثانوي تجاري");
+  assert.equal(nextStage("رياض أطفال ٢"), "أولى ابتدائي");
+  assert.equal(nextStage("كلام قديم"), "");
+  assert.equal(inSchool("أولى جامعة"), true);
+  assert.equal(inSchool("تحت السن"), false);
+  assert.equal(schoolYear(new Date("2026-09-26")), 2026);
+  assert.equal(schoolYear(new Date("2027-05-01")), 2026);
+});
+
+test("shares: fixed, per member and tiers", () => {
+  assert.equal(shareFor({ mode:"fixed", per:200 }, 5), 200);
+  assert.equal(shareFor({ mode:"member", per:1 }, 4), 4);
+  assert.equal(shareFor({ mode:"member", per:1 }, 0), 1);          // unknown size counts as 1
+  assert.equal(shareFor({ mode:"tiers", cut:3, small:0.5, big:1 }, 3), 0.5);
+  assert.equal(shareFor({ mode:"tiers", cut:3, small:0.5, big:1 }, 4), 1);
+  assert.equal(famSize({ familySize:null, children:[{},{}] }), 3);
+});
+
+test("planning: the slide example — 10 kg, ≤3 members = ½ kg, bigger = 1 kg", () => {
+  const fam = n => ({ b:{ code:String(n), familySize:n <= 15 ? 3 : 5, score:50 } });
+  const pool = Array.from({ length:17 }, (_,i) => fam(i+1));
+  const r = planShares(pool, { mode:"tiers", cut:3, small:0.5, big:1 }, { total:10 });
+  assert.equal(r.used, 9.5); assert.equal(r.picked.length, 17); assert.equal(r.left, 0.5);
+});
+
+test("planning stops at the first family that doesn't fit (no queue jumping)", () => {
+  const pool = [{ b:{code:"1",familySize:6} }, { b:{code:"2",familySize:5} }, { b:{code:"3",familySize:1} }];
+  const r = planShares(pool, { mode:"member", per:1 }, { total:10 });
+  assert.deepEqual(r.picked.map(x => x.b.code), ["1"]);
+  assert.equal(r.rest.length, 2); assert.equal(r.members, 6);
+});
+
+test("priority orders", () => {
+  const P = [{ b:{code:"1",score:50,familySize:2}, lm:"2026-08" }, { b:{code:"2",score:80,familySize:3} }, { b:{code:"3",score:null,familySize:7}, missed:true }];
+  assert.deepEqual(sortPool(P,"score").map(x=>x.b.code), ["3","2","1"]);           // didn't come last time → first
+  assert.deepEqual(sortPool(P,"score",false).map(x=>x.b.code), ["2","1","3"]);
+  assert.deepEqual(sortPool(P,"family",false).map(x=>x.b.code), ["3","2","1"]);
+  assert.deepEqual(sortPool(P,"wait",false).map(x=>x.b.code), ["2","3","1"]);
+  assert.equal(minPin("manager"), 8); assert.equal(minPin("worker"), 6);
+});

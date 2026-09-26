@@ -46,3 +46,100 @@ export function age(birth, today = new Date()){
 export const num = n => (+n || 0).toLocaleString("en-US");
 // Parses "1,500", "١٥٠٠", " 200 ج" → number, or null when there is no number at all.
 export const toNumber = v => { const s = latinDigits(v).replace(/[,،\s]/g,"").match(/-?\d+(\.\d+)?/); return s ? +s[0] : null; };
+
+/* ---------- school stages ----------
+   One fixed list so every child's stage is spelled the same way (the old sheets had "1 اع", "اولى اعدادي", "اول اعدادي"…).
+   Each year the family brings a شهادة قيد; recording it moves the child to the next stage. */
+const ORD = ["أولى","تانية","تالتة","رابعة","خامسة","سادسة"];
+const SEC = ["عام","تجاري","صناعي","زراعي","فندقي","أزهري"];
+export const STAGE_GROUPS = [
+  { g:"قبل المدرسة", list:["تحت السن","حضانة","رياض أطفال ١","رياض أطفال ٢"] },
+  { g:"ابتدائي", list:ORD.map(o => `${o} ابتدائي`) },
+  { g:"إعدادي", list:ORD.slice(0,3).map(o => `${o} إعدادي`) },
+  ...SEC.map(t => ({ g:`ثانوي ${t}`, list:ORD.slice(0,3).map(o => `${o} ثانوي ${t}`) })),
+  { g:"معهد / دبلوم بعد الإعدادي", list:ORD.slice(0,5).map(o => `${o} معهد`) },
+  { g:"جامعة", list:ORD.map(o => `${o} جامعة`) },
+  { g:"مش بيدرس", list:["خلص دبلوم","خلص جامعة","خارج التعليم"] },
+];
+export const STAGES = STAGE_GROUPS.flatMap(x => x.list);
+const groupOf = s => STAGE_GROUPS.find(x => x.list.includes(s));
+// Stages that need a yearly شهادة قيد (primary school up to university).
+export const inSchool = s => { const g = groupOf(s)?.g || ""; return /^(ابتدائي|إعدادي|ثانوي|معهد|جامعة)/.test(g); };
+// Next year's stage, or "" when the family has to choose (after إعدادي: which ثانوي; after the last year: graduated).
+export function nextStage(s){
+  const x = groupOf(s); if(!x) return "";
+  const i = x.list.indexOf(s);
+  if(i < x.list.length - 1) return x.g === "قبل المدرسة" && i < 1 ? "" : x.list[i+1];
+  if(x.g === "قبل المدرسة") return "أولى ابتدائي";
+  if(x.g === "ابتدائي") return "أولى إعدادي";
+  return "";
+}
+const LEVEL = [[/^(1|١|ا?ول[يىه]?|أول[يىه]?|الاول[يىه]?|الأول[يىه]?)$/,0],[/^(2|٢|ثان[يىه]?|ثاني[هة]|تاني[هة]?|تان[يىه]|الثاني[هة]?)$/,1],[/^(3|٣|ثالث[هة]?|تالت[هة]?|الثالث[هة]?|ثاث)$/,2],[/^(4|٤|رابع[هة]?|الرابع[هة]?)$/,3],[/^(5|٥|خامس[هة]?|الخامس[هة]?)$/,4],[/^(6|٦|سادس[هة]?|السادس[هة]?)$/,5]];
+// Reads the free-text stages from the old sheets. Returns a stage from STAGES, or "" when unsure (the old text is then kept as is).
+export function normalizeStage(raw){
+  const s0 = String(raw ?? "").trim(); if(!s0) return "";
+  if(STAGES.includes(s0)) return s0;
+  const s = norm(s0).replace(/([0-9])([^0-9\s])/g,"$1 $2");
+  if(/(^|\s)(تحت|ت) السن/.test(s)) return "تحت السن";
+  if(/خارج التعليم|متسرب/.test(s)) return "خارج التعليم";
+  if(/حاصل[هة]? علي دبلوم|خلصت? دبلوم/.test(s)) return "خلص دبلوم";
+  if(/خلصت? (كليه|جامعه)|تخرج/.test(s)) return "خلص جامعة";
+  const words = s.split(" "); let lv = -1;
+  for(const w of words){ const m = LEVEL.find(([re]) => re.test(w)); if(m){ lv = m[1]; break; } }
+  if(lv < 0) return "";
+  const has = re => words.some(w => re.test(w));
+  if(has(/^(ابت|ابتدائي|الابتدائي|ابتدائ[يى]|الابتددائي|الايتدائي|ابتدايي)$/)) return lv < 6 ? `${ORD[lv]} ابتدائي` : "";
+  if(has(/^(اع|اعدادي|الاعدادي|اعدادى)$/)) return lv < 3 ? `${ORD[lv]} إعدادي` : "";
+  if(has(/^(ث|ثانوي|الثانوي|الثنوي|ثانوى)$/)){
+    if(lv > 2) return "";
+    const tr = has(/^(ص|صناعي)$/) ? "صناعي" : has(/^(تجاري|تجارى)$/) ? "تجاري" : has(/^(از|ازهر|ازهري)$/) ? "أزهري" : has(/^(زراعي)$/) ? "زراعي" : has(/^(فندقي)$/) ? "فندقي" : has(/^(فني)$/) ? "" : "عام";
+    return tr ? `${ORD[lv]} ثانوي ${tr}` : "";
+  }
+  if(has(/^معهد$/)) return lv < 5 ? `${ORD[lv]} معهد` : "";
+  if(has(/^(ك|كليه|جامعه)$/)) return `${ORD[lv]} جامعة`;
+  return "";
+}
+// School year that a date falls in, named by the year it started (Sept 2026 → 2026, i.e. 2026/2027).
+export const schoolYear = (d = new Date()) => { const x = new Date(d); return x.getMonth() >= 8 ? x.getFullYear() : x.getFullYear() - 1; };
+export const syLabel = y => `${y}/${+y + 1}`;
+
+/* ---------- distribution planning ----------
+   basis.mode: "fixed" (same for every family) · "member" (per × family size) · "tiers" (≤ cut members → small, more → big) */
+export const famSize = b => +b?.familySize || ((b?.children || []).length ? b.children.length + 1 : 0);
+export function shareFor(basis, fam){
+  const f = +fam || 1, per = +basis?.per || 0;
+  if(basis?.mode === "member") return per * f;
+  if(basis?.mode === "tiers") return f <= (+basis.cut || 3) ? +basis.small || 0 : +basis.big || 0;
+  return per;
+}
+const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);
+const byCodeNum = (a,b) => String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true});
+/* Priority order of the pool. Entries: { b, lm (last month got this type, or undefined), missed (didn't collect last time) }.
+   "score": highest الدرجة first · "family": biggest family first · "wait": longest without this aid first · "code": by case number */
+export const PRIORITY = { score:"الدرجة الأعلى الأول", family:"الأسرة الأكبر الأول", wait:"اللي بقاله أكتر من غير ما ياخد", code:"برقم الحالة" };
+export function sortPool(pool, by = "score", missedFirst = true){
+  const sc = x => x.b.score ?? -1, fm = x => famSize(x.b);
+  const keys = {
+    score: (x,y) => sc(y) - sc(x) || gradeRank(x.b.grade) - gradeRank(y.b.grade) || fm(y) - fm(x),
+    family: (x,y) => fm(y) - fm(x) || sc(y) - sc(x),
+    wait: (x,y) => (!x.lm !== !y.lm ? (x.lm ? 1 : -1) : x.lm && y.lm && x.lm !== y.lm ? x.lm.localeCompare(y.lm) : 0) || sc(y) - sc(x),
+    code: () => 0,
+  };
+  const k = keys[by] || keys.score;
+  return [...pool].sort((x,y) => (missedFirst ? (y.missed ? 1 : 0) - (x.missed ? 1 : 0) : 0) || k(x,y) || byCodeNum(x,y));
+}
+/* Walks the sorted pool and gives each family its share until the available quantity (total) or the family count runs out.
+   Stops at the first family that doesn't fit, so nobody jumps the queue. */
+export function planShares(sorted, basis, { total = null, count = null } = {}){
+  const picked = [], rest = []; let used = 0, members = 0;
+  for(const x of sorted){
+    const fam = famSize(x.b), v = shareFor(basis, fam);
+    const full = (count != null && picked.length >= count) || (total != null && used + v > total + 1e-9) || rest.length;
+    if(full){ rest.push({ ...x, fam, value:v }); continue; }
+    picked.push({ ...x, fam, value:v }); used += v; members += fam || 1;
+  }
+  return { picked, rest, used, members, left: total != null ? total - used : null };
+}
+
+/* ---------- passwords ---------- */
+export const minPin = role => role === "manager" ? 8 : 6;

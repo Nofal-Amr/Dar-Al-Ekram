@@ -57,7 +57,7 @@ function makeData(){
       job: pick(JOBS), income: rnd() < 0.5 ? String(int(3, 20) * 100) : "", pension: rnd() < 0.4 ? String(int(5, 30) * 100) : "", housing: pick(HOUSING),
       family_size: kidsN + 1 + (rnd() < 0.3 ? 1 : 0), status: rnd() < 0.88 ? "نشط" : pick(["انتظار","موقوف","ملغي"]),
       last_review: rnd() < 0.6 ? `2025-${pad(int(1, 12))}-${pad(int(1, 28))}` : null, next_review: null, notes: "",
-      children, source: "بيانات تجريبية", created_at: "2026-01-01T09:00:00Z", updated_at: "2026-01-01T09:00:00Z", created_by: managerId, archived_at: null, archived_by: null,
+      children, tags: rnd() < 0.7 ? [pick(["بنك الطعام موسمي","بنك الطعام شهري","مصر الخير","لحوم الأضاحي"])] : [], photos: {}, source: "بيانات تجريبية", created_at: "2026-01-01T09:00:00Z", updated_at: "2026-01-01T09:00:00Z", created_by: managerId, archived_at: null, archived_by: null,
     });
   }
   const batches = [], batch_items = [];
@@ -75,7 +75,11 @@ function makeData(){
   addBatch(aid_types[4], "2026-08", "مصروف", 90, 0.85);
   addBatch(aid_types[0], "2026-09", "معتمد", 60, 0.4);
   addBatch(aid_types[5], "2026-09", "مسودة", 45, 0);
-  return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [] , ids: { manager: managerId, worker: workerId, helper: helperId } };
+  const tasks = [
+    { id: uuid(), title: "نتصل بمدرسة أولاد حالة 012 عشان شهادات القيد", notes: "", due: "2026-09-28", beneficiary_id: beneficiaries[11].id, assignee: workerId, done_at: null, done_by: null, created_at: "2026-09-20T09:00:00Z", created_by: managerId, archived_at: null },
+    { id: uuid(), title: "نستلم كرتونة البيض من بنك الطعام", notes: "", due: "2026-09-22", beneficiary_id: null, assignee: null, done_at: null, done_by: null, created_at: "2026-09-18T09:00:00Z", created_by: managerId, archived_at: null },
+  ];
+  return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks, ids: { manager: managerId, worker: workerId, helper: helperId } };
 }
 
 export function createDemoClient(){
@@ -99,13 +103,13 @@ export function createDemoClient(){
           if(table === "beneficiaries" && r.national_id && rows().some(x => x.national_id === r.national_id && x.id !== r.id)) throw { message: "duplicate key value violates unique constraint national_id" };
           const i = r.id ? rows().findIndex(x => x.id === r.id) : -1;
           if(i >= 0){ Object.assign(rows()[i], r); return rows()[i]; }
-          const row = { id: r.id || (table === "activity_log" ? rows().length + 1 : uuid()), created_at: now, ...(table === "activity_log" ? { at: now, by: session.user.id } : {}), ...(table === "beneficiaries" ? { archived_at: null } : {}), ...r };
+          const row = { id: r.id || (table === "activity_log" ? rows().length + 1 : uuid()), created_at: now, ...(table === "activity_log" || table === "calls" ? { at: now, by: session.user.id } : {}), ...(table === "beneficiaries" ? { archived_at: null, tags: [], photos: {} } : {}), ...r };
           rows().push(row); return row;
         });
         return { data: st.single ? out[0] : out, error: null };
       }
       let found = rows().filter(match);
-      if(st.op === "update"){ found.forEach(r => Object.assign(r, st.payload, table === "beneficiaries" ? { updated_at: now } : {})); return { data: found, error: null }; }
+      if(st.op === "update"){ found.forEach(r => Object.assign(r, st.payload, table === "beneficiaries" ? { updated_at: now } : {})); const copy = found.map(r => JSON.parse(JSON.stringify(r))); return { data: st.single ? copy[0] : copy, error: null }; }
       if(st.op === "delete"){ db[table] = rows().filter(r => !match(r)); return { data: found, error: null }; }
       if(st.order){ const [c, asc] = st.order; found = [...found].sort((a, b) => (a[c] > b[c] ? 1 : a[c] < b[c] ? -1 : 0) * (asc ? 1 : -1)); }
       if(st.range) found = found.slice(st.range[0], st.range[1] + 1);
@@ -124,7 +128,7 @@ export function createDemoClient(){
     };
     return b;
   }
-  const listeners = [];
+  const listeners = [], photos = new Map();
   return {
     demo: true,
     auth: {
@@ -135,6 +139,11 @@ export function createDemoClient(){
       updateUser: async () => ({ data: {}, error: null }),
     },
     from: query,
+    // Photos stay in this tab's memory only.
+    storage: { from: () => ({
+      upload: async (path, blob) => { await delay(); const f = netFail(); if(f) return f; photos.set(path, blob); return { data: { path }, error: null }; },
+      download: async path => { await delay(); return photos.has(path) ? { data: photos.get(path), error: null } : { data: null, error: { message: "not found" } }; },
+    }) },
     rpc: async (fn, args) => {
       await delay(); const f = netFail(); if(f) return f;
       if(fn === "set_received"){ const it = db.batch_items.find(x => x.id === args.item_id); if(!it) return { error: { message: "not found" } };

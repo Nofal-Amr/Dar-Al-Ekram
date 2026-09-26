@@ -1,8 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num } from "./core.js";
+import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num,
+  STAGE_GROUPS, STAGES, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -22,8 +23,8 @@ const sb = DEMO ? (await import("./demo.js")).createDemoClient()
 /* ================= state ================= */
 let me = null;              // {id, full_name, username, role, active}
 let role = "worker", realRole = "worker";
-const B = new Map(), T = new Map(), K = new Map(), P = new Map();   // beneficiaries, types, batches(with items), profiles
-let loaded = false, view = "home", peopleQ = "", peopleF = "all", peopleLimit = 100;
+const B = new Map(), T = new Map(), K = new Map(), P = new Map(), C = new Map(), TK = new Map();   // beneficiaries, types, batches(with items), profiles, calls, tasks
+let loaded = false, view = "home", peopleQ = "", peopleF = "all", peopleSort = "code", peopleLimit = 100;
 const PAGE = 100;   // rows drawn at a time — keeps the Windows 7 PC responsive
 const logCache = new Map();
 /* Form drafts (localStorage). Wiped on save, on «إلغاء», and on logout. */
@@ -84,14 +85,16 @@ async function logIt(entity, id, text){ if(!canWrite() || !text) return; await s
 /* ================= mapping ================= */
 const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
-  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null });
+  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{} });
 const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
-  family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[] });
+  family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
-  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
+  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, week:r.week||null, donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
 const fromI = r => ({ id:r.id, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
+const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||null, result:r.result, at:r.at, by:r.by });
+const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
 const toI = (it, batchId, i) => ({ batch_id:batchId, beneficiary_id:it.bid||null, position:i, code:it.code, name:it.name, national_id:it.nationalId||null, phone:it.phone||null, family_size:+it.familySize||null, value:+it.value||0, reason:it.reason||"", received:!!it.received, received_at:it.received?new Date().toISOString():null });
 
 /* ================= loading ================= */
@@ -108,12 +111,14 @@ let renderTimer = null;
 function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(() => { render(); refreshSheet(); }, 60); }
 function memo(fn){ let v = -1, out; return () => { if(v !== dataVer){ out = fn(); v = dataVer; } return out; }; }
 
-function setAll(bs, ts, ks, is, ps){
+function setAll(bs, ts, ks, is, ps, cs = [], tk = []){
   B.clear(); bs.forEach(r => B.set(r.id, fromB(r)));
   T.clear(); ts.forEach(r => T.set(r.id, fromT(r)));
   const byBatch = {}; is.forEach(r => (byBatch[r.batch_id] ||= []).push(r));
   K.clear(); ks.forEach(r => K.set(r.id, fromK(r, byBatch[r.id])));
   P.clear(); ps.forEach(r => P.set(r.id, r));
+  C.clear(); cs.forEach(r => C.set(r.id, fromC(r)));
+  TK.clear(); tk.forEach(r => TK.set(r.id, fromTk(r)));
   overlayQueue();
 }
 let reloading = null;
@@ -121,12 +126,12 @@ async function reload(){
   if(reloading) return reloading;
   reloading = (async () => {
     try{
-      const [bs, ts, ks, is, ps] = await Promise.all([fetchAll("beneficiaries"), fetchAll("aid_types"), fetchAll("batches"), fetchAll("batch_items"), fetchAll("profiles")]);
-      setAll(bs, ts, ks, is, ps); snapRaw = { bs, ts, ks, is, ps };
+      const [bs, ts, ks, is, ps, cs, tk] = await Promise.all([fetchAll("beneficiaries"), fetchAll("aid_types"), fetchAll("batches"), fetchAll("batch_items"), fetchAll("profiles"), fetchAll("calls").catch(() => []), fetchAll("tasks").catch(() => [])]);
+      setAll(bs, ts, ks, is, ps, cs, tk); snapRaw = { bs, ts, ks, is, ps, cs, tk };
       loaded = true; loadError = null; fromSnapshot = null; dataVer++; render(); refreshSheet(); saveSnapshotSoon();
     }catch(e){
       loadError = e;
-      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
+      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
       render(); netBanner(); if(loaded) toast(errMsg(e));
     }
     finally{ reloading = null; }
@@ -152,13 +157,15 @@ function applyChange(table, p){
       if(i >= 0) k.items[i] = it; else { k.items.push(it); k.items.sort((a,b) => a.position - b.position); } upsertRaw("is", row); }
     else if(oldId){ for(const k of K.values()){ const i = k.items.findIndex(x => x.id === oldId); if(i >= 0){ k.items.splice(i,1); break; } } }
   }
+  else if(table === "calls"){ if(row){ C.set(row.id, fromC(row)); upsertRaw("cs", row); } }
+  else if(table === "tasks"){ if(row){ TK.set(row.id, fromTk(row)); upsertRaw("tk", row); } }
   overlayQueue(); logCache.clear(); changed();
 }
 let rt = null;
 function subscribeRealtime(){
   if(rt) return;
   rt = sb.channel("all-changes");
-  ["beneficiaries","batches","batch_items","aid_types"].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
+  ["beneficiaries","batches","batch_items","aid_types","calls","tasks"].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
   rt.subscribe();
 }
 
@@ -166,7 +173,7 @@ function subscribeRealtime(){
    The last good copy of the data, so the app still opens — read-only — when the internet drops.
    Stays on this device only and is wiped on logout. */
 let snapRaw = null, snapTimer = null;
-function upsertRaw(key, row){ if(!snapRaw) return; const a = snapRaw[key], i = a.findIndex(r => r.id === row.id); if(i >= 0) a[i] = row; else a.push(row); }
+function upsertRaw(key, row){ if(!snapRaw) return; const a = (snapRaw[key] ||= []), i = a.findIndex(r => r.id === row.id); if(i >= 0) a[i] = row; else a.push(row); }
 function idb(){ return new Promise((res, rej) => { const r = indexedDB.open("dar-alekram", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbSet(k, v){ try{ const db = await idb(); await new Promise((res, rej) => { const tx = db.transaction("kv","readwrite"); v === undefined ? tx.objectStore("kv").delete(k) : tx.objectStore("kv").put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }catch(e){} }
 async function idbGet(k){ try{ const db = await idb(); return await new Promise((res, rej) => { const r = db.transaction("kv").objectStore("kv").get(k); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }catch(e){ return null; } }
@@ -221,27 +228,83 @@ function lastByType(typeId){ const c=lastByTypeMemo.get(typeId); if(c&&c.v===dat
 function eligible(t,b){ if(b.status!=="نشط") return false; if(!t.caseTypes||!t.caseTypes.length) return true; return t.caseTypes.includes(b.caseType||"غير محدد"); }
 function reviewDue(b){ if(b.status!=="نشط"&&b.status!=="انتظار") return false; if(b.nextReview) return b.nextReview<=today; if(!b.lastReview) return true; return addDays(b.lastReview,365)<=today; }
 function kidsTurning18(b){ return (b.children||[]).filter(k=>{ const a=age(k.birth); return a!==""&&a>=17&&a<18; }); }
-const itemFor = (b,value,reason) => ({bid:b.id,code:b.code,name:b.name,nationalId:b.nationalId||"",phone:b.phone||"",familySize:b.familySize||"",value,received:false,reason});
-function propose(t,month,count,cooldown){
-  const last=lastByType(t.id); const taken=new Set();
-  for(const k of K.values()) if(k.typeId===t.id&&k.month===month) k.items.forEach(i=>taken.add(i.bid));
-  const pool=[]; let excludedRecent=0, excludedSame=0;
+const itemFor = (b,value,reason) => ({bid:b.id,code:b.code,name:b.name,nationalId:b.nationalId||"",phone:b.phone||"",familySize:famSize(b)||"",value,received:false,reason});
+/* ---------- the planner ----------
+   Who can be in a new list, in which order, and how much each family gets. Nothing is hidden: families left out are
+   returned with the reason, so the manager can see (and explain) every decision. */
+const sameSlot = (k, month, week) => k.month===month && (!k.week || !week || k.week===week);
+function candidates(t, { month, week, cooldown, caseTypes, tag }){
+  const last=lastByType(t.id), taken=new Set(), out=[], excluded=[];
+  for(const k of K.values()) if(!k.archivedAt && k.typeId===t.id && sameSlot(k,month,week)) k.items.forEach(i=>taken.add(i.bid));
+  // didn't collect last time: in the latest approved/paid list of this type, not marked received
+  const prev=[...K.values()].filter(k=>counts(k)&&k.typeId===t.id&&!k.single&&!sameSlot(k,month,week)).sort((x,y)=>(y.month||"").localeCompare(x.month||"")||(y.week||0)-(x.week||0))[0];
+  const missed=new Set(prev?prev.items.filter(i=>!i.received).map(i=>i.bid):[]);
   for(const b of people()){
-    if(!eligible(t,b)) continue;
-    if(taken.has(b.id)){excludedSame++; continue;}
+    if(b.status!=="نشط") continue;
+    if(caseTypes.length && !caseTypes.includes(b.caseType||"غير محدد")) continue;
+    if(tag && !(b.tags||[]).includes(tag)) continue;
     const lm=last.get(b.id);
-    if(lm&&cooldown>0&&(mIdx(month)-mIdx(lm))<=cooldown){excludedRecent++; continue;}
-    pool.push({b,lm});
+    if(taken.has(b.id)){ excluded.push({b,why:"موجودة في كشف تاني لنفس "+(week?"الأسبوع":"الشهر")}); continue; }
+    if(lm&&cooldown>0&&(mIdx(month)-mIdx(lm))<=cooldown){ excluded.push({b,why:`أخدت ${t.name} في ${mLabel(lm)}`}); continue; }
+    out.push({b,lm,missed:missed.has(b.id)});
   }
-  pool.sort((x,y)=>{
-    if(!x.lm!==!y.lm) return x.lm?1:-1;
-    if(x.lm&&y.lm&&x.lm!==y.lm) return x.lm.localeCompare(y.lm);
-    const g=gradeRank(x.b.grade)-gradeRank(y.b.grade); if(g) return g;
-    const s=(y.b.score??-1)-(x.b.score??-1); if(s) return s;
-    return String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true});
+  return { pool:out, excluded, prev };
+}
+function whyLine(x, t, unit){
+  const p=[x.missed?"ماجاتش تستلم المرة اللي فاتت":"", x.b.score!=null?`الدرجة ${x.b.score}%`:x.b.grade?`تقدير ${x.b.grade}`:"", x.fam?`${x.fam} أفراد`:"عدد الأفراد مش متسجل", x.lm?`آخر ${t.name}: ${mLabel(x.lm)}`:`ماخدتش ${t.name} قبل كده`];
+  return p.filter(Boolean).join(" · ");
+}
+/* ---------- calls ----------
+   Every tap on «ردّت / ماردتش / رقم غلط» is one row in `calls`. The latest one colours the row. */
+const CALL_RES = { "رد":{cls:"ok",label:"ردّت ✓"}, "مردش":{cls:"no",label:"ماردتش"}, "رقم غلط":{cls:"bad",label:"رقم غلط"} };
+const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ for(const key of [c.bid+"|"+(c.batchId||""), c.bid+"|*"]){ const p=m.get(key); if(!p||c.at>p.at) m.set(key,c); } } return m; });
+// Inside a list: the latest call for that list. Elsewhere: the latest call in the last 3 days.
+function lastCall(bid, batchId){ const c=callIndex().get(bid+"|"+(batchId||"*")); if(!c) return null; if(!batchId && c.at<addDays(today,-3)) return null; return c; }
+let dialed=null;   // {bid, batchId}: the row whose dialer we just opened — it shows the three answer buttons
+function callCell(bid, phone, batchId, big){
+  const ph=cleanPhone(phone), c=lastCall(bid,batchId), open=dialed&&dialed.bid===bid&&(dialed.batchId||"")===(batchId||"");
+  const chip=c?`<span class="cchip ${CALL_RES[c.result].cls}">${CALL_RES[c.result].label}<small>${c.at.slice(0,10)===today?"النهارده":dLabel(c.at)}</small></span>`:"";
+  if(!validPhone(ph)) return `<span class="ccell">${chip}<span class="sub">مفيش رقم</span></span>`;
+  const canLog=role!=="viewer";
+  return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}</span>`
+    :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>`:""}
+    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a></span>`;
+}
+const rowCallCls = (bid,batchId) => { const c=lastCall(bid,batchId); return c?"c-"+CALL_RES[c.result].cls:""; };
+function bindCalls(root, redraw){
+  root.querySelectorAll("[data-dial]").forEach(a=>a.addEventListener("click",()=>{ dialed={bid:a.dataset.dial,batchId:a.dataset.cbatch||null}; setTimeout(redraw,400); }));
+  root.querySelectorAll("[data-copen]").forEach(b=>b.onclick=()=>{ dialed={bid:b.dataset.copen,batchId:b.dataset.cbatch||null}; redraw(); });
+  root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
+    b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
+    const { data, error } = await sb.from("calls").insert({beneficiary_id:bid, batch_id:batchId, result:b.dataset.cres, by:me.id}).select().single();
+    if(error){ b.disabled=false; toast(errMsg(error)); return; }
+    C.set(data.id, fromC(data)); upsertRaw("cs", data); dialed=null; changed(); redraw();
   });
-  const picked=pool.slice(0,count).map(({b,lm})=>itemFor(b,t.amount,(lm?`آخر ${t.name}: ${mLabel(lm)}`:`لم يستلم ${t.name} من قبل`)+(b.grade?` · تقدير ${b.grade}`:"")));
-  return {picked,poolSize:pool.length,excludedRecent,excludedSame};
+}
+// Coming back from the phone app: redraw so the answer buttons show on the row that was called.
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden&&dialed){ render(); refreshSheet(); } });
+
+/* ---------- school certificates ---------- */
+const SY = schoolYear(now);
+const stageOf = k => normalizeStage(k.school) || k.school || "";
+const certDue = k => inSchool(stageOf(k)) && String(k.cert||"")!==String(SY) && (age(k.birth)===""||age(k.birth)<26);
+const certList = memo(() => people().filter(b=>b.status==="نشط").flatMap(b=>(b.children||[]).map((k,i)=>({b,k,i})).filter(x=>certDue(x.k))));
+
+/* ---------- tasks ----------
+   Manual to-dos live in `tasks`. The rest are worked out from the data every time, so they tick themselves off. */
+const openTasks = memo(() => [...TK.values()].filter(t=>!t.archivedAt&&!t.doneAt).sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999")||(a.createdAt||"").localeCompare(b.createdAt||"")));
+const missingData = memo(() => people().filter(b=>b.status==="نشط"&&(!famSize(b)||!b.caseType||!validPhone(b.phone))));
+function autoTasks(){
+  const out=[], active=people().filter(b=>b.status==="نشط");
+  if(isMgr()) batches().filter(k=>k.status==="مسودة").forEach(k=>out.push({ic:"list",tone:"red",t:`اعتمد «${k.title}»`,s:`${num(k.items.length)} حالة مستنية الاعتماد`,go:"batch:"+k.id}));
+  batches().filter(k=>k.status==="معتمد").forEach(k=>{ const left=k.items.filter(i=>!i.received); if(!left.length) return;
+    const notCalled=left.filter(i=>i.bid&&!lastCall(i.bid,k.id)).length;
+    out.push({ic:"phone",tone:"",t:`«${k.title}»: فاضل ${num(left.length)} ماستلموش`,s:notCalled?`${num(notCalled)} لسه ماحدش كلّمهم`:"كلهم اتكلموا",go:"batch:"+k.id}); });
+  const certs=certList(); if(certs.length) out.push({ic:"calendar",tone:"",t:`شهادات القيد ${syLabel(SY)}`,s:`${num(certs.length)} طفل في ${num(new Set(certs.map(x=>x.b.id)).size)} أسرة لسه ماجابوش الشهادة`,go:"certs"});
+  const due=people().filter(reviewDue); if(due.length) out.push({ic:"search",tone:"",t:"مراجعة / بحث ميداني",s:`${num(due.length)} حالة ميعادها جه`,go:"due"});
+  const turning=active.filter(b=>kidsTurning18(b).length); if(turning.length) out.push({ic:"cake",tone:"",t:"أبناء هيكملوا 18 سنة",s:`${num(turning.length)} أسرة`,go:"turning"});
+  const miss=missingData(); if(miss.length&&canWrite()) out.push({ic:"edit",tone:"",t:"كمّل بيانات الحالات",s:`${num(miss.length)} حالة ناقصها عدد الأفراد أو النوع أو التليفون`,go:"missing"});
+  return out;
 }
 function notReceived(t,months){
   const since=mIdx(curMonth)-months+1; const got=new Set(receipts().filter(r=>r.typeId===t.id&&mIdx(r.month)>=since).map(r=>r.bid)); const last=lastByType(t.id);
@@ -277,11 +340,11 @@ function setupScreen(){
   showAuth(`<h1>أهلاً بيك</h1><p class="c">أول مرة؟ اعمل حساب مدير الجمعية.<br>الحساب ده بس اللي هيقدر يضيف الموظفين.</p>
     <label class="f">اسمك<input type="text" id="s_n"></label>
     <label class="f">رقم تليفونك (هتدخل بيه)<input type="tel" id="s_u" inputmode="tel" autocomplete="username" dir="ltr"></label>
-    <label class="f">رقم سري (6 أرقام أو أكتر)<input type="password" id="s_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
+    <label class="f">رقم سري (8 أرقام أو أكتر)<input type="password" id="s_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
     <button class="btn pri" id="s_go">إنشاء حساب المدير</button>`);
   $("#s_go").onclick = async () => {
     const n=$("#s_n").value.trim(), u=cleanUser($("#s_u").value), p=$("#s_p").value;
-    if(!n||u.length<3||p.length<6){ toast("اكمل البيانات — الرقم السري 6 أرقام على الأقل"); return; }
+    if(!n||u.length<3||p.length<minPin("manager")){ toast("اكمل البيانات — رقم المدير السري 8 أرقام على الأقل"); return; }
     $("#s_go").innerHTML=`<span class="spin"></span>`;
     const { data, error } = await sb.functions.invoke("manage-users", { body:{action:"bootstrap", full_name:n, username:u, password:p} });
     if(error || data?.error){ $("#s_go").textContent="إنشاء حساب المدير"; toast(data?.error==="already_setup"?"فيه مدير متسجل خلاص — سجّل دخول":errMsg(error||data.error)); if(data?.error==="already_setup") loginScreen(); return; }
@@ -372,15 +435,26 @@ function render(){
 function batchRow(k){
   const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const rec=k.items.filter(i=>i.received).length;
   return `<button class="item" data-batch="${k.id}"><span class="grow"><span class="nm">${esc(k.title||k.typeName)}</span><br>
-    <span class="sub">${mLabel(k.month)} · ${num(k.items.length)} حالة · ${num(total)} ${esc(k.unit)}${counts(k)?` · استلم ${rec} من ${k.items.length}`:""}</span></span>${statusChip(k.status)}</button>`;
+    <span class="sub">${mLabel(k.month)}${k.week?` · أسبوع ${k.week}`:""} · ${num(k.items.length)} حالة · ${num(total)} ${esc(k.unit)}${counts(k)?` · استلم ${rec} من ${k.items.length}`:""}</span></span>${statusChip(k.status)}</button>`;
 }
 const statusChip = s => `<span class="chip ${s==="مسودة"?"grey":s==="معتمد"?"blue":"gold"}">${esc(s)}</span>`;
 function filteredPeople(){
   const q=norm(peopleQ);
-  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
+  const miss=new Set(missingData().map(b=>b.id));
+  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
   if(q) list=list.filter(b=>norm(b.name).includes(q)||(b.nationalId||"").includes(q)||(q.replace(/^0/,"").length>3&&cleanPhone(b.phone).includes(q.replace(/^0/,"")))||String(b.code)===q.padStart(3,"0")||String(b.code)===q);
+  const S=PEOPLE_SORT[peopleSort]; if(S&&S.fn) list=[...list].sort((a,b)=>S.fn(a,b)||String(a.code).localeCompare(String(b.code),"en",{numeric:true}));
   return list;
 }
+const allTags = memo(() => [...new Set(people().flatMap(b=>b.tags||[]))].sort());
+/* The cases list is ordered by what the dropdown says — nothing hidden. */
+const PEOPLE_SORT = {
+  code:{label:"رقم الحالة"},
+  name:{label:"الاسم (أ ← ي)", fn:(a,b)=>norm(a.name).localeCompare(norm(b.name),"ar")},
+  score:{label:"الدرجة (الأعلى الأول)", fn:(a,b)=>(b.score??-1)-(a.score??-1)||gradeRank(a.grade)-gradeRank(b.grade)},
+  family:{label:"عدد الأفراد (الأكبر الأول)", fn:(a,b)=>famSize(b)-famSize(a)},
+  last:{label:"آخر استلام (الأقدم الأول)", fn:(a,b)=>{ const m=lastAnyMap(); return (m.get(a.id)||"").localeCompare(m.get(b.id)||""); }},
+};
 function vPeople(){
   const all=people(); const list=filteredPeople();
   return `
@@ -389,22 +463,25 @@ function vPeople(){
     <select id="pf" style="width:auto;flex:0 0 auto" aria-label="تصفية">
       <option value="all">الكل (${num(all.length)})</option>
       <option value="due" ${peopleF==="due"?"selected":""}>محتاجة مراجعة</option>
+      <option value="missing" ${peopleF==="missing"?"selected":""}>ناقصها بيانات</option>
       <optgroup label="الحالة">${STATUSES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       <optgroup label="النوع">${CASE_TYPES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
+      ${allTags().length?`<optgroup label="قايمة المتبرع">${allTags().map(t=>`<option value="tag:${esc(t)}" ${peopleF==="tag:"+t?"selected":""}>${esc(t)}</option>`).join("")}</optgroup>`:""}
     </select>
+    <label class="sortl">مترتبة حسب <select id="ps" aria-label="الترتيب">${Object.entries(PEOPLE_SORT).map(([k,v])=>`<option value="${k}" ${peopleSort===k?"selected":""}>${v.label}</option>`).join("")}</select></label>
   </div>
   <div class="row" style="margin-bottom:8px"><span class="sub grow">${num(list.length)} حالة</span>
     <button class="btn sm" id="pPhones">${ic("phone")}أرقام القائمة دي</button>
     ${isMgr()?`<button class="btn sm" id="pX">تنزيل Excel</button>`:""}
     ${canWrite()?`<button class="btn sm pri" id="addP">${ic("plus")}حالة جديدة</button>`:""}
   </div>
-  ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
-    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${b.familySize??"—"}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
+  ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>الدرجة</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
+    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
   </tbody></table></div>`:""}
   <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,peopleLimit).map(b=>`
     <button class="item" data-open="${b.id}">
       <span class="code">${esc(b.code)}</span>
-      <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${b.familySize?` · ${b.familySize} أفراد`:""}</span></span>
+      <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${famSize(b)?` · ${famSize(b)} أفراد`:""}${peopleSort==="score"&&b.score!=null?` · الدرجة ${b.score}%`:""}${peopleSort==="last"?` · آخر استلام ${lastAnyMap().get(b.id)?mLabel(lastAnyMap().get(b.id)):"—"}`:""}</span></span>
       ${reviewDue(b)?`<span class="chip red">مراجعة</span>`:""}
       ${b.caseType?`<span class="chip">${esc(b.caseType)}</span>`:""}
       ${b.status!=="نشط"?`<span class="chip ${b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span>`:""}
@@ -416,7 +493,8 @@ function vBatches(){
   const list=batches();
   return `
   <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${isMgr()?`<button class="btn pri" id="newK">${ic("list")}كشف جديد</button>`:""}</div>
-  <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${isMgr()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>`;
+  <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${isMgr()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>
+  ${isMgr()?(()=>{ const n=[...K.values()].filter(k=>k.archivedAt).length; return `<div class="bar"><button class="btn sm" data-go="archive">${ic("archive")}الكشوف المؤرشفة (${num(n)})</button></div>`; })():""}`;
 }
 let rep={typeId:"",months:3,month:curMonth};
 function vReports(){
@@ -483,9 +561,16 @@ function vSettings(){
   <h3>نسخة احتياطية</h3>
   <p class="sub" style="margin-top:0">نزّل كل الحالات وكل الصرف في ملف Excel واحد.</p>
   <div class="bar"><button class="btn" id="backup">${ic("download")}تنزيل نسخة احتياطية</button></div>`:(realRole==="manager"?`<div class="bar"><button class="btn" data-preview="manager">${ic("undo")}رجوع لشاشة المدير</button></div>`:"")}
-  ${isMgr()?(()=>{ const arch=archivedPeople(); return `<h3>الأرشيف</h3>
-  <p class="sub" style="margin-top:0">الحالات المؤرشفة مش بتظهر في القوائم ولا الكشوف، بس سجلها كامل محفوظ.</p>
-  ${arch.length?`<div class="list">${arch.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">اتأرشفت ${dLabel(b.archivedAt)}</span></span><button class="btn sm" data-restore="${b.id}">${ic("restore")}رجّعها</button></div>`).join("")}</div>`:`<div class="empty">الأرشيف فاضي</div>`}`; })():""}
+  ${isMgr()?(()=>{ const arch=archivedPeople(), ak=[...K.values()].filter(k=>k.archivedAt).sort((a,b)=>b.archivedAt.localeCompare(a.archivedAt)), at=[...T.values()].filter(t=>t.archivedAt);
+  const row=(title,sub,attr)=>`<div class="item"><span class="grow"><span class="nm">${esc(title)}</span><br><span class="sub">${esc(sub)}</span></span><button class="btn sm" ${attr}>${ic("restore")}رجّعه</button></div>`;
+  return `<h3 id="archive">الأرشيف</h3>
+  <p class="sub" style="margin-top:0">أي حاجة بتتأرشف بتيجي هنا: مش بتظهر في القوايم، بس كلها محفوظة وترجع بضغطة.</p>
+  <h4>الحالات (${num(arch.length)})</h4>
+  ${arch.length?`<div class="list">${arch.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">اتأرشفت ${dLabel(b.archivedAt)}</span></span><button class="btn sm" data-restore="${b.id}">${ic("restore")}رجّعها</button></div>`).join("")}</div>`:`<div class="empty">مفيش</div>`}
+  <h4>الكشوف (${num(ak.length)})</h4>
+  ${ak.length?`<div class="list">${ak.map(k=>row(k.title,`${k.status} · ${num(k.items.length)} أسرة · اتأرشف ${dLabel(k.archivedAt)}`,`data-restorek="${k.id}"`)).join("")}</div>`:`<div class="empty">مفيش</div>`}
+  <h4>أنواع المساعدات (${num(at.length)})</h4>
+  ${at.length?`<div class="list">${at.map(t=>row(t.name,`اتأرشف ${dLabel(t.archivedAt)}`,`data-restoret="${t.id}"`)).join("")}</div>`:`<div class="empty">مفيش</div>`}`; })():""}
   <h3>التطبيق</h3>
   ${installBlock()}
   <h3>العرض</h3>
@@ -502,12 +587,15 @@ function bindView(){
   v.querySelectorAll("[data-type]").forEach(el=>el.onclick=()=>openType(el.dataset.type));
   v.querySelectorAll("[data-user]").forEach(el=>el.onclick=()=>openUser(el.dataset.user));
   v.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>go(el.dataset.go));
+  v.querySelectorAll("[data-task]").forEach(el=>el.onclick=()=>taskSheet(el.dataset.task));
+  v.querySelectorAll("[data-done]").forEach(el=>el.onclick=()=>doneTask(el.dataset.done,el));
   const on=(id,ev,fn)=>{const el=$(id); if(el) el[ev]=fn;};
   on("#pq","oninput",e=>{ peopleQ=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ peopleLimit=PAGE; const pos=$("#pq")?.selectionStart; render(); const n=$("#pq"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } },180); });
   on("#pf","onchange",e=>{peopleF=e.target.value; peopleLimit=PAGE; render();});
+  on("#ps","onchange",e=>{peopleSort=e.target.value; peopleLimit=PAGE; render();});
   on("#pMore","onclick",()=>{ peopleLimit+=PAGE; render(); });
   on("#addP","onclick",()=>editPerson(null));
-  on("#pPhones","onclick",()=>phoneSheet("الحالات المعروضة", filteredPeople().map(b=>({name:b.name,phone:b.phone,code:b.code}))));
+  on("#pPhones","onclick",()=>phoneSheet("الحالات المعروضة", filteredPeople().map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
   on("#newK","onclick",()=>newBatch());
   on("#newT","onclick",()=>openType(null));
@@ -515,9 +603,9 @@ function bindView(){
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
-  on("#rP","onclick",()=>{const t=T.get(rep.typeId); phoneSheet(`لم يستلموا ${t.name} — آخر ${rep.months} شهر`, notReceived(t,rep.months).map(({b})=>({name:b.name,phone:b.phone,code:b.code})));});
+  on("#rP","onclick",()=>{const t=T.get(rep.typeId); phoneSheet(`لم يستلموا ${t.name} — آخر ${rep.months} شهر`, notReceived(t,rep.months).map(({b})=>({bid:b.id,name:b.name,phone:b.phone,code:b.code})));});
   on("#rX","onclick",()=>{const t=T.get(rep.typeId); const rows=[["م","رقم الحالة","الاسم","الرقم القومي","التليفون","النوع","آخر استلام"]]; notReceived(t,rep.months).forEach(({b,lm},i)=>rows.push([i+1,b.code,b.name,b.nationalId||"",cleanPhone(b.phone),b.caseType||"",lm?mLabel(lm):"لم يستلم"])); xlsx({"كشف":rows},`لم يستلموا ${t.name} - آخر ${rep.months} شهر.xlsx`);});
-  on("#dueP","onclick",()=>phoneSheet("حالات محتاجة مراجعة", people().filter(reviewDue).map(b=>({name:b.name,phone:b.phone,code:b.code}))));
+  on("#dueP","onclick",()=>phoneSheet("حالات محتاجة مراجعة", people().filter(reviewDue).map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
   v.querySelectorAll("[data-preview]").forEach(el=>el.onclick=()=>setPreview(el.dataset.preview));
   on("#bigText","onclick",()=>{ document.body.classList.toggle("big"); try{localStorage.setItem("big",document.body.classList.contains("big")?"1":"");}catch(e){} render(); });
   on("#backup","onclick",backup);
@@ -525,6 +613,10 @@ function bindView(){
   on("#logout","onclick",logout);
   on("#myPin","onclick",changeMyPin);
   on("#installApp","onclick",installApp);
+  v.querySelectorAll("[data-restorek]").forEach(el=>el.onclick=async()=>{ const id=el.dataset.restorek; el.disabled=true;
+    if(await run(sb.from("batches").update({archived_at:null,archived_by:null}).eq("id",id),"الكشف رجع ✓")){ await logIt("batch",id,"إرجاع من الأرشيف"); refreshBatch(id); } else el.disabled=false; });
+  v.querySelectorAll("[data-restoret]").forEach(el=>el.onclick=async()=>{ el.disabled=true;
+    if(await run(sb.from("aid_types").update({archived_at:null}).eq("id",el.dataset.restoret),"رجع ✓")) refreshTable("aid_types"); else el.disabled=false; });
   v.querySelectorAll("[data-restore]").forEach(el=>el.onclick=async()=>{ const id=el.dataset.restore; el.disabled=true;
     if(await run(sb.from("beneficiaries").update({archived_at:null,archived_by:null}).eq("id",id),"رجعت ✓")){ await logIt("beneficiary",id,"إرجاع من الأرشيف"); refreshPerson(id); } else el.disabled=false; });
 }
@@ -536,6 +628,11 @@ function go(what){
   else if(what==="batches"){ view="batches"; render(); }
   else if(what==="users"){ view="settings"; render(); }
   else if(what==="due"){ view="people"; peopleF="due"; render(); }
+  else if(what==="missing"){ view="people"; peopleF="missing"; render(); }
+  else if(what==="certs") certsSheet();
+  else if(what==="archive"){ view="settings"; render(); setTimeout(()=>$("#archive")?.scrollIntoView(),60); }
+  else if(what==="newtask") taskSheet(null);
+  else if(what.startsWith("batch:")) openBatch(what.slice(6));
   else if(what==="people-active"){ view="people"; peopleF="نشط"; render(); }
   else if(what==="turning"){ view="reports"; render(); }
   else if(what==="give"||what==="print"){
@@ -590,8 +687,11 @@ function vDash(){
     ${isMgr()?`<button class="kpi ${drafts.length?"warn":""}" data-go="batches"><span>مسودات مستنية اعتماد</span><strong>${num(drafts.length)}</strong><small>${num(approved.length)} كشف معتمد شغال</small></button>`:`<div class="kpi"><span>كشوف شغالة</span><strong>${num(approved.length)}</strong><small>معتمدة ولسه بتتسلّم</small></div>`}
   </div>
   ${pending.length&&isMgr()?`<button class="alert" data-go="users"><span>${ic("user")}</span><span class="grow">${num(pending.length)} حساب مستني تفعيل</span><span>‹</span></button>`:""}
-  ${turning.length?`<button class="alert" data-go="turning"><span>${ic("cake")}</span><span class="grow">${num(turning.length)} أسرة فيها ابن هيكمل 18 سنة خلال السنة</span><span>‹</span></button>`:""}
   <div class="dash-grid">
+    <section>
+      <div class="row" style="justify-content:space-between;margin:20px 0 8px"><h3 style="margin:0">المطلوب النهارده</h3>${canWrite()?`<button class="btn sm" data-go="newtask">${ic("plus")}مهمة</button>`:""}</div>
+      ${tasksBoard()}
+    </section>
     <section>
       <h3>كشوف شغالة</h3>
       <div class="list">${approved.length?approved.map(k=>{ const rec=k.items.filter(i=>i.received).length; return `
@@ -599,12 +699,16 @@ function vDash(){
           <span class="prog" aria-label="نسبة التسليم"><i style="width:${pct(rec,k.items.length)}%"></i></span>
           <span class="sub">استلم ${num(rec)} من ${num(k.items.length)} · ${pct(rec,k.items.length)}%</span></span>${statusChip(k.status)}</button>`;}).join(""):`<div class="empty">مفيش كشوف معتمدة حالياً</div>`}</div>
     </section>
-    <section>
-      <h3>محتاجة مراجعة قريب</h3>
-      <div class="list">${due.slice(0,6).map(b=>`<button class="item" data-open="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">آخر مراجعة: ${dLabel(b.lastReview)}</span></span></button>`).join("")||`<div class="empty">كله متراجع ✓</div>`}
-      ${due.length>6?`<button class="item" data-go="due"><span class="grow sub">عرض الكل (${num(due.length)}) ‹</span></button>`:""}</div>
-    </section>
   </div>`;
+}
+function tasksBoard(){
+  const mine=openTasks(), auto=autoTasks();
+  const tRow=t=>{ const late=t.due&&t.due<today, b=t.bid?B.get(t.bid):null;
+    return `<div class="task ${late?"late":""}"><button class="tick" data-done="${t.id}" aria-label="خلصت: ${esc(t.title)}" ${canWrite()||t.assignee===me.id?"":"disabled"}></button>
+      <button class="grow tbody" data-task="${t.id}"><span class="nm">${esc(t.title)}</span><br><span class="sub">${[t.due?(late?"متأخرة — ":"")+dLabel(t.due):"",b?b.name:"",t.assignee?"لـ "+who(t.assignee):""].filter(Boolean).map(esc).join(" · ")}</span></button></div>`; };
+  const aRow=x=>`<button class="task auto" data-go="${x.go}"><span class="aic ${x.tone}">${ic(x.ic)}</span><span class="grow"><span class="nm">${esc(x.t)}</span><br><span class="sub">${esc(x.s)}</span></span><span aria-hidden="true">‹</span></button>`;
+  if(!mine.length&&!auto.length) return `<div class="list"><div class="empty">${ic("smile")} مفيش حاجة مستنياك النهارده</div></div>`;
+  return `<div class="list tasks">${mine.map(tRow).join("")}${auto.map(aRow).join("")}</div>`;
 }
 
 /* ================= simple UI (helpers / non-literate staff) ================= */
@@ -647,8 +751,9 @@ function vSimple(){
     const left=k.items.filter(i=>!i.received);
     return `<button class="s-back" data-s="call">→ رجوع</button>
       <h2 class="s-title">${ic("phone")}لسه ما استلموش <small>${num(left.length)}</small></h2>
-      <div class="s-list">${left.map(it=>{ const ph=cleanPhone(it.phone||B.get(it.bid)?.phone); return `<div class="s-row"><span class="grow"><b>${esc(it.name)}</b><small dir="ltr">${esc(ph||"مفيش رقم")}</small></span>
-        ${validPhone(ph)?`<a class="s-call" href="tel:${ph}">${ic("phone")}اتصل</a>`:`<span class="s-ok muted">—</span>`}</div>`;}).join("")||`<div class="s-empty">كله استلم ✓</div>`}</div>`;
+      <p class="s-hint">اضغط «اتصل»، ولما تخلص المكالمة اختار: ردّت / ماردتش / رقم غلط.</p>
+      <div class="s-list">${left.map(it=>{ const ph=cleanPhone(it.phone||B.get(it.bid)?.phone); return `<div class="s-row ${it.bid?rowCallCls(it.bid,k.id):""}"><span class="grow"><b>${esc(it.name)}</b><small dir="ltr">${esc(ph||"مفيش رقم")}</small></span>
+        ${it.bid?callCell(it.bid,ph,k.id,true):validPhone(ph)?`<a class="s-call" href="tel:${ph}">${ic("phone")}اتصل</a>`:""}</div>`;}).join("")||`<div class="s-empty">كله استلم ✓</div>`}</div>`;
   }
   if(scr==="find"){
     const qq=norm(sq);
@@ -664,7 +769,7 @@ function vSimple(){
     return `<button class="s-back" data-s="find">→ رجوع</button>
       <div class="s-person"><div class="s-ic big">${ic("user")}</div><h2>${esc(b.name)}</h2><p>رقم الحالة <b>${esc(b.code)}</b>${b.familySize?` · <b>${b.familySize}</b> أفراد`:""}${(b.children||[]).length?` · <b>${b.children.length}</b> أطفال`:""}</p>
         ${b.status!=="نشط"?`<p class="s-warn">${ic("alert")}الحالة دي ${esc(b.status)}</p>`:""}
-        ${validPhone(ph)?`<a class="s-call wide" href="tel:${ph}">${ic("phone")}اتصل بيها <span dir="ltr">${ph}</span></a>`:`<p class="sub">مفيش رقم تليفون</p>`}</div>
+        <div style="margin-top:10px">${callCell(b.id,b.phone,null,true)}</div></div>
       <h3 class="s-title">خدت إيه قبل كده؟</h3>
       <div class="s-list">${hist.map(r=>`<div class="s-row ${r.received?"done":""}"><span class="grow"><b>${esc(r.typeName)}</b><small>${mLabel(r.month)}</small></span><span class="s-ok ${r.received?"":"muted"}">${r.received?"✓ استلم":"لسه"}</span></div>`).join("")||`<div class="s-empty">لسه ما خدتش حاجة</div>`}</div>`;
   }
@@ -681,6 +786,7 @@ function bindSimple(){
     if(to==="find") setTimeout(()=>$("#s_q")?.focus(),50);
   });
   v.querySelectorAll("[data-preview]").forEach(el=>el.onclick=()=>setPreview(el.dataset.preview));
+  bindCalls(v, render);
   const q=$("#s_q"); if(q) q.oninput=()=>{ sq=q.value; const pos=q.selectionStart; render(); const n=$("#s_q"); n.focus(); n.setSelectionRange(pos,pos); };
   v.querySelectorAll("[data-give]").forEach(el=>el.onclick=async()=>{
     const bid=sv.screen.split(":")[1]; const k=K.get(bid); const it=k?.items.find(x=>x.id===el.dataset.give); if(!it) return;
@@ -720,7 +826,8 @@ async function loadLog(entity,id){
 async function editPerson(id){
   if(!canWrite()) return;
   const draftKey=`draft:person:${id||"new"}`;
-  const b=id?{...B.get(id)}:{code:await nextCode(),name:"",nationalId:"",phone:"",phone2:"",birth:"",caseType:"",grade:"",score:null,project:"",area:"",address:"",marital:"",job:"",income:"",housing:"",pension:"",notes:"",familySize:null,children:[],status:"انتظار",lastReview:"",nextReview:""};
+  const b=id?{...B.get(id)}:{code:await nextCode(),name:"",nationalId:"",phone:"",phone2:"",birth:"",caseType:"",grade:"",score:null,project:"",area:"",address:"",marital:"",job:"",income:"",housing:"",pension:"",notes:"",familySize:null,children:[],tags:[],status:"انتظار",lastReview:"",nextReview:""};
+  b.tags=[...(b.tags||[])];
   b.children=[...(b.children||[])].map(k=>({...k}));
   const projects=[...new Set(people().map(p=>p.project).filter(Boolean))];
   sheet(id?`تعديل: ${b.name}`:"حالة جديدة",`
@@ -752,6 +859,9 @@ async function editPerson(id){
       <label class="f">ميعاد المراجعة الجاية<input type="date" id="p_next" value="${esc(b.nextReview)}"></label>
     </div>
     <label class="f">ملاحظات<textarea id="p_notes">${esc(b.notes)}</textarea></label>
+    <div class="sub">قوايم المتبرعين اللي الحالة عليها</div>
+    <div class="checks" id="p_tags">${[...new Set([...allTags(),...b.tags])].map(t=>`<label><input type="checkbox" value="${esc(t)}" ${b.tags.includes(t)?"checked":""}> ${esc(t)}</label>`).join("")}</div>
+    <label class="f">قايمة جديدة (اختياري)<input type="text" id="p_newtag" placeholder="مثال: مصر الخير"></label>
     <h3>الأبناء</h3><div id="kids"></div>
     <button class="btn sm" id="addKid">${ic("plus")}إضافة ابن / ابنة</button>
     <label class="f" style="margin-top:14px">سبب التعديل (اختياري — بيتسجل في سجل الحالة)<input type="text" id="p_why" placeholder="مثال: بحث ميداني جديد، تغيير رقم التليفون"></label>
@@ -775,21 +885,25 @@ async function editPerson(id){
     q("#p_nid").oninput=nidHint; nidHint();
     q("#p_nid").onblur=()=>{ const r=parseNID(q("#p_nid").value); if(r.ok&&q("#p_nid").value!==r.nid) q("#p_nid").value=r.nid; };
     const drawKids=()=>{
-      q("#kids").innerHTML=b.children.length?`<div class="tbl" style="margin-bottom:8px"><table><thead><tr><th>الاسم</th><th>النوع</th><th>الميلاد</th><th>الدراسة</th><th></th></tr></thead><tbody>${b.children.map((k,i)=>`<tr>
+      q("#kids").innerHTML=b.children.length?`<div class="tbl" style="margin-bottom:8px"><table><thead><tr><th>الاسم</th><th>الرقم القومي</th><th>النوع</th><th>الميلاد</th><th>المرحلة الدراسية</th><th></th></tr></thead><tbody>${b.children.map((k,i)=>`<tr>
         <td><input type="text" data-k="${i}" data-f="name" value="${esc(k.name)}" style="min-width:110px" aria-label="اسم الابن"></td>
+        <td><input type="text" inputmode="numeric" dir="ltr" data-k="${i}" data-f="nid" value="${esc(k.nid||"")}" style="min-width:150px" maxlength="20" aria-label="الرقم القومي للابن"></td>
         <td><select data-k="${i}" data-f="gender" style="min-width:70px" aria-label="النوع"><option></option><option ${k.gender==="ولد"?"selected":""}>ولد</option><option ${k.gender==="بنت"?"selected":""}>بنت</option></select></td>
         <td><input type="date" data-k="${i}" data-f="birth" value="${esc(k.birth)}" aria-label="تاريخ الميلاد"></td>
-        <td><input type="text" data-k="${i}" data-f="school" value="${esc(k.school)}" style="min-width:110px" aria-label="المرحلة الدراسية"></td>
+        <td>${stageSelect("", k.school, `data-k="${i}" data-f="school" style="min-width:150px"`)}</td>
         <td><button class="btn sm danger" data-rk="${i}" aria-label="حذف">×</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="sub">لا يوجد أبناء مسجلين</p>`;
-      s.querySelectorAll("[data-k]").forEach(el=>el.onchange=()=>{ b.children[+el.dataset.k][el.dataset.f]=el.value; });
+      s.querySelectorAll("[data-k]").forEach(el=>el.onchange=()=>{ const k=b.children[+el.dataset.k]; k[el.dataset.f]=el.value;
+        // a child's national ID fills in the birth date and gender, like the mother's
+        if(el.dataset.f==="nid"){ const r=parseNID(el.value); if(r.ok){ k.nid=r.nid; k.birth=r.birth; k.gender=r.gender==="ذكر"?"ولد":"بنت"; drawKids(); } else if(el.value.trim()) toast(r.error); } });
       s.querySelectorAll("[data-rk]").forEach(el=>el.onclick=()=>{ b.children.splice(+el.dataset.rk,1); drawKids(); });
     };
     drawKids();
-    q("#addKid").onclick=()=>{ b.children.push({name:"",gender:"",birth:"",school:""}); drawKids(); };
+    q("#addKid").onclick=()=>{ b.children.push({name:"",gender:"",birth:"",school:"",nid:""}); drawKids(); };
     q("#cancelP").onclick=()=>{ clearDraft(draftKey); id?viewPerson(id):closeSheet(); };
     q("#saveP").onclick=async()=>{
       const g=x=>q(x).value.trim(); const prev=id?B.get(id):null;
-      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name)};
+      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name),
+        tags:[...new Set([...[...s.querySelectorAll("#p_tags input:checked")].map(i=>i.value), g("#p_newtag")].filter(Boolean))]};
       if(!rec.name){ toast("اكتب الاسم الأول"); q("#p_name").focus(); return; }
       const nid=parseNID(rec.nationalId); if(nid.ok) rec.nationalId=nid.nid;
       if(rec.nationalId&&!nid.ok&&!await ask(`${nid.error}.\nتحفظ كده برضو؟`,{title:"الرقم القومي شكله غلط",ok:"احفظ برضو",cancel:"أصلّحه"})){ q("#p_nid").focus(); return; }
@@ -815,23 +929,30 @@ function viewPerson(id){
     <div class="row" style="margin-bottom:12px">
       <span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span><span class="chip">${esc(b.caseType||"غير محدد")}</span>
       ${b.grade?`<span class="chip gold">تقدير ${esc(b.grade)}</span>`:""}${reviewDue(b)?`<span class="chip red">محتاجة مراجعة</span>`:""}
+      ${(b.tags||[]).map(t=>`<span class="chip blue">${esc(t)}</span>`).join("")}
     </div>
+    <div class="callbar">${callCell(b.id,b.phone,null,true)}${validPhone(b.phone2)?callCell(b.id,b.phone2,null,true):""}</div>
     <div class="bar">
       ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button>`:""}
       ${isMgr()?`<button class="btn gold" id="v_single">${ic("cash")}صرف فردي</button>`:""}
       <button class="btn" id="v_print">${ic("printer")}طباعة الملف</button>
-      ${validPhone(b.phone)?`<a class="btn" href="tel:${cleanPhone(b.phone)}" style="text-decoration:none;display:inline-flex;align-items:center">${ic("phone")}اتصال</a>`:""}
+      ${canWrite()?`<button class="btn" id="v_task">${ic("check")}مهمة للحالة دي</button>`:""}
     </div>
+    ${(()=>{ const ts=openTasks().filter(t=>t.bid===b.id); return ts.length?`<div class="list tasks" style="margin-bottom:12px">${ts.map(t=>`<div class="task ${t.due&&t.due<today?"late":""}"><button class="tick" data-done="${t.id}" aria-label="خلصت"></button><button class="grow tbody" data-task="${t.id}"><span class="nm">${esc(t.title)}</span><br><span class="sub">${t.due?dLabel(t.due):""}</span></button></div>`).join("")}</div>`:""; })()}
     <div class="facts">
       ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f("تليفون تاني",b.phone2)}
-      ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize)}${f("عدد الأبناء",(b.children||[]).length||"")}
+      ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize||(famSize(b)?famSize(b)+" (من عدد الأبناء)":""))}${f("عدد الأبناء",(b.children||[]).length||"")}
       ${f("المشروع",b.project)}${f("المنطقة",b.area)}${f("العمل",b.job)}${f("الدخل",b.income)}${f("المعاش",b.pension)}${f("السكن",b.housing)}
       ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?b.score+"%":"")}
     </div>
     ${b.address?`<p><span class="sub">العنوان:</span> ${esc(b.address)}</p>`:""}
     ${b.notes?`<div class="note">${esc(b.notes)}</div>`:""}
+    <h3>الصور</h3>
+    <div class="photos">${photoTile(b.id,"mother","الأم")}${photoTile(b.id,"idcard","البطاقة")}${(b.children||[]).map((k,i)=>photoTile(b.id,"k"+i,k.name||"ابن / ابنة")).join("")}</div>
     <h3>الأبناء</h3>
-    ${(b.children||[]).length?`<div class="tbl"><table><thead><tr><th>الاسم</th><th>النوع</th><th>السن</th><th>الدراسة</th></tr></thead><tbody>${b.children.map(k=>{const a=age(k.birth); return `<tr><td>${esc(k.name)}</td><td>${esc(k.gender)}</td><td class="n">${a===""?"—":a}${a!==""&&a>=18?` <span class="chip red">فوق 18</span>`:a!==""&&a>=17?` <span class="chip gold">قرب 18</span>`:""}</td><td>${esc(k.school)}</td></tr>`;}).join("")}</tbody></table></div>`:`<p class="sub">لا يوجد أبناء مسجلين</p>`}
+    ${(b.children||[]).length?`<div class="tbl"><table><thead><tr><th>الاسم</th><th>السن</th><th>المرحلة الدراسية</th><th>شهادة القيد ${syLabel(SY)}</th></tr></thead><tbody>${b.children.map((k,i)=>{const a=age(k.birth), st=stageOf(k); return `<tr><td>${esc(k.name)}${k.nid?`<div class="why" dir="ltr" style="text-align:end">${esc(k.nid)}</div>`:""}</td><td class="n">${a===""?"—":a}${a!==""&&a>=18?` <span class="chip red">فوق 18</span>`:a!==""&&a>=17?` <span class="chip gold">قرب 18</span>`:""}</td>
+      <td>${esc(st||"—")}${st&&!STAGES.includes(st)?` <span class="chip gold" title="اختارها من القايمة في «تعديل»">مكتوبة بإيد</span>`:""}</td>
+      <td>${!inSchool(st)?`<span class="sub">—</span>`:String(k.cert||"")===String(SY)?`<span class="chip">✓ وصلت</span>`:canWrite()?`<button class="btn sm" data-cert="${i}">${ic("check")}وصلت</button>`:`<span class="chip red">لسه</span>`}</td></tr>`;}).join("")}</tbody></table></div>`:`<p class="sub">لا يوجد أبناء مسجلين</p>`}
     <h3>سجل المساعدات</h3>
     <div class="tbl"><table><thead><tr><th>الشهر</th><th>النوع</th><th>القيمة</th><th>استلم</th></tr></thead><tbody>
     ${hist.map(r=>`<tr><td class="n">${mLabel(r.month)}</td><td>${esc(r.typeName)}</td><td class="n">${num(r.value)} ${esc(r.unit)}</td><td>${r.received?"✓ "+(r.receivedAt?dLabel(r.receivedAt):""):"—"}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">لم تستلم أي مساعدة معتمدة بعد</td></tr>`}
@@ -847,6 +968,11 @@ function viewPerson(id){
     if(q("#v_rev")) q("#v_rev").onclick=()=>reviewSheet(id);
     if(q("#v_single")) q("#v_single").onclick=()=>singleGive(id);
     q("#v_print").onclick=()=>doPrint(caseHTML(B.get(id),logs||[]), `ملف ${B.get(id).code} ${B.get(id).name}`);
+    if(q("#v_task")) q("#v_task").onclick=()=>taskSheet(null,id);
+    s.querySelectorAll("[data-task]").forEach(el=>el.onclick=()=>taskSheet(el.dataset.task));
+    s.querySelectorAll("[data-done]").forEach(el=>el.onclick=()=>doneTask(el.dataset.done,el));
+    s.querySelectorAll("[data-cert]").forEach(el=>el.onclick=()=>certDialog(id,+el.dataset.cert));
+    bindCalls(s, redraw); bindPhotos(s, id, redraw);
     if(q("#v_del")) q("#v_del").onclick=async()=>{
       if(!await ask("الحالة هتختفي من القوائم والكشوف الجديدة، بس سجلها وكل اللي صرفته يفضل محفوظ.\nتقدر ترجّعها في أي وقت من «الإعدادات ← الأرشيف».",{title:"أرشفة الحالة؟",ok:"أرشفة"})) return;
       if(await run(sb.from("beneficiaries").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشفت ✓")){ await logIt("beneficiary",id,"أرشفة الحالة"); closeSheet(); refreshPerson(id); }
@@ -904,6 +1030,133 @@ function singleGive(bid){
   });
 }
 
+/* ================= photos =================
+   Private bucket «photos». Every picture is shrunk on the device first (~100 KB) so 1 GB holds thousands of them,
+   and it's fetched as a blob so it never needs a public link. Replacing a photo keeps the old file (no deleting). */
+const photoURL = new Map();   // path → blob: URL
+const photoPath = (b, slot) => slot.startsWith("k") ? (b.children||[])[+slot.slice(1)]?.photo : b.photos?.[slot];
+function photoTile(bid, slot, label){
+  const b=B.get(bid), path=photoPath(b,slot), url=path&&photoURL.get(path);
+  if(path&&!url) loadPhoto(path);
+  return `<figure class="ph"><button class="phb" data-ph="${slot}" ${path?"":"disabled"} aria-label="صورة ${esc(label)}">${url?`<img src="${url}" alt="">`:path?`<span class="spin"></span>`:ic("user")}</button>
+    <figcaption>${esc(label)}</figcaption>${canWrite()?`<label class="btn sm phup">${ic(path?"refresh":"plus")}${path?"غيّر":"صورة"}<input type="file" accept="image/*" data-up="${slot}" hidden></label>`:""}</figure>`;
+}
+const photoLoading = new Set();
+async function loadPhoto(path){
+  if(photoLoading.has(path)) return; photoLoading.add(path);
+  const { data, error } = await sb.storage.from("photos").download(path);
+  photoLoading.delete(path);
+  if(error||!data) return;
+  photoURL.set(path, URL.createObjectURL(data)); refreshSheet();
+}
+function shrink(file, max=1100, q=0.72){
+  return new Promise((res, rej)=>{ const img=new Image(), u=URL.createObjectURL(file);
+    img.onload=()=>{ const r=Math.min(1, max/Math.max(img.width,img.height)); const c=document.createElement("canvas"); c.width=Math.round(img.width*r); c.height=Math.round(img.height*r);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(u); c.toBlob(b=>b?res(b):rej(new Error("image")),"image/jpeg",q); };
+    img.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error("image")); }; img.src=u; });
+}
+function bindPhotos(root, bid, redraw){
+  root.querySelectorAll("[data-ph]").forEach(el=>el.onclick=()=>{ const path=photoPath(B.get(bid),el.dataset.ph), url=photoURL.get(path); if(!url) return;
+    const w=document.createElement("div"); w.className="ask-scrim"; w.innerHTML=`<img class="ph-big" src="${url}" alt="">`; w.onclick=()=>w.remove(); document.body.appendChild(w); });
+  root.querySelectorAll("[data-up]").forEach(inp=>inp.onchange=async()=>{
+    const f=inp.files?.[0]; if(!f) return; const slot=inp.dataset.up;
+    toast("بنرفع الصورة…");
+    let blob; try{ blob=await shrink(f); }catch(e){ toast("الملف ده مش صورة"); return; }
+    const path=`${bid}/${slot}-${Date.now()}.jpg`;
+    const up=await sb.storage.from("photos").upload(path, blob, { contentType:"image/jpeg" });
+    if(up.error){ toast(errMsg(up.error)); return; }
+    photoURL.set(path, URL.createObjectURL(blob));
+    const b=B.get(bid); let patch;
+    if(slot.startsWith("k")){ const kids=(b.children||[]).map(x=>({...x})); kids[+slot.slice(1)].photo=path; patch={children:kids}; }
+    else patch={photos:{...(b.photos||{}), [slot]:path}};
+    if(await run(sb.from("beneficiaries").update(patch).eq("id",bid),"الصورة اتحفظت ✓")){ await logIt("beneficiary",bid,"رفع صورة"); await refreshPerson(bid); redraw(); }
+  });
+}
+
+/* ================= tasks ================= */
+function taskSheet(id, forBid){
+  const t=id?{...TK.get(id)}:{title:"",notes:"",due:today,bid:forBid||null,assignee:null};
+  const staff=[...P.values()].filter(u=>u.active&&["manager","worker","helper"].includes(u.role));
+  const ro=!canWrite();
+  sheet(id?"مهمة":"مهمة جديدة",`
+    <label class="f">المطلوب<input type="text" id="k_t" value="${esc(t.title)}" placeholder="مثال: نجيب شهادة القيد من مدرسة يوسف" ${ro?"readonly":""}></label>
+    <div class="grid2">
+      <label class="f">ميعادها<input type="date" id="k_d" value="${esc(t.due)}" ${ro?"readonly":""}></label>
+      <label class="f">مين هيعملها<select id="k_a" ${ro?"disabled":""}><option value="">أي حد</option>${staff.map(u=>`<option value="${u.id}" ${t.assignee===u.id?"selected":""}>${esc(u.full_name||u.username)}</option>`).join("")}</select></label>
+    </div>
+    <label class="f">الحالة (اختياري)<input type="search" id="k_bq" value="${esc(t.bid?B.get(t.bid)?.name||"":"")}" placeholder="اكتب اسم الحالة" autocomplete="off" ${ro?"readonly":""}></label><div id="k_bs"></div>
+    <label class="f">ملاحظات<textarea id="k_n" ${ro?"readonly":""}>${esc(t.notes)}</textarea></label>
+    ${t.doneAt?`<div class="note green">${ic("check")} خلصت ${dLabel(t.doneAt)}${t.doneBy?" — "+esc(who(t.doneBy)):""}</div>`:""}
+    <div class="bar">${ro?"":`<button class="btn pri" id="k_s">${ic("save")}حفظ</button>`}
+      ${id&&!t.doneAt?`<button class="btn" id="k_done">${ic("check")}خلصت</button>`:""}
+      ${id&&canWrite()?`<button class="btn danger" id="k_x">${ic("archive")}شيلها</button>`:""}</div>`, s=>{
+    const q=x=>s.querySelector(x); let bid=t.bid;
+    const bq=q("#k_bq"); bq.oninput=()=>{ bid=null; const qq=norm(bq.value); if(!qq){ q("#k_bs").innerHTML=""; return; }
+      const res=people().filter(b=>norm(b.name).includes(qq)||b.code===qq.padStart(3,"0")).slice(0,5);
+      q("#k_bs").innerHTML=`<div class="list" style="margin:-4px 0 10px">${res.map(b=>`<button class="item" data-pick="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">مفيش</div>`}</div>`;
+      q("#k_bs").querySelectorAll("[data-pick]").forEach(el=>el.onclick=()=>{ bid=el.dataset.pick; bq.value=B.get(bid).name; q("#k_bs").innerHTML=""; }); };
+    if(q("#k_s")) q("#k_s").onclick=async()=>{
+      const rec={title:q("#k_t").value.trim(), due:q("#k_d").value||null, assignee:q("#k_a").value||null, beneficiary_id:bid||null, notes:q("#k_n").value.trim()};
+      if(!rec.title){ toast("اكتب المطلوب"); q("#k_t").focus(); return; }
+      q("#k_s").disabled=true;
+      const { data, error } = id ? await sb.from("tasks").update(rec).eq("id",id).select().single() : await sb.from("tasks").insert({...rec, created_by:me.id}).select().single();
+      if(error){ q("#k_s").disabled=false; toast(errMsg(error)); return; }
+      TK.set(data.id, fromTk(data)); upsertRaw("tk",data); changed(); toast("اتحفظت ✓"); forBid?viewPerson(forBid):closeSheet();
+    };
+    if(q("#k_done")) q("#k_done").onclick=()=>doneTask(id).then(()=>closeSheet());
+    if(q("#k_x")) q("#k_x").onclick=async()=>{ const { data, error } = await sb.from("tasks").update({archived_at:new Date().toISOString()}).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; } TK.set(id, fromTk(data)); changed(); closeSheet(); toast("اتشالت"); };
+  });
+}
+async function doneTask(id, el){
+  if(el) el.disabled=true;
+  const { data, error } = await sb.from("tasks").update({done_at:new Date().toISOString(), done_by:me.id}).eq("id",id).select().single();
+  if(error){ if(el) el.disabled=false; toast(errMsg(error)); return; }
+  TK.set(id, fromTk(data)); upsertRaw("tk",data); changed(); toast("برافو ✓ "+data.title);
+}
+
+/* ================= school certificates (شهادة القيد) =================
+   Once a year every child in school brings a certificate. Recording it moves the child to next year's stage. */
+function certsSheet(){
+  const draw=()=>{ const list=certList(); const fams=[...new Set(list.map(x=>x.b.id))];
+    return `<p class="sub" style="margin-top:0">السنة الدراسية ${syLabel(SY)}. أول ما الأسرة تجيب شهادة القيد، اضغط «وصلت» — الطفل بينتقل للسنة الجاية لوحده.</p>
+      <div class="note">${num(list.length)} طفل في ${num(fams.length)} أسرة لسه</div>
+      <div class="bar"><button class="btn" id="c_ph">${ic("phone")}أرقام الأسر دي</button></div>
+      <div class="list">${fams.map(id=>{ const b=B.get(id); const kids=list.filter(x=>x.b.id===id);
+        return `<div class="item col"><div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><button class="grow nm linkish" data-open="${b.id}">${esc(b.name)}</button>${callCell(b.id,b.phone,null)}</div>
+          ${kids.map(x=>`<div class="row kidrow"><span class="grow">${esc(x.k.name||"بدون اسم")} <span class="sub">· ${esc(stageOf(x.k))}</span></span>${canWrite()?`<button class="btn sm" data-cert="${b.id}:${x.i}">${ic("check")}وصلت</button>`:""}</div>`).join("")}</div>`; }).join("")||`<div class="empty">كل الشهادات وصلت ✓</div>`}</div>`; };
+  const mount=s=>{
+    s.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>viewPerson(el.dataset.open));
+    s.querySelectorAll("[data-cert]").forEach(el=>el.onclick=()=>{ const [bid,i]=el.dataset.cert.split(":"); certDialog(bid,+i); });
+    const ph=s.querySelector("#c_ph"); if(ph) ph.onclick=()=>phoneSheet("شهادات القيد", [...new Set(certList().map(x=>x.b.id))].map(id=>B.get(id)).map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code})));
+    bindCalls(s, redraw);
+  };
+  let mine=-1; const redraw=()=>{ const body=$("#scrim .sh-body"); if(body&&sheetSeq===mine){ body.innerHTML=draw(); mount($("#scrim")); } };
+  sheet("شهادات القيد", draw(), mount, redraw); mine=sheetSeq;
+}
+function certDialog(bid, i, back){
+  const b=B.get(bid), k=(b.children||[])[i]; if(!k) return;
+  const cur=stageOf(k), nx=nextStage(cur);
+  return new Promise(resolve=>{
+    const w=document.createElement("div"); w.className="ask-scrim";
+    w.innerHTML=`<div class="ask" role="alertdialog" aria-modal="true"><h2>شهادة قيد ${esc(k.name||"")} — ${syLabel(SY)}</h2>
+      <p>السنة اللي فاتت: <b>${esc(cur||"مش متسجلة")}</b>. السنة دي بقى في إيه؟</p>
+      <label class="f">${stageSelect("cd_s", nx||cur)}</label>
+      <div class="bar"><button class="btn pri" data-a="1">${ic("save")}حفظ</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+    document.body.appendChild(w);
+    const done=async ok=>{ if(!ok){ w.remove(); resolve(false); return; }
+      const st=w.querySelector("#cd_s").value; const kids=(B.get(bid).children||[]).map(x=>({...x})); kids[i]={...kids[i], school:st, cert:String(SY)};
+      if(await run(sb.from("beneficiaries").update({children:kids}).eq("id",bid),"اتسجلت ✓")){ await logIt("beneficiary",bid,`شهادة قيد ${kids[i].name} ${syLabel(SY)}: ${st}`); await refreshPerson(bid); }
+      w.remove(); resolve(true); if(back) back(); };
+    w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(a) done(a.dataset.a==="1"); };
+  });
+}
+// One dropdown for every stage. An old free-text value that isn't in the list is kept as its own option.
+function stageSelect(id, value, attrs=""){
+  const v=normalizeStage(value)||value||"";
+  return `<select ${id?`id="${id}"`:""} ${attrs} aria-label="المرحلة الدراسية"><option value=""></option>${v&&!STAGES.includes(v)?`<option selected>${esc(v)}</option>`:""}
+    ${STAGE_GROUPS.map(g=>`<optgroup label="${esc(g.g)}">${g.list.map(x=>`<option ${x===v?"selected":""}>${x}</option>`).join("")}</optgroup>`).join("")}</select>`;
+}
+
 /* ================= types ================= */
 function openType(id){
   const t=id?{...T.get(id)}:{name:"",unit:"جنيه",amount:0,caseTypes:[],cooldown:1,template:"cash",order:types().length+1};
@@ -933,14 +1186,15 @@ function newUser(){
   sheet("إضافة موظف",`
     <label class="f">الاسم<input type="text" id="u_n"></label>
     <label class="f">رقم التليفون (هيدخل بيه)<input type="text" id="u_u" inputmode="tel" dir="ltr"></label>
-    <label class="f">رقم سري (6 أرقام أو أكتر)<input type="text" id="u_p" class="pin" inputmode="numeric" dir="ltr" value="${String(Math.floor(100000+Math.random()*900000))}"></label>
+    <label class="f">رقم سري (6 أرقام، والمدير 8)<input type="text" id="u_p" class="pin" inputmode="numeric" dir="ltr" value="${String(Math.floor(100000+Math.random()*900000))}"></label>
     <div class="sub" style="margin-bottom:6px">نوع الحساب</div><div class="roles">${["helper","worker","manager","viewer"].map((r,i)=>`<label class="rolec"><input type="radio" name="u_r" value="${r}" ${i===0?"checked":""}><span><b>${ROLE_AR[r]}</b><small>${ROLE_DESC[r]}</small></span></label>`).join("")}</div>
     <div class="note">ابعت للموظف رقم التليفون والرقم السري ولينك الموقع، وقوله يضيفه على الشاشة الرئيسية.</div>
     <div class="bar"><button class="btn pri" id="u_go">إنشاء الحساب</button></div>`, s=>{
     const q=x=>s.querySelector(x);
+    s.querySelectorAll("input[name=u_r]").forEach(r=>r.onchange=()=>{ const n=minPin(r.value); if(q("#u_p").value.length!==n) q("#u_p").value=String(Math.floor(10**(n-1)+Math.random()*9*10**(n-1))); });
     q("#u_go").onclick=async()=>{
-      const n=q("#u_n").value.trim(), u=cleanUser(q("#u_u").value), p=q("#u_p").value.trim();
-      if(!n||u.length<3||p.length<6){ toast("اكمل البيانات — الرقم السري 6 أرقام على الأقل"); return; }
+      const n=q("#u_n").value.trim(), u=cleanUser(q("#u_u").value), p=q("#u_p").value.trim(), r=s.querySelector("input[name=u_r]:checked").value;
+      if(!n||u.length<3||p.length<minPin(r)){ toast(`اكمل البيانات — الرقم السري ${minPin(r)} أرقام على الأقل${r==="manager"?" للمدير":""}`); return; }
       q("#u_go").disabled=true;
       const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"create", full_name:n, username:u, password:p, role:s.querySelector("input[name=u_r]:checked").value} });
       if(error||data?.error){ q("#u_go").disabled=false; toast(data?.error==="exists"?"الرقم ده عليه حساب فعلاً":errMsg(error||data.error)); return; }
@@ -963,7 +1217,7 @@ function openUser(uid){
     const q=x=>s.querySelector(x);
     q("#e_s").onclick=async()=>{ if(await run(sb.from("profiles").update({full_name:q("#e_n").value.trim(), ...(self?{}:{role:q("#e_r").value, active:q("#e_a").checked})}).eq("id",uid),"تم الحفظ ✓")){ closeSheet(); refreshTable("profiles"); } };
     q("#e_pin").onclick=async()=>{
-      const p=String(Math.floor(100000+Math.random()*900000));
+      const p=u.role==="manager"?String(Math.floor(10000000+Math.random()*90000000)):String(Math.floor(100000+Math.random()*900000));
       if(!await ask("هيتعمل رقم سري جديد للحساب ده، والقديم مش هيشتغل تاني.",{title:"رقم سري جديد؟",ok:"اعمل رقم جديد"})) return;
       const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"reset_password", user_id:uid, password:p} });
       if(error||data?.error){ toast(errMsg(error||data.error)); return; }
@@ -973,86 +1227,155 @@ function openUser(uid){
   });
 }
 function changeMyPin(){
-  sheet("تغيير الرقم السري",`<label class="f">الرقم السري الجديد (6 أرقام أو أكتر)<input type="password" id="m_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
+  sheet("تغيير الرقم السري",`<label class="f">الرقم السري الجديد (${minPin(realRole)} أرقام أو أكتر)<input type="password" id="m_p" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label>
     <label class="f">اكتبه تاني<input type="password" id="m_p2" class="pin" inputmode="numeric" autocomplete="new-password" dir="ltr"></label><div class="bar"><button class="btn pri" id="m_go">حفظ</button></div>`, s=>{
-    s.querySelector("#m_go").onclick=async()=>{ const a=s.querySelector("#m_p").value,b=s.querySelector("#m_p2").value; if(a.length<6){toast("6 أرقام على الأقل");return;} if(a!==b){toast("الرقمين مش زي بعض");return;}
+    s.querySelector("#m_go").onclick=async()=>{ const a=s.querySelector("#m_p").value,b=s.querySelector("#m_p2").value; if(a.length<minPin(realRole)){toast(`${minPin(realRole)} أرقام على الأقل`);return;} if(a!==b){toast("الرقمين مش زي بعض");return;}
       const { error } = await sb.auth.updateUser({password:a}); if(error){ toast(errMsg(error)); return; } closeSheet(); toast("اتغيّر ✓"); };
   });
 }
 
-/* ================= new batch ================= */
+/* ================= new batch (the planner) =================
+   Everything recalculates as you type: who's in, how much each family gets, how far the quantity goes, and why. */
+const DONORS = ["مصر الخير","بنك الطعام","أهل الخير","صدقات","إسلام زوهير","أبلة لبنى"];
 function newBatch(){
   if(!isMgr()) return;
   const ts=types(); if(!ts.length){ toast("أضف نوع مساعدة الأول من الإعدادات"); return; }
-  const st={typeId:ts[0].id,month:curMonth,count:50,value:ts[0].amount,cooldown:ts[0].cooldown,picked:null,info:null};
-  sheet("كشف صرف جديد",`
-    <div class="pill-steps"><span class="on">١ الإعدادات</span>›<span id="st2">٢ مراجعة الأسماء</span>›<span>٣ حفظ كمسودة</span></div>
+  const t0=ts[0];
+  const st={ typeId:t0.id, month:curMonth, week:"", donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
+    mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, total:"", count:"", by:"score", missedFirst:true,
+    removed:new Set(), added:[], values:{}, showRest:false, showOut:false };
+  const donors=[...new Set([...DONORS, ...batches().map(k=>k.donor).filter(Boolean)])];
+  sheet("كشف جديد",`
     <div class="grid2">
-      <label class="f">نوع المساعدة<select id="n_t">${ts.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>
+      <label class="f">نوع المساعدة<select id="n_t">${ts.map(t=>`<option value="${t.id}">${esc(t.name)} (${esc(t.unit)})</option>`).join("")}</select></label>
+      <label class="f">الجهة المتبرعة<input type="text" id="n_d" list="n_dl" placeholder="مثال: مصر الخير"><datalist id="n_dl">${donors.map(d=>`<option value="${esc(d)}">`).join("")}</datalist></label>
       <label class="f">عن شهر<input type="month" id="n_m" value="${st.month}"></label>
-      <label class="f">عدد الحالات المطلوب<input type="number" id="n_c" value="${st.count}" min="1"></label>
-      <label class="f">القيمة لكل حالة<input type="number" id="n_v" value="${st.value}"></label>
+      <label class="f">الأسبوع<select id="n_w"><option value="">كل الشهر</option>${[1,2,3,4,5].map(w=>`<option value="${w}">الأسبوع ${w}</option>`).join("")}</select></label>
     </div>
-    <label class="f">استبعد اللي أخد نفس النوع خلال آخر (شهر)<input type="number" id="n_cd" min="0" value="${st.cooldown}"></label>
-    <button class="btn pri" id="n_go">اقترح الأسماء</button><div id="n_res"></div>`, s=>{
+    <h3 style="margin-top:6px">مين يدخل؟</h3>
+    <div class="sub">نوع الحالة (لو ما اخترتش حاجة: كل الحالات النشطة)</div>
+    <div class="checks" id="n_ct">${CASE_TYPES.map(c=>`<label><input type="checkbox" value="${c}"> ${c}</label>`).join("")}</div>
+    <div class="grid2">
+      <label class="f">من قايمة متبرع معيّن<select id="n_tag"><option value="">كل القوايم</option>${allTags().map(t=>`<option>${esc(t)}</option>`).join("")}</select></label>
+      <label class="f">استبعاد اللي أخد قريب<select id="n_cd"><option value="0">مفيش استبعاد — الكل يدخل</option>${[1,2,3,6,12].map(n=>`<option value="${n}">اللي أخد نفس النوع خلال آخر ${n} شهر</option>`).join("")}</select></label>
+    </div>
+    <h3>كل أسرة تاخد كام؟</h3>
+    <div class="modes" role="radiogroup">
+      <label class="rolec"><input type="radio" name="n_mode" value="fixed"><span><b>نفس الكمية لكل أسرة</b><small><input type="number" id="n_per_f" min="0" step="any" class="mini"> <span class="u"></span> لكل أسرة</small></span></label>
+      <label class="rolec"><input type="radio" name="n_mode" value="member"><span><b>حسب عدد الأفراد</b><small><input type="number" id="n_per_m" min="0" step="any" class="mini"> <span class="u"></span> لكل فرد — مثال: وجبة لكل فرد</small></span></label>
+      <label class="rolec"><input type="radio" name="n_mode" value="tiers"><span><b>شرائح</b><small>لحد <input type="number" id="n_cut" min="1" class="mini"> أفراد = <input type="number" id="n_small" min="0" step="any" class="mini"> <span class="u"></span>، وأكتر = <input type="number" id="n_big" min="0" step="any" class="mini"> <span class="u"></span></small></span></label>
+    </div>
+    <div class="grid2">
+      <label class="f">الكمية المتاحة (فاضي = يكفي الكل)<input type="number" id="n_total" min="0" step="any" placeholder="مثال: 300"></label>
+      <label class="f">أو أقصى عدد أسر (اختياري)<input type="number" id="n_count" min="1" placeholder="مثال: 50"></label>
+      <label class="f">لو مش هتكفي، مين الأول؟<select id="n_by">${Object.entries(PRIORITY).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></label>
+      <label class="f" style="display:flex;gap:8px;align-items:center;margin-top:22px"><input type="checkbox" id="n_missed" checked style="width:20px;height:20px"> اللي ماجاش يستلم المرة اللي فاتت ياخد أولوية</label>
+    </div>
+    <div id="n_res"></div>`, s=>{
     const q=x=>s.querySelector(x);
-    q("#n_t").onchange=e=>{ const t=T.get(e.target.value); q("#n_v").value=t.amount; q("#n_cd").value=t.cooldown; };
-    q("#n_go").onclick=()=>{
-      st.typeId=q("#n_t").value; st.month=q("#n_m").value||curMonth; st.count=Math.max(1,+q("#n_c").value||1); st.value=+q("#n_v").value||0; st.cooldown=Math.max(0,+q("#n_cd").value||0);
-      const r=propose({...T.get(st.typeId),amount:st.value},st.month,st.count,st.cooldown); st.picked=r.picked; st.info=r; drawRes();
-    };
-    function drawRes(){
-      const t=T.get(st.typeId); q("#st2").className="on"; const short=st.info.poolSize<st.count;
+    const fillType=()=>{ const t=T.get(st.typeId); s.querySelectorAll(".u").forEach(u=>u.textContent=t.unit); s.querySelectorAll("#n_ct input").forEach(i=>i.checked=st.caseTypes.includes(i.value)); };
+    const put=()=>{ q("#n_t").value=st.typeId; q("#n_m").value=st.month; q("#n_w").value=st.week; q("#n_d").value=st.donor; q("#n_cd").value=st.cooldown; q("#n_tag").value=st.tag;
+      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
+      q("#n_total").value=st.total; q("#n_count").value=st.count; q("#n_by").value=st.by; q("#n_missed").checked=st.missedFirst; fillType(); };
+    const read=()=>{ const prevType=st.typeId; st.typeId=q("#n_t").value; st.month=q("#n_m").value||curMonth; st.week=q("#n_w").value; st.donor=q("#n_d").value.trim(); st.cooldown=+q("#n_cd").value||0; st.tag=q("#n_tag").value;
+      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):q("#n_per_f")).value||0; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
+      st.total=q("#n_total").value; st.count=q("#n_count").value; st.by=q("#n_by").value; st.missedFirst=q("#n_missed").checked;
+      st.caseTypes=[...s.querySelectorAll("#n_ct input:checked")].map(i=>i.value);
+      if(prevType!==st.typeId){ const t=T.get(st.typeId); st.per=t.amount||1; st.caseTypes=[...(t.caseTypes||[])]; st.removed.clear(); st.added=[]; st.values={}; put(); } };
+    put();
+    let tm=null; s.addEventListener("input",e=>{ if(e.target.closest("#n_res")) return; clearTimeout(tm); tm=setTimeout(()=>{ read(); draw(); },150); });
+    // Text boxes already redraw on "input"; redrawing again on their "change" (fired on blur) would swap out the button being clicked.
+    s.addEventListener("change",e=>{ if(e.target.closest("#n_res")||/^(text|number|search|month)$/.test(e.target.type)) return; read(); draw(); });
+    let plan=null;
+    function compute(){
+      const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big};
+      const c=candidates(t,{month:st.month, week:+st.week||null, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag});
+      const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)), st.by, st.missedFirst);
+      const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
+      const added=st.added.map(id=>B.get(id)).filter(Boolean).map(b=>({b, lm:lastByType(t.id).get(b.id), fam:famSize(b), value:shareFor(basis,famSize(b)), manual:true}));
+      const picked=[...r.picked, ...added].map(x=>({...x, value:st.values[x.b.id]??x.value}));
+      return { t, basis, c, r, picked, all:c.pool.length };
+    }
+    function draw(){
+      plan=compute(); const { t, c, r, picked }=plan, u=esc(t.unit);
+      const used=picked.reduce((a,x)=>a+(+x.value||0),0), mem=picked.reduce((a,x)=>a+(x.fam||1),0);
+      const noSize=picked.filter(x=>!x.fam).length, need=c.pool.reduce((a,x)=>a+shareFor(plan.basis,famSize(x.b)),0);
+      const sizes=[1,2,3,4,5,6].map(n=>c.pool.filter(x=>n<6?famSize(x.b)===n:famSize(x.b)>=6).length), unknown=c.pool.filter(x=>!famSize(x.b)).length;
+      const rule=`الترتيب: ${st.missedFirst?"اللي ماجاش يستلم المرة اللي فاتت، بعدين ":""}${PRIORITY[st.by]}${st.by==="score"?" (ولو الدرجة زي بعض: الأسرة الأكبر)":""}.`;
       q("#n_res").innerHTML=`
-        <h3>${esc(t.name)} — ${mLabel(st.month)}</h3>
-        <div class="note ${short?"red":""}">المؤهلين: ${num(st.info.poolSize)} حالة. اتستبعد ${num(st.info.excludedRecent)} لأنهم أخدوا خلال آخر ${st.cooldown} شهر${st.info.excludedSame?`، و${num(st.info.excludedSame)} موجودين في كشف تاني لنفس الشهر`:""}.${short?` العدد المتاح أقل من المطلوب (${st.count}).`:""}<br>الترتيب: اللي ما أخدش خالص الأول، بعدين الأقدم في آخر استلام، بعدين التقدير.</div>
-        <input type="search" id="n_add" placeholder="إضافة حالة بإيدك بالاسم أو الرقم"><div id="n_sugg" style="margin-top:8px"></div>
-        <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>سبب الإدراج</th><th>القيمة</th><th></th></tr></thead><tbody>
-        ${st.picked.map((p,i)=>`<tr><td class="n">${i+1}</td><td>${esc(p.name)}<div class="sub">${esc(p.code)}</div></td><td class="why">${esc(p.reason)}</td><td><input type="number" data-v="${i}" value="${p.value}" style="width:90px;min-height:36px;padding:4px 8px" aria-label="القيمة"></td><td><button class="btn sm danger" data-rm="${i}" aria-label="استبعاد">×</button></td></tr>`).join("")||`<tr><td colspan="5" class="empty">لا توجد حالات مؤهلة</td></tr>`}
+        <div class="plan">
+          <div class="plan-big"><div><span>هتكفي</span><strong>${num(picked.length)}</strong><small>أسرة</small></div><div><span>يعني</span><strong>${num(mem)}</strong><small>فرد</small></div><div><span>المطلوب</span><strong>${num(Math.round(used*100)/100)}</strong><small>${u}</small></div>${st.total!==""?`<div class="${+st.total-used<0?"neg":""}"><span>يفضل</span><strong>${num(Math.round((+st.total-used)*100)/100)}</strong><small>${u}</small></div>`:""}</div>
+          <p>المؤهلين <b>${num(c.pool.length)}</b> أسرة${st.total!==""||st.count!==""?` — لو كلهم هيحتاجوا ${num(Math.round(need*100)/100)} ${u}`:""}.${r.rest.length?` <b>${num(r.rest.length)}</b> أسرة مش هيلحقوا المرة دي.`:""}${c.excluded.length?` واتستبعد ${num(c.excluded.length)} (تحت).`:""}</p>
+          <p class="sub">${esc(rule)}${noSize?` · ${num(noSize)} أسرة عدد أفرادها مش متسجل واتحسبت فرد واحد.`:""}</p>
+          <table class="sizes"><thead><tr><th>عدد الأفراد</th>${["1","2","3","4","5","6+"].map(x=>`<th>${x}</th>`).join("")}${unknown?"<th>مش متسجل</th>":""}</tr></thead><tbody><tr><td>عدد الأسر</td>${sizes.map(n=>`<td>${num(n)}</td>`).join("")}${unknown?`<td>${num(unknown)}</td>`:""}</tr></tbody></table>
+        </div>
+        <input type="search" id="n_add" placeholder="ضيف حالة بإيدك بالاسم أو الرقم"><div id="n_sugg" style="margin-top:8px"></div>
+        <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>ليه هنا</th><th>أفراد</th><th>${u}</th><th></th></tr></thead><tbody>
+        ${picked.map((x,i)=>`<tr><td class="n">${i+1}</td><td>${esc(x.b.name)}<div class="sub">${esc(x.b.code)}</div></td><td class="why">${x.manual?"إضافة بإيدك · ":""}${esc(whyLine(x,t))}</td><td class="n">${x.fam||"؟"}</td>
+          <td><input type="number" step="any" data-v="${x.b.id}" value="${x.value}" class="mini" aria-label="الكمية"></td><td><button class="btn sm danger" data-rm="${x.b.id}" aria-label="شيل">×</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">مفيش حد — غيّر الشروط اللي فوق</td></tr>`}
         </tbody></table></div>
-        <p class="sub">الإجمالي: ${num(st.picked.length)} حالة · ${num(st.picked.reduce((s,p)=>s+(+p.value||0),0))} ${esc(t.unit)}</p>
-        <div class="bar"><button class="btn pri" id="n_save" ${st.picked.length?"":"disabled"}>${ic("save")}حفظ كمسودة</button></div>`;
-      q("#n_res").querySelectorAll("[data-rm]").forEach(el=>el.onclick=()=>{ st.picked.splice(+el.dataset.rm,1); drawRes(); });
-      q("#n_res").querySelectorAll("[data-v]").forEach(el=>el.onchange=()=>{ st.picked[+el.dataset.v].value=+el.value||0; drawRes(); });
+        ${r.rest.length?`<button class="btn sm" id="n_restT" style="margin-top:10px">${st.showRest?"اخفي":"اعرض"} اللي مش هيلحقوا (${num(r.rest.length)})</button>${st.showRest?`<div class="list" style="margin-top:8px">${r.rest.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(whyLine({...x,fam:famSize(x.b)},t))} · نصيبها ${num(x.value)} ${u}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
+        ${c.excluded.length?`<button class="btn sm" id="n_outT" style="margin-top:10px">${st.showOut?"اخفي":"اعرض"} المستبعدين (${num(c.excluded.length)})</button>${st.showOut?`<div class="list" style="margin-top:8px">${c.excluded.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(x.why)}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
+        <div class="bar" style="margin-top:16px"><button class="btn pri" id="n_save" ${picked.length?"":"disabled"}>${ic("save")}حفظ كمسودة (${num(picked.length)} أسرة)</button></div>`;
+      const R=q("#n_res");
+      R.querySelectorAll("[data-rm]").forEach(el=>el.onclick=()=>{ const id=el.dataset.rm; st.added=st.added.filter(x=>x!==id); st.removed.add(id); draw(); });
+      R.querySelectorAll("[data-v]").forEach(el=>el.onchange=()=>{ st.values[el.dataset.v]=+el.value||0; draw(); });
+      R.querySelectorAll("[data-addr]").forEach(el=>el.onclick=()=>{ const id=el.dataset.addr; st.removed.delete(id); if(!st.added.includes(id)) st.added.push(id); draw(); });
+      const rt=q("#n_restT"); if(rt) rt.onclick=()=>{ st.showRest=!st.showRest; draw(); };
+      const ot=q("#n_outT"); if(ot) ot.onclick=()=>{ st.showOut=!st.showOut; draw(); };
       const add=q("#n_add"); add.oninput=()=>{
         const qq=norm(add.value); if(!qq){ q("#n_sugg").innerHTML=""; return; }
-        const inIds=new Set(st.picked.map(p=>p.bid));
+        const inIds=new Set(plan.picked.map(x=>x.b.id));
         const res=people().filter(b=>!inIds.has(b.id)&&(norm(b.name).includes(qq)||(b.nationalId||"").includes(qq)||b.code===qq.padStart(3,"0"))).slice(0,6);
-        q("#n_sugg").innerHTML=`<div class="list" style="margin-bottom:10px">${res.map(b=>`<button class="item" data-add="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span>${b.status!=="نشط"?`<span class="chip red">${esc(b.status)}</span>`:""}</button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
-        q("#n_sugg").querySelectorAll("[data-add]").forEach(el=>el.onclick=()=>{ const b=B.get(el.dataset.add); const lm=lastByType(st.typeId).get(b.id); st.picked.push(itemFor(b,st.value,"إضافة يدوية"+(lm?` · آخر استلام ${mLabel(lm)}`:""))); drawRes(); });
+        q("#n_sugg").innerHTML=`<div class="list" style="margin-bottom:10px">${res.map(b=>`<button class="item" data-addr="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span>${b.status!=="نشط"?`<span class="chip red">${esc(b.status)}</span>`:""}</button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
+        q("#n_sugg").querySelectorAll("[data-addr]").forEach(el=>el.onclick=()=>{ const id=el.dataset.addr; st.removed.delete(id); if(!st.added.includes(id)) st.added.push(id); draw(); });
       };
-      const sv=q("#n_save"); if(sv) sv.onclick=async()=>{
-        sv.disabled=true; sv.innerHTML=`<span class="spin"></span>`;
-        const k=await run(sb.from("batches").insert({title:`كشف ${t.name} — ${mLabel(st.month)}`,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:st.month,status:"مسودة",cooldown:st.cooldown,created_by:me.id}).select("id").single());
-        if(!k){ sv.disabled=false; sv.innerHTML=ic("save")+" حفظ كمسودة"; return; }
-        const rows=st.picked.map((it,i)=>toI(it,k.id,i));
+      q("#n_save").onclick=async()=>{
+        const sv=q("#n_save"); sv.disabled=true; sv.innerHTML=`<span class="spin"></span>`;
+        const week=+st.week||null;
+        const title=`كشف ${t.name}${st.donor?` (${st.donor})`:""} — ${mLabel(st.month)}${week?` · الأسبوع ${week}`:""}`;
+        const k=await run(sb.from("batches").insert({title,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:st.month,week,donor:st.donor,status:"مسودة",cooldown:st.cooldown,
+          basis:{...plan.basis, total:st.total===""?null:+st.total, by:st.by, missedFirst:st.missedFirst}, created_by:me.id}).select("id").single());
+        if(!k){ sv.disabled=false; draw(); return; }
+        const rows=plan.picked.map((x,i)=>toI(itemFor(x.b,+x.value||0,(x.manual?"إضافة بإيدك · ":"")+whyLine(x,t)),k.id,i));
         for(let i=0;i<rows.length;i+=500){ if(!await run(sb.from("batch_items").insert(rows.slice(i,i+500)))) break; }
-        await logIt("batch",k.id,`إنشاء الكشف (${rows.length} حالة)`);
+        await logIt("batch",k.id,`إنشاء الكشف (${rows.length} أسرة · ${num(rows.reduce((a,r)=>a+r.value,0))} ${t.unit}) — ${rule}`);
         toast("تم حفظ الكشف كمسودة ✓"); view="batches"; await refreshBatch(k.id); openBatch(k.id);
       };
     }
+    draw();
   });
 }
 
 /* ================= batch detail ================= */
+function basisText(k){
+  const b=k.basis||{}, u=k.unit;
+  const how=b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
+  return [how&&"النصيب: "+how, b.total!=null&&b.total!==undefined?`من ${num(b.total)} ${u} متاحين`:"", b.by&&"الأولوية: "+(b.missedFirst?"اللي ماجاش المرة اللي فاتت، بعدين ":"")+(PRIORITY[b.by]||"")].filter(Boolean).join(" · ");
+}
 function openBatch(id, giveMode){
-  let q_="", logs=null;
+  let q_="", logs=null, only="all";
   const draw=()=>{
     const k=K.get(id); if(!k) return "";
     const items=k.items; const total=items.reduce((s,i)=>s+(+i.value||0),0); const rec=items.filter(i=>i.received).length; const draft=k.status==="مسودة";
-    const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq));
+    const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq))
+      .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
+    const members=items.reduce((a,i)=>a+(+i.familySize||1),0);
     return `
-    <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)} · ${num(items.length)} حالة · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
+    <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${k.week?` · الأسبوع ${k.week}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
+    ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
     ${draft?`<div class="note">المسودة مش بتتحسب في سجل المساعدات، والموظفين مش شايفينها. راجع الأسماء واضغط «اعتماد».</div>`:""}
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       <button class="btn" id="b_print">${ic("printer")}طباعة</button><button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
-      ${isMgr()&&(draft||k.single)?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
+      ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
+    ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
-      <div class="give ${it.received?"done":""}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
     :`<div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>${k.template==="cash"?"الرقم القومي":"أفراد"}</th><th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
       ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td><td class="n">${esc(k.template==="cash"?it.nationalId:it.familySize)}</td><td class="n">${num(it.value)}</td><td>${isMgr()?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
@@ -1065,7 +1388,9 @@ function openBatch(id, giveMode){
     if(q("#b_ok")) q("#b_ok").onclick=()=>upd({status:"معتمد",approved_at:new Date().toISOString(),approved_by:me.id},"اعتماد الكشف","اتعتمد ✓");
     if(q("#b_paid")) q("#b_paid").onclick=()=>upd({status:"مصروف",paid_at:new Date().toISOString()},"إغلاق الكشف — تم الصرف","تمام ✓");
     if(q("#b_back")) q("#b_back").onclick=()=>upd({status:"مسودة"},"إرجاع لمسودة");
-    if(q("#b_del")) q("#b_del").onclick=async()=>{ if(await ask(K.get(id).single?"الصرف ده مش هيتحسب في سجل الحالة بعد كده، بس هيفضل محفوظ في الأرشيف.":"المسودة هتختفي من القوائم، وتفضل محفوظة في الأرشيف.",{title:"أرشفة الكشف؟",ok:"أرشفة"})&&await run(sb.from("batches").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشف ✓")){ await logIt("batch",id,"أرشفة الكشف"); closeSheet(); refreshBatch(id); } };
+    s.querySelectorAll("[data-only]").forEach(el=>el.onclick=()=>{ only=el.dataset.only; refreshSheet(); });
+    bindCalls(s, ()=>refreshSheet());
+    if(q("#b_del")) q("#b_del").onclick=async()=>{ const kk=K.get(id); if(await ask(kk.status==="مسودة"?"المسودة هتختفي من القوايم، وتفضل محفوظة في الأرشيف.":"الكشف هيختفي من القوايم، وماحدش هيتحسب إنه استلمه منه لحد ما ترجّعه.\nتلاقيه في «الإعدادات ← الأرشيف» وترجّعه في أي وقت.",{title:"أرشفة الكشف؟",ok:"أرشفة"})&&await run(sb.from("batches").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشف ✓")){ await logIt("batch",id,"أرشفة الكشف"); closeSheet(); refreshBatch(id); } };
     s.querySelectorAll("[data-rm]").forEach(el=>el.onclick=async()=>{ const it=K.get(id).items.find(x=>x.id===el.dataset.rm); if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); refreshBatch(id); } });
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
@@ -1075,7 +1400,7 @@ function openBatch(id, giveMode){
     });
     const bq=q("#b_q"); bq.oninput=()=>{ q_=bq.value; const pos=bq.selectionStart; refreshSheet(); const n=$("#b_q"); if(n){n.focus(); n.setSelectionRange(pos,pos);} };
     q("#b_print").onclick=()=>doPrint(batchHTML(K.get(id)),K.get(id).title);
-    q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k)); };
+    q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
     q("#b_xlsx").onclick=()=>batchXlsx(K.get(id));
   };
   if(!K.get(id)) return;
@@ -1100,34 +1425,37 @@ function phoneChooser(){
       ${ts.map(t=>`<button class="item" data-ph="not:${t.id}"><span class="grow nm">لم يستلموا ${esc(t.name)} آخر 3 شهور</span></button>`).join("")}
     </div>`, s=>{
     s.querySelectorAll("[data-ph]").forEach(el=>el.onclick=()=>{
-      const [kind,arg]=el.dataset.ph.split(/:(.*)/s); const Pm=b=>({name:b.name,phone:b.phone,code:b.code});
+      const [kind,arg]=el.dataset.ph.split(/:(.*)/s); const Pm=b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code});
       if(kind==="active") phoneSheet("كل الحالات النشطة", people().filter(b=>b.status==="نشط").map(Pm));
       if(kind==="type") phoneSheet(`حالات ${arg}`, people().filter(b=>b.status==="نشط"&&b.caseType===arg).map(Pm));
       if(kind==="waiting") phoneSheet("حالات الانتظار", people().filter(b=>b.status==="انتظار").map(Pm));
       if(kind==="due") phoneSheet("محتاجة مراجعة", people().filter(reviewDue).map(Pm));
-      if(kind==="batch"){ const k=K.get(arg); phoneSheet(k.title,k.items.map(it=>({name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),true); }
+      if(kind==="batch"){ const k=K.get(arg); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),true,k.id); }
       if(kind==="not"){ const t=T.get(arg); phoneSheet(`لم يستلموا ${t.name}`, notReceived(t,3).map(({b})=>Pm(b))); }
     });
   });
 }
-function phoneSheet(title, rows, hasDone){
-  let onlyPending=false;
+function phoneSheet(title, rows, hasDone, batchId){
+  let onlyPending=!!hasDone;
   const build=()=>{ const list=rows.filter(r=>!onlyPending||!r.done); const ok=list.filter(r=>validPhone(r.phone)); const bad=list.filter(r=>!validPhone(r.phone)); return {ok,bad,text:`${title}\n\n`+ok.map((r,i)=>`${i+1}- ${r.name}: ${cleanPhone(r.phone)}`).join("\n")}; };
   const draw=()=>{ const {ok,bad,text}=build(); return `
     <div class="note green">${num(ok.length)} رقم صالح${bad.length?` · <b>${num(bad.length)}</b> بدون رقم أو رقم غلط (تحت)`:""}</div>
     ${hasDone?`<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="ph_p" ${onlyPending?"checked":""} style="width:20px;height:20px"> اللي لسه ما استلموش بس</label>`:""}
+    <p class="sub" style="margin-top:0">اضغط ${ic("phone")} يفتحلك الاتصال على طول — مش محتاج تسجّل الأرقام. لما تخلص اختار: ردّت / ماردتش / رقم غلط، والصف بيتلوّن.</p>
+    <div class="list calls">${ok.map(r=>`<div class="item ${r.bid?rowCallCls(r.bid,batchId):""}"><span class="code">${esc(r.code)}</span><span class="grow"><span class="nm">${esc(r.name)}</span><br><span class="sub" dir="ltr" style="text-align:end;display:block">${esc(cleanPhone(r.phone))}</span></span>${r.bid?callCell(r.bid,r.phone,batchId):`<a class="cdial" href="tel:${cleanPhone(r.phone)}">${ic("phone")}</a>`}</div>`).join("")||`<div class="empty">مفيش أرقام</div>`}</div>
+    <details style="margin-top:14px"><summary class="sub">نسخ القائمة / واتساب / Excel / تسجيل الأرقام على الموبايل</summary>
     <div class="bar">
-      <button class="btn pri" id="ph_copy">${ic("copy")} نسخ القائمة</button>
+      <button class="btn" id="ph_copy">${ic("copy")} نسخ القائمة</button>
       <a class="btn" id="ph_wa" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center">${ic("chat")}إرسال واتساب</a>
-      <button class="btn gold" id="ph_vcf">${ic("user")}تنزيل الأرقام للموبايل (.vcf)</button>
+      <button class="btn" id="ph_vcf">${ic("user")}تسجيل الأرقام على الموبايل (.vcf)</button>
       <button class="btn" id="ph_x">Excel</button>
     </div>
-    <textarea class="phones" id="ph_t" readonly aria-label="القائمة">${esc(text)}</textarea>
-    <p class="sub">ملف .vcf: افتحه على الموبايل وهيسألك «استيراد جهات الاتصال» — كل الأرقام بتتسجل مرة واحدة باسم «دار الإكرام - …».</p>
+    <textarea class="phones" id="ph_t" readonly aria-label="القائمة">${esc(text)}</textarea></details>
     ${bad.length?`<h3>من غير رقم صالح</h3><div class="list">${bad.map(r=>`<div class="item"><span class="code">${esc(r.code)}</span><span class="grow">${esc(r.name)}</span><span class="sub">${esc(r.phone||"لا يوجد")}</span></div>`).join("")}</div>`:""}`; };
   const mount=s=>{
     const q=x=>s.querySelector(x); const {ok,text}=build();
     if(q("#ph_p")) q("#ph_p").onchange=e=>{ onlyPending=e.target.checked; q(".sh-body").innerHTML=draw(); mount(s); };
+    bindCalls(s, ()=>{ const b=q(".sh-body"); if(b){ const sc=b.scrollTop; b.innerHTML=draw(); mount(s); b.scrollTop=sc; } });
     q("#ph_wa").href="https://wa.me/?text="+encodeURIComponent(text.length>6000?text.slice(0,6000)+"\n…":text);
     q("#ph_copy").onclick=async()=>{ try{ await navigator.clipboard.writeText(text); toast("اتنسخت ✓ الصقها في واتساب"); }catch(e){ const ta=q("#ph_t"); ta.focus(); ta.select(); try{ document.execCommand("copy"); toast("اتنسخت ✓"); }catch(_){ toast("علّم النص واضغط نسخ"); } } };
     q("#ph_vcf").onclick=()=>{ const v=ok.map(r=>`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:دار الإكرام - ${r.name}\r\nN:${r.name};دار الإكرام;;;\r\nTEL;TYPE=CELL:${cleanPhone(r.phone)}\r\nNOTE:حالة رقم ${r.code}\r\nEND:VCARD`).join("\r\n"); saveFile(`${title}.vcf`, new Blob([v],{type:"text/vcard"})); };
@@ -1148,22 +1476,26 @@ const PRINT_CSS=`
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
 .ps td.nm,.ps td.l{text-align:right}.ps .sig{height:26px;min-width:90px}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
-.ps .signs{display:flex;justify-content:space-between;margin-top:34px}.ps .signs div{text-align:center;min-width:140px}
-.ps .signs span{display:block;border-top:1px dotted #000;margin-top:34px}
+.ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
+.ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
+.ps .signs em i{flex:1;border-bottom:1px solid #000;height:1em}
+.ps h1 small{font-size:13px;font-weight:400}.ps tfoot td{font-weight:700;background:#f3f3f3}
 .ps h2{font-size:14px;margin:14px 0 6px;border-bottom:1px solid #000}
 .ps .kv td:nth-child(odd){background:#f3f3f3;font-weight:600;width:18%}
 @page{size:A4;margin:12mm}
 thead{display:table-header-group} tr{page-break-inside:avoid}`;
 (()=>{ const st=document.createElement("style"); st.textContent="@media print{"+PRINT_CSS+"}"; document.head.appendChild(st); })();
 const hdr=()=>{ const d=new Date(); return `<div class="hd"><div class="orgw"><img src="${$("#logoImg").src}" alt=""><div class="org">${ORG}<small>${ORG2}</small></div></div><div>التاريخ: ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}</div></div>`; };
+// Same layout as the office's Excel lists: م · الاسم · الرقم القومي · عدد · الكمية · التوقيع, then the committee's signatures.
+const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس الإدارة"];
+const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
-  const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0);
-  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف "+(cash?"صرف":"توزيع")} ${esc(k.typeName)}</h1><div class="mo">عن شهر: ${mLabel(k.month)}</div>
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>اسم المستفيد</th>${cash?"<th>الرقم القومي</th><th>المبلغ</th>":"<th>عدد أفراد الأسرة</th><th>الكمية</th>"}<th>التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td>${cash?`<td>${esc(it.nationalId)}</td>`:`<td>${esc(it.familySize)}</td>`}<td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
-    </tbody></table>
-    <div class="tot"><span>إجمالي عدد الحالات: ${num(k.items.length)}</span><span>الإجمالي: ${num(total)} ${esc(k.unit)}</span></div>
-    <div class="signs"><div>إعداد<span></span></div><div>مراجعة<span></span></div><div>اعتماد<span></span></div></div></div>`;
+  const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
+  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1><div class="mo">عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}</div>
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th><th>التوقيع</th></tr></thead><tbody>
+    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td><td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td><td>${num(total)}</td><td></td></tr></tfoot></table>
+    ${signsHTML()}</div>`;
 }
 function caseHTML(b,logs){
   const hist=receipts().filter(r=>r.bid===b.id).sort((a,c)=>c.month.localeCompare(a.month));
@@ -1177,17 +1509,17 @@ function caseHTML(b,logs){
     <h2>سجل المساعدات</h2><table><thead><tr><th>الشهر</th><th>النوع</th><th>القيمة</th><th>استلم</th></tr></thead><tbody>
     ${hist.map(r=>`<tr><td>${mLabel(r.month)}</td><td>${esc(r.typeName)}</td><td>${num(r.value)} ${esc(r.unit)}</td><td>${r.received?"✓":""}</td></tr>`).join("")||`<tr><td colspan="4">لا يوجد</td></tr>`}</tbody></table>
     <h2>سجل التغييرات</h2><table><tbody>${logs.slice(0,20).map(l=>`<tr><td style="width:22%">${dLabel(l.at)}</td><td class="l">${esc(l.text)}</td></tr>`).join("")||`<tr><td>لا يوجد</td></tr>`}</tbody></table>
-    <div class="signs"><div>الباحث الاجتماعي<span></span></div><div>مدير الجمعية<span></span></div></div></div>`;
+    <div class="signs"><div>الباحث الاجتماعي<span></span></div><div>مجلس الإدارة<span></span></div></div></div>`;
 }
 function doPrint(html){ $("#print").innerHTML=html; setTimeout(()=>window.print(),50); }
 
 /* ================= excel / files ================= */
 function batchXlsx(k){
   const cash=k.template==="cash";
-  const rows=[[ORG],[`${k.single?"إيصال صرف":"كشف "+(cash?"صرف":"توزيع")} ${k.typeName} — عن شهر ${mLabel(k.month)}`],[],["م","رقم الحالة","اسم المستفيد",cash?"الرقم القومي":"عدد أفراد الأسرة","التليفون",cash?"المبلغ":"الكمية","استلم","سبب الإدراج","التوقيع"]];
-  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,cash?it.nationalId:it.familySize,cleanPhone(it.phone),+it.value||0,it.received?"✓":"",it.reason||"",""]));
-  rows.push([],["","","إجمالي عدد الحالات",k.items.length,"","الإجمالي",k.items.reduce((s,i)=>s+(+i.value||0),0)],[],["إعداد: ..........","","مراجعة: ..........","","اعتماد: .........."]);
-  xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,14,10,7,30,16]);
+  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج","التوقيع"]];
+  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",""]));
+  rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
+  xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,12,14,7,30,16]);
 }
 function peopleRows(list){
   const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","تليفون 2","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
