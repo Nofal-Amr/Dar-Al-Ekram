@@ -155,3 +155,12 @@ export function weekdaysOf(month, dow = 6){
   return out;
 }
 export const dayLabel = iso => { if(!iso) return ""; const x = new Date(iso + "T00:00:00Z"); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()} ${MONTHS[x.getUTCMonth()]}`; };
+// "السبت 26 سبتمبر و3 أكتوبر" — several days of one list, the weekday said once when they share it.
+export function daysText(days){
+  const ds = [...(days || [])].filter(Boolean).sort(); if(!ds.length) return "";
+  const p = ds.map(d => new Date(d + "T00:00:00Z"));
+  const same = p.every(x => x.getUTCDay() === p[0].getUTCDay());
+  const part = (x, i) => `${same && i ? "" : DAYS[x.getUTCDay()] + " "}${x.getUTCDate()}${i < p.length - 1 && p[i+1].getUTCMonth() === x.getUTCMonth() ? "" : " " + MONTHS[x.getUTCMonth()]}`;
+  const out = p.map(part);
+  return out.length === 1 ? out[0] : out.slice(0, -1).join("، ") + " و" + out[out.length - 1];
+}

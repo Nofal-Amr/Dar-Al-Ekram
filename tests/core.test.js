@@ -134,3 +134,11 @@ test("Saturdays of a month: 4 or 5, never a fixed 5", () => {
   assert.equal(weekdaysOf("2026-02").length, 4);
   assert.equal(dayLabel("2026-10-03"), "السبت 3 أكتوبر");
 });
+
+import { daysText } from "../core.js";
+test("days of a list read naturally", () => {
+  assert.equal(daysText(["2026-09-26"]), "السبت 26 سبتمبر");
+  assert.equal(daysText(["2026-10-03","2026-09-26"]), "السبت 26 سبتمبر و3 أكتوبر");
+  assert.equal(daysText(["2026-10-03","2026-10-10","2026-10-17"]), "السبت 3، 10 و17 أكتوبر");
+  assert.equal(daysText([]), "");
+});

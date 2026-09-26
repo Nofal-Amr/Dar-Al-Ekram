@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num,
-  STAGE_GROUPS, STAGES, DAYS, weekdaysOf, dayLabel, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.4";
+export const VERSION = "1.3.5";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -91,7 +91,7 @@ const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, ph
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
-  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, week:r.week||null, distDate:r.dist_date||"", donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
+  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
 const fromI = r => ({ id:r.id, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
 const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||null, result:r.result, at:r.at, by:r.by });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
@@ -233,13 +233,15 @@ const itemFor = (b,value,reason) => ({bid:b.id,code:b.code,name:b.name,nationalI
    Who can be in a new list, in which order, and how much each family gets. Nothing is hidden: families left out are
    returned with the reason, so the manager can see (and explain) every decision. */
 // "السبت 3 أكتوبر" for a one-day list, "الأسبوع 2" for older weekly ones, "" for a whole month.
-const slotText = k => k.distDate ? dayLabel(k.distDate) : k.week ? `الأسبوع ${k.week}` : "";
-const sameSlot = (k, month, week) => k.month===month && (!k.week || !week || k.week===week);
-function candidates(t, { month, week, cooldown, caseTypes, tag }){
+const slotText = k => k.days?.length ? daysText(k.days) : k.week ? `الأسبوع ${k.week}` : "";
+// Does list k already cover this month/day? A list with days only clashes on those days.
+const sameSlot = (k, month, week, day) => day && k.days?.length ? k.days.includes(day) : k.month===month && (!k.week || !week || k.week===week);
+function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag }){
   const last=lastByType(t.id), taken=new Set(), out=[], excluded=[];
-  for(const k of K.values()) if(!k.archivedAt && k.typeId===t.id && sameSlot(k,month,week)) k.items.forEach(i=>taken.add(i.bid));
+  const day = week ? weekdaysOf(month, dow)[week-1] : null;
+  for(const k of K.values()) if(!k.archivedAt && k.typeId===t.id && sameSlot(k,month,week,day)) k.items.forEach(i=>taken.add(i.bid));
   // didn't collect last time: in the latest approved/paid list of this type, not marked received
-  const prev=[...K.values()].filter(k=>counts(k)&&k.typeId===t.id&&!k.single&&!sameSlot(k,month,week)).sort((x,y)=>(y.month||"").localeCompare(x.month||"")||(y.week||0)-(x.week||0))[0];
+  const prev=[...K.values()].filter(k=>counts(k)&&k.typeId===t.id&&!k.single&&!sameSlot(k,month,week,day)).sort((x,y)=>(y.month||"").localeCompare(x.month||"")||(y.week||0)-(x.week||0))[0];
   const missed=new Set(prev?prev.items.filter(i=>!i.received).map(i=>i.bid):[]);
   for(const b of people()){
     if(b.status!=="نشط") continue;
@@ -1302,7 +1304,7 @@ function newBatch(){
     let plan=null;
     function compute(){
       const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big};
-      const c=candidates(t,{month:st.month, week:+st.week||null, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag});
+      const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag});
       const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)), st.by, st.missedFirst);
       const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
       const added=st.added.map(id=>B.get(id)).filter(Boolean).map(b=>({b, lm:lastByType(t.id).get(b.id), fam:famSize(b), value:shareFor(basis,famSize(b)), manual:true}));
@@ -1347,7 +1349,7 @@ function newBatch(){
         const sv=q("#n_save"); sv.disabled=true; sv.innerHTML=`<span class="spin"></span>`;
         const week=+st.week||null, distDate=week?weekdaysOf(st.month,st.dow)[week-1]:null;
         const title=`كشف ${t.name}${st.donor?` (${st.donor})`:""} — ${distDate?`${dayLabel(distDate)} ${st.month.slice(0,4)}`:mLabel(st.month)}`;
-        const k=await run(sb.from("batches").insert({title,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:st.month,week,dist_date:distDate,donor:st.donor,status:"مسودة",cooldown:st.cooldown,
+        const k=await run(sb.from("batches").insert({title,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:st.month,week,dist_date:distDate,dist_days:distDate?[distDate]:[],donor:st.donor,status:"مسودة",cooldown:st.cooldown,
           basis:{...plan.basis, total:st.total===""?null:+st.total, by:st.by, missedFirst:st.missedFirst}, created_by:me.id}).select("id").single());
         if(!k){ sv.disabled=false; draw(); return; }
         const rows=plan.picked.map((x,i)=>toI(itemFor(x.b,+x.value||0,(x.manual?"إضافة بإيدك · ":"")+whyLine(x,t)),k.id,i));
@@ -1361,6 +1363,35 @@ function newBatch(){
 }
 
 /* ================= batch detail ================= */
+// Rename a list, change its donor, and tick the days it's given on (any weekday, this month and the next).
+function editBatch(id){
+  const k=K.get(id); if(!k||!isMgr()) return;
+  const [y,m]=k.month.split("-").map(Number), next=`${m===12?y+1:y}-${String(m===12?1:m+1).padStart(2,"0")}`;
+  let dow=k.days?.length?new Date(k.days[0]+"T00:00:00Z").getUTCDay():6, days=new Set(k.days||[]);
+  const autoTitle=()=>{ const ds=[...days].sort(), d=q_("#e_d").value.trim(); return `كشف ${k.typeName}${d?` (${d})`:""} — ${ds.length?`${daysText(ds)} ${ds[ds.length-1].slice(0,4)}`:mLabel(k.month)}`; };
+  let q_=()=>null;
+  const dayBoxes=()=>[k.month,next].map(mo=>`<div class="sub" style="margin-top:6px">${mLabel(mo)}</div><div class="checks">${weekdaysOf(mo,dow).map(d=>`<label><input type="checkbox" value="${d}" ${days.has(d)?"checked":""}> ${dayLabel(d)}</label>`).join("")}</div>`).join("");
+  sheet("تعديل الكشف",`
+    <label class="f">اسم الكشف<input type="text" id="e_t" value="${esc(k.title)}"></label>
+    <div class="bar" style="margin-top:-4px"><button class="btn sm" id="e_auto">${ic("refresh")}اسم تلقائي من الأيام</button></div>
+    <label class="f">الجهة المتبرعة<input type="text" id="e_d" value="${esc(k.donor||"")}" list="e_dl"><datalist id="e_dl">${DONORS.map(d=>`<option value="${esc(d)}">`).join("")}</datalist></label>
+    <label class="f">يوم التوزيع<select id="e_dow">${DAYS.map((d,i)=>`<option value="${i}" ${i===dow?"selected":""}>كل ${d}</option>`).join("")}</select></label>
+    <div class="sub">الكشف شغال في الأيام دي (علّم عليهم):</div><div id="e_days">${dayBoxes()}</div>
+    <div class="bar"><button class="btn pri" id="e_s">${ic("save")}حفظ</button></div>`, s=>{
+    q_=x=>s.querySelector(x);
+    const readDays=()=>{ s.querySelectorAll("#e_days input").forEach(i=>i.checked?days.add(i.value):days.delete(i.value)); };
+    s.querySelector("#e_days").onchange=readDays;
+    q_("#e_dow").onchange=e=>{ readDays(); dow=+e.target.value; q_("#e_days").innerHTML=dayBoxes(); };
+    q_("#e_auto").onclick=()=>{ readDays(); q_("#e_t").value=autoTitle(); };
+    q_("#e_s").onclick=async()=>{
+      readDays(); const ds=[...days].sort(), title=q_("#e_t").value.trim()||autoTitle();
+      q_("#e_s").disabled=true;
+      if(await run(sb.from("batches").update({title, donor:q_("#e_d").value.trim(), dist_days:ds, dist_date:ds[0]||null}).eq("id",id),"اتحفظ ✓")){
+        await logIt("batch",id,`تعديل الكشف: ${title}${ds.length?` · الأيام: ${daysText(ds)}`:""}`); await refreshBatch(id); openBatch(id);
+      } else q_("#e_s").disabled=false;
+    };
+  });
+}
 function basisText(k){
   const b=k.basis||{}, u=k.unit;
   const how=b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
@@ -1381,7 +1412,7 @@ function openBatch(id, giveMode){
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      <button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${isMgr()?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -1413,6 +1444,7 @@ function openBatch(id, giveMode){
     });
     const bq=q("#b_q"); bq.oninput=()=>{ q_=bq.value; const pos=bq.selectionStart; refreshSheet(); const n=$("#b_q"); if(n){n.focus(); n.setSelectionRange(pos,pos);} };
     q("#b_print").onclick=()=>doPrint(batchHTML(K.get(id)),K.get(id).title);
+    if(q("#b_edit")) q("#b_edit").onclick=()=>editBatch(id);
     // e.g. a list given over two Saturdays: the second week's paper has only the families that haven't collected yet
     if(q("#b_printLeft")) q("#b_printLeft").onclick=()=>{ const k=K.get(id); doPrint(batchHTML({...k, items:k.items.filter(i=>!i.received), left:true}),k.title); };
     q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
@@ -1506,7 +1538,7 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.distDate?`يوم ${dayLabel(k.distDate)} ${k.distDate.slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
+  return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th><th>التوقيع</th></tr></thead><tbody>
     ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td><td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td><td>${num(total)}</td><td></td></tr></tfoot></table>
@@ -1531,7 +1563,7 @@ function doPrint(html){ $("#print").innerHTML=html; setTimeout(()=>window.print(
 /* ================= excel / files ================= */
 function batchXlsx(k){
   const cash=k.template==="cash";
-  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.distDate?`يوم ${dayLabel(k.distDate)} ${k.distDate.slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج","التوقيع"]];
+  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج","التوقيع"]];
   k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",""]));
   rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
   xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,12,14,7,30,16]);
