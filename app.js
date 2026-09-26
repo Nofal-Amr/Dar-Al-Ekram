@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.12";
+export const VERSION = "1.3.13";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -248,7 +248,8 @@ const slotText = k => k.days?.length ? daysText(k.days) : k.week ? `الأسبو
 const sameSlot = (k, month, week, day) => day && k.days?.length ? k.days.includes(day) : k.month===month && (!k.week || !week || k.week===week);
 function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBatch = "", onlyLeft = false, need = "", minStu = 0 }){
   const src = fromBatch ? K.get(fromBatch) : null;
-  const srcIds = src ? new Set(src.items.filter(i=>i.bid && (!onlyLeft || !i.received)).map(i=>i.bid)) : null;
+  // onlyLeft: "no" = didn't collect, "yes" = collected, "all" = everyone on that list
+  const srcIds = src ? new Set(src.items.filter(i=>i.bid && (onlyLeft==="all"||!onlyLeft ? true : onlyLeft==="yes" ? i.received : !i.received)).map(i=>i.bid)) : null;
   const last=lastByType(t.id), taken=new Set(), out=[], excluded=[];
   const day = week ? weekdaysOf(month, dow)[week-1] : null;
   for(const k of K.values()) if(!k.archivedAt && k.id!==fromBatch && k.typeId===t.id && sameSlot(k,month,week,day)) k.items.forEach(i=>taken.add(i.bid));
@@ -258,9 +259,8 @@ function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBat
   for(const b of people()){
     if(srcIds){ if(!srcIds.has(b.id)) continue; }
     else if(b.status!=="نشط") continue;
-    // Starting from an old list, that list already says who's in — the case-type and donor-list filters don't apply.
-    if(!srcIds && caseTypes.length && !caseTypes.includes(b.caseType||"غير محدد")) continue;
-    if(!srcIds && tag && !(b.tags||[]).includes(tag)) continue;
+    if(caseTypes.length && !caseTypes.includes(b.caseType||"غير محدد")) continue;
+    if(tag && !(b.tags||[]).includes(tag)) continue;
     const stu=studentsOf(b);
     if(need==="kids" && !(b.children||[]).length && stu.src!=="list"){ excluded.push({b,why:"مفيش أطفال متسجلين"}); continue; }
     if(need==="students" && !stu.n){ excluded.push({b,why:stu.src==="none"?"مفيش أطفال متسجلين":"مفيش طلاب في المدارس"}); continue; }
@@ -1277,7 +1277,7 @@ function newBatch(){
   const t0=ts[0];
   const st={ typeId:t0.id, month:curMonth, week:"", dow:6, donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
     mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, total:"", count:"", by:"score", missedFirst:true,
-    fromBatch:"", onlyLeft:true, need:"", minStu:"",
+    fromBatch:"", onlyLeft:"no", need:"", minStu:"",
     removed:new Set(), added:[], values:{}, showRest:false, showOut:false };
   const srcLists=batches().filter(k=>counts(k)&&!k.single);
   const donors=[...new Set([...DONORS, ...batches().map(k=>k.donor).filter(Boolean)])];
@@ -1291,8 +1291,8 @@ function newBatch(){
     </div>
     <h3 style="margin-top:6px">مين يدخل؟</h3>
     <div class="grid2">
-      <label class="f">من فين (لو اخترت كشف، نوع الحالة وقايمة المتبرع مش بيتطبقوا)<select id="n_src"><option value="">كل الحالات النشطة</option>${srcLists.map(k=>`<option value="${k.id}">من كشف: ${esc(k.title)}</option>`).join("")}</select></label>
-      <label class="f" style="display:flex;gap:8px;align-items:center;margin-top:22px"><input type="checkbox" id="n_left" checked style="width:20px;height:20px"> اللي ماستلموش من الكشف ده بس</label>
+      <label class="f">من فين<select id="n_src"><option value="">كل الحالات النشطة</option>${srcLists.map(k=>`<option value="${k.id}">من كشف: ${esc(k.title)}</option>`).join("")}</select></label>
+      <label class="f">من الكشف ده<select id="n_left"><option value="no">اللي ماستلموش بس</option><option value="yes">اللي استلموا بس</option><option value="all">الكل</option></select></label>
       <label class="f">شيل الأسر<select id="n_need"><option value="">ماتشيلش حد</option><option value="kids">اللي معندهاش أطفال</option><option value="students">اللي معندهاش طلاب في المدارس</option></select></label>
       <label class="f">أقل عدد طلاب في الأسرة (اختياري)<input type="number" id="n_minstu" min="0" placeholder="مثال: 2 = طالبين أو أكتر"></label>
     </div>
@@ -1322,10 +1322,12 @@ function newBatch(){
     const fillDays=()=>{ const ds=weekdaysOf(st.month, st.dow); if(+st.week>ds.length) st.week="";
       q("#n_w").innerHTML=`<option value="">الشهر كله</option>${ds.map((d,i)=>`<option value="${i+1}">${dayLabel(d)}</option>`).join("")}`; q("#n_w").value=st.week; };
     const put=()=>{ q("#n_t").value=st.typeId; q("#n_m").value=st.month; q("#n_dow").value=st.dow; fillDays(); q("#n_d").value=st.donor; q("#n_cd").value=st.cooldown; q("#n_tag").value=st.tag;
-      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").checked=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
+      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").value=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
       q("#n_total").value=st.total; q("#n_count").value=st.count; q("#n_by").value=st.by; q("#n_missed").checked=st.missedFirst; fillType(); };
     const read=()=>{ const prevType=st.typeId; st.typeId=q("#n_t").value; const pm=st.month, pd=st.dow; st.month=q("#n_m").value||curMonth; st.dow=+q("#n_dow").value; st.week=q("#n_w").value; if(pm!==st.month||pd!==st.dow) fillDays(); st.donor=q("#n_d").value.trim(); st.cooldown=+q("#n_cd").value||0; st.tag=q("#n_tag").value;
-      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; st.fromBatch=q("#n_src").value; st.onlyLeft=q("#n_left").checked; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
+      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; const pf=st.fromBatch; st.fromBatch=q("#n_src").value;
+      // picking an old list starts with no case-type filter (the aid type's default would silently shrink it); tick types to narrow it
+      if(st.fromBatch&&st.fromBatch!==pf){ st.caseTypes=[]; s.querySelectorAll("#n_ct input").forEach(i=>i.checked=false); } st.onlyLeft=q("#n_left").value; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
       st.total=q("#n_total").value; st.count=q("#n_count").value; st.by=q("#n_by").value; st.missedFirst=q("#n_missed").checked;
       st.caseTypes=[...s.querySelectorAll("#n_ct input:checked")].map(i=>i.value);
       if(prevType!==st.typeId){ const t=T.get(st.typeId); st.per=t.amount||1; st.caseTypes=[...(t.caseTypes||[])]; st.removed.clear(); st.added=[]; st.values={}; put(); } };
@@ -1395,29 +1397,48 @@ function newBatch(){
 }
 
 /* ================= batch detail ================= */
-// A new draft from an old list: same aid, same families and amounts — everyone, or only those who didn't collect.
+// A new draft from an old list: same aid, same families and amounts. Who comes over is decided by rules —
+// each rule = case type + collected or not; a family is copied if it matches ANY rule
+// (e.g. «أيتام · استلموا» + «مساعدات · ماستلموش» in the same new list).
+const RECV = { all:"الكل", yes:"استلموا", no:"ماستلموش" };
+const itemMatches = (it, rule) => { const b=it.bid&&B.get(it.bid);
+  if(rule.type && (b?.caseType||"غير محدد")!==rule.type) return false;
+  return rule.recv==="all" || (rule.recv==="yes" ? it.received : !it.received); };
 function copyBatch(id){
   const k=K.get(id); if(!k||!canDraft()) return;
-  const left=k.items.filter(i=>!i.received).length, all=k.items.length;
+  const types=[...new Set(k.items.map(i=>(i.bid&&B.get(i.bid)?.caseType)||"غير محدد"))].sort();
+  let rules=[{type:"",recv:"all"}];
+  const chosen=()=>k.items.filter(it=>rules.some(r=>itemMatches(it,r)));
+  const count=r=>k.items.filter(it=>itemMatches(it,r)).length;
+  const drawRules=()=>`${rules.map((r,i)=>`<div class="rule"><span class="sub">${i?"أو":"اللي"}</span>
+      <select data-rt="${i}" aria-label="نوع الحالة"><option value="">كل الأنواع</option>${types.map(t=>`<option ${r.type===t?"selected":""}>${esc(t)}</option>`).join("")}</select>
+      <select data-rr="${i}" aria-label="الاستلام">${Object.entries(RECV).map(([v,l])=>`<option value="${v}" ${r.recv===v?"selected":""}>${l}</option>`).join("")}</select>
+      <span class="chip">${num(count(r))}</span>${rules.length>1?`<button class="btn sm danger" data-rx="${i}" aria-label="شيل القاعدة">×</button>`:""}</div>`).join("")}
+    <button class="btn sm" id="c_addr">${ic("plus")}قاعدة تانية (أو)</button>
+    <div class="note green" style="margin-top:10px">هيتنسخ <b>${num(chosen().length)}</b> أسرة من ${num(k.items.length)}</div>`;
   sheet("نسخة جديدة من الكشف",`
-    <p class="sub" style="margin-top:0">من: <b>${esc(k.title)}</b></p>
+    <p class="sub" style="margin-top:0">من: <b>${esc(k.title)}</b> — ${num(k.items.filter(i=>i.received).length)} استلموا من ${num(k.items.length)}</p>
     <label class="f">اسم الكشف الجديد<input type="text" id="c_t" value="${esc(k.title.replace(/\s*\(نسخة\)$/,""))} (نسخة)"></label>
     <label class="f">عن شهر<input type="month" id="c_m" value="${curMonth}"></label>
-    <div class="modes">
-      <label class="rolec"><input type="radio" name="c_w" value="all" checked><span><b>كل الأسماء (${num(all)})</b><small>نفس الأسر ونفس الكميات</small></span></label>
-      <label class="rolec"><input type="radio" name="c_w" value="left" ${left?"":"disabled"}><span><b>اللي ماستلموش بس (${num(left)})</b><small>عشان تكمّلهم في كشف تاني</small></span></label>
-    </div>
+    <h3>مين يتنسخ؟</h3><div id="c_rules">${drawRules()}</div>
     <div class="bar"><button class="btn pri" id="c_go">${ic("copy")}اعمل النسخة (مسودة)</button></div>`, s=>{
     const q=x=>s.querySelector(x);
+    const bindR=()=>{ q("#c_rules").innerHTML=drawRules();
+      s.querySelectorAll("[data-rt]").forEach(el=>el.onchange=()=>{ rules[+el.dataset.rt].type=el.value; bindR(); });
+      s.querySelectorAll("[data-rr]").forEach(el=>el.onchange=()=>{ rules[+el.dataset.rr].recv=el.value; bindR(); });
+      s.querySelectorAll("[data-rx]").forEach(el=>el.onclick=()=>{ rules.splice(+el.dataset.rx,1); bindR(); });
+      q("#c_addr").onclick=()=>{ rules.push({type:"",recv:"all"}); bindR(); }; };
+    bindR();
     q("#c_go").onclick=async()=>{
-      const onlyLeft=s.querySelector("input[name=c_w]:checked").value==="left", src=k.items.filter(i=>!onlyLeft||!i.received);
+      const src=chosen(); if(!src.length){ toast("مفيش حد مطابق للقواعد"); return; }
       q("#c_go").disabled=true; q("#c_go").innerHTML=`<span class="spin"></span>`;
       const nk=await run(sb.from("batches").insert({title:q("#c_t").value.trim()||k.title+" (نسخة)",type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
         donor:k.donor||"",basis:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
       if(!nk){ q("#c_go").disabled=false; return; }
       const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid); return toI(b?itemFor(b,it.value,"منسوخ من: "+k.title,it.students):{...it, received:false, reason:"منسوخ من: "+k.title},nk.id,i); });
       for(let i=0;i<rows.length;i+=500){ if(!await run(sb.from("batch_items").insert(rows.slice(i,i+500)))) break; }
-      await logIt("batch",nk.id,`نسخة من «${k.title}» (${rows.length} أسرة${onlyLeft?"، اللي ماستلموش بس":""})`);
+      const ruleText=rules.map(r=>`${r.type||"كل الأنواع"} · ${RECV[r.recv]}`).join(" أو ");
+      await logIt("batch",nk.id,`نسخة من «${k.title}» (${rows.length} أسرة: ${ruleText})`);
       toast("اتعملت النسخة ✓"); await refreshBatch(nk.id); openBatch(nk.id);
     };
   });
@@ -1470,7 +1491,7 @@ function openBatch(id, giveMode){
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
-    ${draft?`<div class="note">${isMgr()?"المسودة مش بتتحسب في سجل المساعدات، والمساعدين مش شايفينها. راجع الأسماء واضغط «اعتماد».":"دي مسودة: تقدر تعدّلها وتشيل وتضيف، والمدير هو اللي بيعتمدها."}</div>`:""}
+    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف، والمدير هو اللي بيعتمدها — وبعد الاعتماد بتظهر زراير «سلّم» عشان تعلّموا مين استلم."}</div>`:""}
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
