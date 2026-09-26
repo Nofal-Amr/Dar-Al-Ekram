@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.3";
+export const VERSION = "1.3.4";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -83,10 +83,10 @@ async function run(promise, okMsg){
 async function logIt(entity, id, text){ if(!canWrite() || !text) return; await sb.from("activity_log").insert({entity, entity_id:id, text}); logCache.delete(entity+id); }
 
 /* ================= mapping ================= */
-const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
+const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
   familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{} });
-const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
+const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
@@ -258,6 +258,9 @@ function whyLine(x, t, unit){
 }
 /* ---------- calls ----------
    Every tap on «ردّت / ماردتش / رقم غلط» is one row in `calls`. The latest one colours the row. */
+const PHONE_OWNERS = ["جوزها","ابنها","بنتها","أخوها","أختها","ابن أخوها","بنت أختها","أمها","أبوها","حماتها","جارتها","رقم تاني ليها"];
+// "رقم جوزها" — says whose phone the family's second number is.
+const phone2Name = b => b?.phone2Owner ? (b.phone2Owner.startsWith("رقم") ? b.phone2Owner : "رقم "+b.phone2Owner) : "رقم تاني";
 const CALL_RES = { "رد":{cls:"ok",label:"ردّت ✓"}, "مردش":{cls:"no",label:"ماردتش"}, "رقم غلط":{cls:"bad",label:"رقم غلط"}, "مش هييجي":{cls:"away",label:"مش هيعرف ييجي"} };
 const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ for(const key of [c.bid+"|"+(c.batchId||""), c.bid+"|*"]){ const p=m.get(key); if(!p||c.at>p.at) m.set(key,c); } } return m; });
 // Inside a list: the latest call for that list. Elsewhere: the latest call in the last 3 days.
@@ -270,9 +273,10 @@ function callCell(bid, phone, batchId, big){
   const canLog=role!=="viewer";
   // If this number didn't work, the family's second number is one tap away.
   const b=B.get(bid), alt=[b?.phone,b?.phone2].map(cleanPhone).find(x=>validPhone(x)&&x!==ph);
+  const altName = alt===cleanPhone(b?.phone2) ? phone2Name(b) : "رقمها";
   return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}</span>`
     :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>`:""}
-    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل بالرقم التاني ${alt}">${ic("phone")}رقم تاني</a>`:""}</span>`;
+    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ب${esc(altName)} ${alt}">${ic("phone")}${esc(altName)}</a>`:""}</span>`;
 }
 const rowCallCls = (bid,batchId) => { const c=lastCall(bid,batchId); return c?"c-"+CALL_RES[c.result].cls:""; };
 function bindCalls(root, redraw){
@@ -846,6 +850,7 @@ async function editPerson(id){
       <label class="f">تاريخ الميلاد (بيتحسب من الرقم القومي)<input type="date" id="p_birth" value="${esc(b.birth)}"></label>
       <label class="f">التليفون<input type="text" inputmode="tel" id="p_phone" value="${esc(b.phone)}" dir="ltr"></label>
       <label class="f">تليفون تاني<input type="text" inputmode="tel" id="p_phone2" value="${esc(b.phone2)}" dir="ltr"></label>
+      <label class="f">التليفون التاني ده رقم مين؟<input type="text" id="p_phone2o" list="p_owners" value="${esc(b.phone2Owner||"")}" placeholder="مثال: جوزها، ابن أخوها"><datalist id="p_owners">${PHONE_OWNERS.map(o=>`<option value="${o}">`).join("")}</datalist></label>
       <label class="f">نوع الحالة<select id="p_type"><option value="">غير محدد</option>${CASE_TYPES.filter(c=>c!=="غير محدد").map(c=>`<option ${b.caseType===c?"selected":""}>${c}</option>`).join("")}</select></label>
       <label class="f">الحالة الاجتماعية<select id="p_marital"><option value=""></option>${MARITAL.map(c=>`<option ${b.marital===c?"selected":""}>${c}</option>`).join("")}</select></label>
       <label class="f">المشروع<input type="text" id="p_project" list="projs" value="${esc(b.project)}"><datalist id="projs">${projects.map(p=>`<option value="${esc(p)}">`).join("")}</datalist></label>
@@ -906,7 +911,7 @@ async function editPerson(id){
     q("#cancelP").onclick=()=>{ clearDraft(draftKey); id?viewPerson(id):closeSheet(); };
     q("#saveP").onclick=async()=>{
       const g=x=>q(x).value.trim(); const prev=id?B.get(id):null;
-      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name),
+      const rec={...b, code:g("#p_code"), status:g("#p_status"), name:g("#p_name"), nationalId:g("#p_nid"), birth:g("#p_birth"), phone:g("#p_phone"), phone2:g("#p_phone2"), phone2Owner:g("#p_phone2o"), caseType:g("#p_type"), marital:g("#p_marital"), project:g("#p_project"), area:g("#p_area"), address:g("#p_address"), job:g("#p_job"), income:g("#p_income"), pension:g("#p_pension"), housing:g("#p_housing"), familySize:g("#p_fam")?+g("#p_fam"):null, grade:g("#p_grade"), lastReview:g("#p_last"), nextReview:g("#p_next"), notes:g("#p_notes"), children:b.children.filter(k=>k.name),
         tags:[...new Set([...[...s.querySelectorAll("#p_tags input:checked")].map(i=>i.value), g("#p_newtag")].filter(Boolean))]};
       if(!rec.name){ toast("اكتب الاسم الأول"); q("#p_name").focus(); return; }
       const nid=parseNID(rec.nationalId); if(nid.ok) rec.nationalId=nid.nid;
@@ -944,7 +949,7 @@ function viewPerson(id){
     </div>
     ${(()=>{ const ts=openTasks().filter(t=>t.bid===b.id); return ts.length?`<div class="list tasks" style="margin-bottom:12px">${ts.map(t=>`<div class="task ${t.due&&t.due<today?"late":""}"><button class="tick" data-done="${t.id}" aria-label="خلصت"></button><button class="grow tbody" data-task="${t.id}"><span class="nm">${esc(t.title)}</span><br><span class="sub">${t.due?dLabel(t.due):""}</span></button></div>`).join("")}</div>`:""; })()}
     <div class="facts">
-      ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f("تليفون تاني",b.phone2)}
+      ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f(b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2)}
       ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize||(famSize(b)?famSize(b)+" (من عدد الأبناء)":""))}${f("عدد الأبناء",(b.children||[]).length||"")}
       ${f("المشروع",b.project)}${f("المنطقة",b.area)}${f("العمل",b.job)}${f("الدخل",b.income)}${f("المعاش",b.pension)}${f("السكن",b.housing)}
       ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?b.score+"%":"")}
@@ -1512,7 +1517,7 @@ function caseHTML(b,logs){
   const kv=pairs=>`<table class="kv"><tbody>${pairs.reduce((rows,p,i)=>{ if(i%2===0) rows.push([p]); else rows[rows.length-1].push(p); return rows; },[]).map(r=>`<tr>${r.map(([l,v])=>`<td>${l}</td><td class="l">${esc(v??"")}</td>`).join("")}${r.length<2?"<td></td><td></td>":""}</tr>`).join("")}</tbody></table>`;
   return `<div class="ps">${hdr()}<h1>ملف حالة رقم ${esc(b.code)}</h1><div class="mo">${esc(b.status)} · ${esc(b.caseType||"غير محدد")}</div>
     <h2>البيانات الأساسية</h2>
-    ${kv([["الاسم",b.name],["الرقم القومي",b.nationalId],["تاريخ الميلاد",b.birth],["السن",age(b.birth)],["التليفون",cleanPhone(b.phone)],["تليفون تاني",b.phone2],["الحالة الاجتماعية",b.marital],["المشروع",b.project],["العمل",b.job],["الدخل",b.income],["المعاش",b.pension],["السكن",b.housing],["أفراد الأسرة",b.familySize],["التقدير",b.grade],["آخر مراجعة",b.lastReview],["المراجعة الجاية",b.nextReview]])}
+    ${kv([["الاسم",b.name],["الرقم القومي",b.nationalId],["تاريخ الميلاد",b.birth],["السن",age(b.birth)],["التليفون",cleanPhone(b.phone)],[b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2],["الحالة الاجتماعية",b.marital],["المشروع",b.project],["العمل",b.job],["الدخل",b.income],["المعاش",b.pension],["السكن",b.housing],["أفراد الأسرة",b.familySize],["التقدير",b.grade],["آخر مراجعة",b.lastReview],["المراجعة الجاية",b.nextReview]])}
     ${kv([["العنوان",b.address||b.area],["ملاحظات",b.notes]])}
     <h2>الأبناء</h2><table><thead><tr><th>م</th><th>الاسم</th><th>النوع</th><th>تاريخ الميلاد</th><th>السن</th><th>المرحلة الدراسية</th></tr></thead><tbody>
     ${(b.children||[]).map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(k.name)}</td><td>${esc(k.gender)}</td><td>${esc(k.birth)}</td><td>${age(k.birth)}</td><td>${esc(k.school)}</td></tr>`).join("")||`<tr><td colspan="6">لا يوجد</td></tr>`}</tbody></table>
@@ -1532,8 +1537,8 @@ function batchXlsx(k){
   xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,12,14,7,30,16]);
 }
 function peopleRows(list){
-  const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","تليفون 2","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
-  list.forEach(b=>rows.push([b.code,b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),b.phone2||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
+  const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
+  list.forEach(b=>rows.push([b.code,b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),b.phone2||"",b.phone2Owner||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
   return rows;
 }
 function backup(){
