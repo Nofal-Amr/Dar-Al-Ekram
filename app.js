@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.17";
+export const VERSION = "1.3.18";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -474,11 +474,14 @@ const statusChip = s => `<span class="chip ${s==="مسودة"?"grey":s==="معت
 function filteredPeople(){
   const q=norm(peopleQ);
   const miss=new Set(missingData().map(b=>b.id));
-  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF==="docs"?(b.docs||[]).some(d=>!d.checkedAt): peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
+  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF==="docs"?(b.docs||[]).some(d=>!d.checkedAt): peopleF==="nodocs"?!(b.docs||[]).length: peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
   if(q) list=list.filter(b=>norm(b.name).includes(q)||(b.nationalId||"").includes(q)||(q.replace(/^0/,"").length>3&&cleanPhone(b.phone).includes(q.replace(/^0/,"")))||String(b.code)===q.padStart(3,"0")||String(b.code)===q);
   const S=PEOPLE_SORT[peopleSort]; if(S&&S.fn) list=[...list].sort((a,b)=>S.fn(a,b)||String(a.code).localeCompare(String(b.code),"en",{numeric:true}));
   return list;
 }
+// «الملف» in the cases list: reviewed / uploaded but not reviewed / no file yet
+const fileState = b => !(b.docs||[]).length ? "none" : (b.docs||[]).every(d=>d.checkedAt) ? "checked" : "pending";
+const FILE_CHIP = { checked:`<span class="chip">✓ اتراجع</span>`, pending:`<span class="chip gold">محتاج مراجعة</span>`, none:`<span class="chip grey">مفيش ملف</span>` };
 const allTags = memo(() => [...new Set(people().flatMap(b=>b.tags||[]))].sort());
 /* The cases list is ordered by what the dropdown says — nothing hidden. */
 const PEOPLE_SORT = {
@@ -498,25 +501,28 @@ function vPeople(){
       <option value="due" ${peopleF==="due"?"selected":""}>محتاجة مراجعة</option>
       <option value="missing" ${peopleF==="missing"?"selected":""}>ناقصها بيانات</option>
       <option value="docs" ${peopleF==="docs"?"selected":""}>ليها ملف لسه ماتراجعش</option>
+      <option value="nodocs" ${peopleF==="nodocs"?"selected":""}>مالهاش ملف مرفوع</option>
       <optgroup label="الحالة">${STATUSES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       <optgroup label="النوع">${CASE_TYPES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       ${allTags().length?`<optgroup label="قايمة المتبرع">${allTags().map(t=>`<option value="tag:${esc(t)}" ${peopleF==="tag:"+t?"selected":""}>${esc(t)}</option>`).join("")}</optgroup>`:""}
     </select>
     <label class="sortl">مترتبة حسب <select id="ps" aria-label="الترتيب">${Object.entries(PEOPLE_SORT).map(([k,v])=>`<option value="${k}" ${peopleSort===k?"selected":""}>${v.label}</option>`).join("")}</select></label>
   </div>
-  <div class="row" style="margin-bottom:8px"><span class="sub grow">${num(list.length)} حالة</span>
+  <div class="row" style="margin-bottom:8px"><span class="sub grow">${num(list.length)} حالة · ملفات: ${(()=>{ const c={checked:0,pending:0,none:0}; all.forEach(b=>c[fileState(b)]++); return `${num(c.checked)} اتراجعت، ${num(c.pending)} محتاجة مراجعة، ${num(c.none)} مالهاش ملف`; })()}</span>
+    ${canWrite()?`<label class="btn sm" style="cursor:pointer">${ic("sheet")}رفع ملفات حالات<input type="file" id="pDocs" accept="application/pdf,image/*" multiple hidden></label>`:""}
     <button class="btn sm" id="pPhones">${ic("phone")}أرقام القائمة دي</button>
     ${isMgr()?`<button class="btn sm" id="pX">تنزيل Excel</button>`:""}
     ${canWrite()?`<button class="btn sm pri" id="addP">${ic("plus")}حالة جديدة</button>`:""}
   </div>
-  ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>الدرجة</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
-    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
+  ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>الدرجة</th><th>الملف</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
+    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td>${FILE_CHIP[fileState(b)]}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
   </tbody></table></div>`:""}
   <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,peopleLimit).map(b=>`
     <button class="item" data-open="${b.id}">
       <span class="code">${esc(b.code)}</span>
       <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${famSize(b)?` · ${famSize(b)} أفراد`:""}${peopleSort==="score"&&b.score!=null?` · الدرجة ${b.score}%`:""}${peopleSort==="last"?` · آخر استلام ${lastAnyMap().get(b.id)?mLabel(lastAnyMap().get(b.id)):"—"}`:""}</span></span>
       ${reviewDue(b)?`<span class="chip red">مراجعة</span>`:""}
+      ${fileState(b)!=="none"?FILE_CHIP[fileState(b)]:""}
       ${b.caseType?`<span class="chip">${esc(b.caseType)}</span>`:""}
       ${b.status!=="نشط"?`<span class="chip ${b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span>`:""}
     </button>`).join(""):`<div class="empty">${all.length?"مفيش نتيجة — جرّب جزء من الاسم بس":"لا توجد حالات بعد"}</div>`}
@@ -628,6 +634,7 @@ function bindView(){
   on("#pf","onchange",e=>{peopleF=e.target.value; peopleLimit=PAGE; render();});
   on("#ps","onchange",e=>{peopleSort=e.target.value; peopleLimit=PAGE; render();});
   on("#pMore","onclick",()=>{ peopleLimit+=PAGE; render(); });
+  on("#pDocs","onchange",e=>{ const fs=[...e.target.files]; e.target.value=""; if(fs.length) bulkDocs(fs); });
   on("#addP","onclick",()=>editPerson(null));
   on("#pPhones","onclick",()=>phoneSheet("الحالات المعروضة", filteredPeople().map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
@@ -987,7 +994,7 @@ function viewPerson(id){
     <h3>الصور</h3>
     <div class="photos">${photoTile(b.id,"mother","الأم")}${photoTile(b.id,"idcard","البطاقة")}${(b.children||[]).map((k,i)=>photoTile(b.id,"k"+i,k.name||"ابن / ابنة")).join("")}</div>
     <h3>ملفات الحالة (PDF)</h3>
-    ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span> ${d.checkedAt?`<span class="chip">✓ اتراجع ${dLabel(d.checkedAt)}</span>`:`<span class="chip gold">لسه ماتراجعش</span>`}</span>
+    ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span> ${d.nameOk?`<span class="chip">✓ اسم الملف مطابق</span> `:""}${d.checkedAt?`<span class="chip">✓ اتراجع ${dLabel(d.checkedAt)}</span>`:`<span class="chip gold">اترفع — محتاج مراجعة</span>`}</span>
       <button class="btn sm" data-dopen="${i}">${ic("eye")}افتح</button>${canWrite()?`<button class="btn sm" data-dmanual="${i}">${ic("edit")}راجع بعينك</button>`:""}${/pdf$/i.test(d.path)?`<button class="btn sm pri" data-dcheck="${i}">${ic("check")}قارن بالموقع</button>`:""}</div>`).join("")}</div>`:`<p class="sub">مفيش ملفات. ارفع ملف الحالة (PDF أو صورة الورقة) — المكتوب على الكمبيوتر بيتقارن لوحده، والمكتوب بخط الإيد بتراجعه بعينك جنب البيانات.</p>`}
     ${canWrite()?`<label class="btn" style="cursor:pointer">${ic("plus")}ارفع ملف (PDF أو صورة)<input type="file" id="v_doc" accept="application/pdf,image/*" hidden></label>`:""}
     <h3>الأبناء</h3>
@@ -1147,13 +1154,47 @@ function bindDocs(root, bid){
   const up=root.querySelector("#v_doc"); if(up) up.onchange=async()=>{
     const f=up.files?.[0]; up.value=""; if(!f) return;
     if(f.size>15*1024*1024){ toast("الملف أكبر من 15 ميجا"); return; }
-    toast("بنرفع الملف…");
+    // make sure the file is this family's: its name should carry her name, national ID or case number
+    const b=B.get(bid), m=matchFileName(f.name, people());
+    if(m.b && m.b.id!==bid){ if(!await ask(`اسم الملف «${f.name}» شبه حالة تانية: ${m.b.code} — ${m.b.name}.\nترفعه على ${b.name} برضو؟`,{title:"الملف ده بتاع مين؟",ok:"أيوه، ارفعه هنا",cancel:"لأ",danger:true})) return; }
+    else if(!m.b){ if(!await ask(`اسم الملف «${f.name}» مافيهوش اسم ${b.name} ولا رقمها القومي ولا رقم الحالة.\nمتأكد إنه ملفها؟`,{title:"اتأكد من الملف",ok:"أيوه، ارفعه",cancel:"رجوع"})) return; }
+    toast(m.b?.id===bid?"اسم الملف مطابق للحالة ✓ — بنرفع…":"بنرفع الملف…");
     const ext=/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)?"pdf":(f.type.split("/")[1]||"jpg"), path=`${bid}/${Date.now()}.${ext}`;
     const r=await sb.storage.from("docs").upload(path, f, { contentType:f.type||"application/pdf" }); if(r.error){ toast(errMsg(r.error)); return; }
     docBlobs.set(path, f);
-    const d={ path, name:f.name, at:new Date().toISOString(), by:me.id };
+    const d={ path, name:f.name, at:new Date().toISOString(), by:me.id, nameOk:m.b?.id===bid };
     if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ مع الحالة ✓ — تقدر تراجعه بعدين")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
   };
+}
+/* Many case files at once (e.g. a folder of scans): each file goes to the case its name points to
+   (national ID, name, or case number). Files that can't be placed are listed to pick the case by hand. */
+function bulkDocs(files){
+  const all=people(), label=b=>`${b.code} — ${b.name}`, byLabel=new Map(all.map(b=>[label(b),b]));
+  const rows=files.map(f=>{ const m=matchFileName(f.name, all); return { f, b:m.b, how:m.how, on:!!m.b && f.size<=15*1024*1024, big:f.size>15*1024*1024 }; });
+  const HOW={nid:"بالرقم القومي",name:"بالاسم",name3:"بالاسم",code:"برقم الحالة"};
+  const draw=()=>{ const ok=rows.filter(r=>r.on&&r.b).length, un=rows.filter(r=>!r.b).length;
+    return `<div class="note">${ic("info")} <span>${num(files.length)} ملف — <b>${num(rows.filter(r=>r.b).length)}</b> عرفنا حالتهم من اسم الملف${un?`، و<b>${num(un)}</b> اختار حالتهم بإيدك`:""}.</span></div>
+    <datalist id="bd_list">${all.map(b=>`<option value="${esc(label(b))}">`).join("")}</datalist>
+    <div class="list">${rows.map((r,i)=>`<div class="item col"><div class="row" style="width:100%"><input type="checkbox" data-on="${i}" ${r.on?"checked":""} ${r.b&&!r.big?"":"disabled"} style="width:20px;height:20px">
+        <span class="grow"><span class="nm">${esc(r.f.name)}</span><br><span class="sub">${r.big?"أكبر من 15 ميجا — مش هيترفع":r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
+      ${!r.b&&!r.big?`<input type="search" list="bd_list" data-pick="${i}" placeholder="اكتب اسم الحالة أو رقمها واختار" style="margin-top:6px">`:""}</div>`).join("")}</div>
+    <div class="bar"><button class="btn pri" id="bd_go" ${ok?"":"disabled"}>${ic("plus")}ارفع ${num(ok)} ملف</button></div>`; };
+  const mount=s=>{ const re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
+    s.querySelectorAll("[data-on]").forEach(el=>el.onchange=()=>{ rows[+el.dataset.on].on=el.checked; re(); });
+    s.querySelectorAll("[data-pick]").forEach(el=>el.onchange=()=>{ const b=byLabel.get(el.value); if(b){ const r=rows[+el.dataset.pick]; r.b=b; r.how="hand"; r.on=true; re(); } });
+    s.querySelector("#bd_go").onclick=async()=>{
+      const go=s.querySelector("#bd_go"); go.disabled=true; const todo=rows.filter(r=>r.on&&r.b); let done=0, failed=0;
+      const byCase=new Map();
+      for(const r of todo){ go.innerHTML=`<span class="spin"></span> ${num(done+1)} من ${num(todo.length)}`;
+        const ext=/pdf$/i.test(r.f.type)||/\.pdf$/i.test(r.f.name)?"pdf":(r.f.type.split("/")[1]||"jpg"), path=`${r.b.id}/${Date.now()}-${done}.${ext}`;
+        const u=await sb.storage.from("docs").upload(path, r.f, { contentType:r.f.type||"application/pdf" });
+        if(u.error){ failed++; continue; } docBlobs.set(path, r.f);
+        (byCase.get(r.b.id)||byCase.set(r.b.id,[]).get(r.b.id)).push({ path, name:r.f.name, at:new Date().toISOString(), by:me.id, nameOk:r.how!=="hand" }); done++; }
+      for(const [bid,ds] of byCase){ if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), ...ds] }).eq("id",bid))){ await logIt("beneficiary",bid,`رفع ${ds.length} ملف: ${ds.map(d=>d.name).join("، ")}`); await refreshPerson(bid); } }
+      toast(`اترفع ${num(done)} ملف ✓${failed?` · ${num(failed)} ماترفعوش`:""}`); closeSheet(); view="people"; peopleF="docs"; render();
+    };
+  };
+  sheet("رفع ملفات حالات", draw(), mount);
 }
 async function checkDoc(bid, d){
   const b=B.get(bid); let text="";

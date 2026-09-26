@@ -195,3 +195,15 @@ test("PDF cross-check against the case on the site", () => {
   assert.ok(r.extra.some(x => x.includes("32308260200015")));       // a child in the file, not on the site
   assert.equal(crossCheck("   ", b).readable, false);               // a scanned image has no text
 });
+
+import { matchFileName } from "../core.js";
+test("which case a file is for, from its name", () => {
+  const P = [{ code:"161", name:"نورا عرفه سليمان", nationalId:"29903201401304" }, { code:"045", name:"سحر السيد رزق مصطفى", nationalId:"28307071402286" }, { code:"046", name:"سحر عطا عبدالخالق", nationalId:"" }];
+  assert.equal(matchFileName("29903201401304.pdf", P).b.code, "161");
+  assert.equal(matchFileName("ملف نورا عرفه سليمان.pdf", P).b.code, "161");
+  assert.equal(matchFileName("نورا_عرفه.pdf", P).b.code, "161");              // part of the name is enough when only one case fits
+  assert.equal(matchFileName("045.pdf", P).b.code, "045");
+  assert.equal(matchFileName("45 سحر.pdf", P).b.code, "045");                  // «سحر» alone fits two cases → falls back to the case number
+  assert.equal(matchFileName("سحر.pdf", P).b, null);
+  assert.equal(matchFileName("scan0001.pdf", P).b, null);
+});

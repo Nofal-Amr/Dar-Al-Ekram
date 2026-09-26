@@ -245,3 +245,18 @@ export function crossCheck(text, b, today = new Date()){
     out.extra.push(`رقم قومي في الملف مش على الموقع: ${x} — ${p.gender}، مواليد ${p.birth}`); });
   return out;
 }
+// Which case is a file for, from its file name: «29903201401304.pdf», «161 نورا عرفه.pdf», «ملف نورا عرفه سليمان.pdf».
+export function matchFileName(fileName, people){
+  const base = latinDigits(String(fileName || "").replace(/\.[a-z0-9]{2,5}$/i, "")).replace(/[_\-.]+/g, " ").trim();
+  const nid = (base.match(/\d{14}/) || [""])[0];
+  if(nid){ const b = people.find(p => p.nationalId === nid); if(b) return { b, how:"nid" }; }
+  const NOISE = new Set(["ملف","حاله","الحاله","نموذج","انضمام","بحث","ميداني","scan","img","pdf","page"]);   // compared after norm() (ة→ه)
+  const words = base.replace(/\d+/g, " ").split(/\s+/).filter(w => w && !NOISE.has(norm(w).toLowerCase())).join(" ");
+  if(words.split(" ").length >= 2){ const m = matchPerson({ name:words, nid:"" }, people); if(m.b) return m;
+    // the file name may carry only part of the name («نورا عرفه»): all its words in one case's name, and only one such case
+    const w = norm(words).split(" "), hits = people.filter(p => { const pn = norm(p.name).split(" "); return w.every(x => pn.includes(x)); });
+    if(hits.length === 1) return { b:hits[0], how:"name" }; }
+  const code = (base.match(/(?:^|\s)(\d{1,4})(?=\s|$)/) || [])[1];
+  if(code){ const b = people.find(p => String(p.code) === code.padStart(3, "0") || String(p.code) === code); if(b) return { b, how:"code" }; }
+  return { b:null, how:"" };
+}
