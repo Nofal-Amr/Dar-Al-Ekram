@@ -164,3 +164,14 @@ export function daysText(days){
   const out = p.map(part);
   return out.length === 1 ? out[0] : out.slice(0, -1).join("، ") + " و" + out[out.length - 1];
 }
+
+/* ---------- students ----------
+   A child counts as a student when their stage is a school stage, or when no stage is written but they're of school age (6–17). */
+export function countStudents(children, today = new Date()){
+  return (children || []).filter(k => {
+    const st = normalizeStage(k.school);
+    if(st) return inSchool(st);
+    if(String(k.school || "").trim() && !/^[-\s]*$/.test(k.school)) return false;   // written but unclear (e.g. «تأجيل») → not counted
+    const a = age(k.birth, today); return a !== "" && a >= 6 && a <= 17;
+  }).length;
+}

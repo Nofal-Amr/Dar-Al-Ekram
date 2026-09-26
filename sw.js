@@ -1,6 +1,6 @@
 // Service worker: keeps the app shell on the device so it opens without internet.
 // Case data never goes through here — it comes live from Supabase (plus the app's own offline copy).
-const VERSION = "v1.3.7";
+const VERSION = "v1.3.8";
 const SHELL = `shell-${VERSION}`, STATIC = "static-v2";
 const APP = ["./", "index.html", "app.js", "core.js", "icons.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 // Pinned third-party files never change at the same URL, so they can be cache-first forever.

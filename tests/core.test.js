@@ -142,3 +142,12 @@ test("days of a list read naturally", () => {
   assert.equal(daysText(["2026-10-03","2026-10-10","2026-10-17"]), "السبت 3، 10 و17 أكتوبر");
   assert.equal(daysText([]), "");
 });
+
+import { countStudents } from "../core.js";
+test("students in a family", () => {
+  const t = new Date("2026-09-26");
+  assert.equal(countStudents([{school:"تحت السن",birth:"2023-08-26"},{school:"رياض اطفال",birth:"2020-06-04"},{school:"ثالثة ابتدائي",birth:"2017-06-20"}], t), 1);
+  assert.equal(countStudents([{school:"حاصله على دبلوم"},{school:"الاول الثنوي"},{school:"الاول الاعدادي"},{school:"الخامس الابتدائي"}], t), 3);
+  assert.equal(countStudents([{school:"",birth:"2015-09-05"},{school:"-",birth:"2022-09-18"}], t), 1);   // no stage: counted by age
+  assert.equal(countStudents([], t), 0);
+});
