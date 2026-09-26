@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.16";
+export const VERSION = "1.3.17";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -335,6 +335,7 @@ function autoTasks(){
   const certs=certList(); if(certs.length) out.push({ic:"calendar",tone:"",t:`شهادات القيد ${syLabel(SY)}`,s:`${num(certs.length)} طفل في ${num(new Set(certs.map(x=>x.b.id)).size)} أسرة لسه ماجابوش الشهادة`,go:"certs"});
   const due=people().filter(reviewDue); if(due.length) out.push({ic:"search",tone:"",t:"مراجعة / بحث ميداني",s:`${num(due.length)} حالة ميعادها جه`,go:"due"});
   const turning=active.filter(b=>kidsTurning18(b).length); if(turning.length) out.push({ic:"cake",tone:"",t:"أبناء هيكملوا 18 سنة",s:`${num(turning.length)} أسرة`,go:"turning"});
+  const unchecked=people().filter(b=>(b.docs||[]).some(d=>!d.checkedAt)); if(unchecked.length&&canWrite()) out.push({ic:"edit",tone:"",t:"ملفات حالات لسه ماتراجعتش",s:`${num(unchecked.length)} حالة ليها ملف مرفوع ومحدش قارنه بالموقع`,go:"docs"});
   const miss=missingData(); if(miss.length&&canWrite()) out.push({ic:"edit",tone:"",t:"كمّل بيانات الحالات",s:`${num(miss.length)} حالة ناقصها عدد الأفراد أو النوع أو التليفون`,go:"missing"});
   return out;
 }
@@ -473,7 +474,7 @@ const statusChip = s => `<span class="chip ${s==="مسودة"?"grey":s==="معت
 function filteredPeople(){
   const q=norm(peopleQ);
   const miss=new Set(missingData().map(b=>b.id));
-  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
+  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF==="docs"?(b.docs||[]).some(d=>!d.checkedAt): peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
   if(q) list=list.filter(b=>norm(b.name).includes(q)||(b.nationalId||"").includes(q)||(q.replace(/^0/,"").length>3&&cleanPhone(b.phone).includes(q.replace(/^0/,"")))||String(b.code)===q.padStart(3,"0")||String(b.code)===q);
   const S=PEOPLE_SORT[peopleSort]; if(S&&S.fn) list=[...list].sort((a,b)=>S.fn(a,b)||String(a.code).localeCompare(String(b.code),"en",{numeric:true}));
   return list;
@@ -496,6 +497,7 @@ function vPeople(){
       <option value="all">الكل (${num(all.length)})</option>
       <option value="due" ${peopleF==="due"?"selected":""}>محتاجة مراجعة</option>
       <option value="missing" ${peopleF==="missing"?"selected":""}>ناقصها بيانات</option>
+      <option value="docs" ${peopleF==="docs"?"selected":""}>ليها ملف لسه ماتراجعش</option>
       <optgroup label="الحالة">${STATUSES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       <optgroup label="النوع">${CASE_TYPES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       ${allTags().length?`<optgroup label="قايمة المتبرع">${allTags().map(t=>`<option value="tag:${esc(t)}" ${peopleF==="tag:"+t?"selected":""}>${esc(t)}</option>`).join("")}</optgroup>`:""}
@@ -661,6 +663,7 @@ function go(what){
   else if(what==="users"){ view="settings"; render(); }
   else if(what==="due"){ view="people"; peopleF="due"; render(); }
   else if(what==="missing"){ view="people"; peopleF="missing"; render(); }
+  else if(what==="docs"){ view="people"; peopleF="docs"; render(); }
   else if(what==="certs") certsSheet();
   else if(what==="archive"){ view="settings"; render(); setTimeout(()=>$("#archive")?.scrollIntoView(),60); }
   else if(what==="newtask") taskSheet(null);
@@ -984,7 +987,7 @@ function viewPerson(id){
     <h3>الصور</h3>
     <div class="photos">${photoTile(b.id,"mother","الأم")}${photoTile(b.id,"idcard","البطاقة")}${(b.children||[]).map((k,i)=>photoTile(b.id,"k"+i,k.name||"ابن / ابنة")).join("")}</div>
     <h3>ملفات الحالة (PDF)</h3>
-    ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span></span>
+    ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span> ${d.checkedAt?`<span class="chip">✓ اتراجع ${dLabel(d.checkedAt)}</span>`:`<span class="chip gold">لسه ماتراجعش</span>`}</span>
       <button class="btn sm" data-dopen="${i}">${ic("eye")}افتح</button>${canWrite()?`<button class="btn sm" data-dmanual="${i}">${ic("edit")}راجع بعينك</button>`:""}${/pdf$/i.test(d.path)?`<button class="btn sm pri" data-dcheck="${i}">${ic("check")}قارن بالموقع</button>`:""}</div>`).join("")}</div>`:`<p class="sub">مفيش ملفات. ارفع ملف الحالة (PDF أو صورة الورقة) — المكتوب على الكمبيوتر بيتقارن لوحده، والمكتوب بخط الإيد بتراجعه بعينك جنب البيانات.</p>`}
     ${canWrite()?`<label class="btn" style="cursor:pointer">${ic("plus")}ارفع ملف (PDF أو صورة)<input type="file" id="v_doc" accept="application/pdf,image/*" hidden></label>`:""}
     <h3>الأبناء</h3>
@@ -1149,7 +1152,7 @@ function bindDocs(root, bid){
     const r=await sb.storage.from("docs").upload(path, f, { contentType:f.type||"application/pdf" }); if(r.error){ toast(errMsg(r.error)); return; }
     docBlobs.set(path, f);
     const d={ path, name:f.name, at:new Date().toISOString(), by:me.id };
-    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ ✓")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); ext==="pdf" ? checkDoc(bid, d) : manualCheck(bid, d); }
+    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ مع الحالة ✓ — تقدر تراجعه بعدين")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
   };
 }
 async function checkDoc(bid, d){
@@ -1166,8 +1169,12 @@ async function checkDoc(bid, d){
       ${r.extra.length?`<h3>في الملف ومش على الموقع (${num(r.extra.length)})</h3><ul class="cx">${li(r.extra,"ex","plus")}</ul>`:""}
       ${r.ok.length?`<h3>مطابق (${num(r.ok.length)})</h3><ul class="cx">${li(r.ok,"okk","check")}</ul>`:""}
       <details><summary class="sub">الكلام اللي اتقرا من الملف</summary><pre class="pdftxt">${esc(text.slice(0,4000))}</pre></details>
-      <p class="sub">البرنامج بيقارن الأرقام القومية والتليفونات والأسامي وعدد الأفراد. باقي الخانات راجعها بعينك.</p>`;
+      <p class="sub">البرنامج بيقارن الأرقام القومية والتليفونات والأسامي وعدد الأفراد. باقي الخانات راجعها بعينك.</p>
+      ${canWrite()?`<div class="bar">${d.checkedAt?"":`<button class="btn pri" id="cx_done">${ic("check")}تمام — علّم إن الملف اتراجع</button>`}<button class="btn" id="cx_manual">${ic("edit")}راجع بعينك</button></div>`:""}`;
   const mc=$("#cx_manual"); if(mc) mc.onclick=()=>manualCheck(bid, d);
+  const dn=$("#cx_done"); if(dn) dn.onclick=async()=>{ dn.disabled=true;
+    const docs=(B.get(bid).docs||[]).map(x=>x.path===d.path?{...x, checkedAt:new Date().toISOString(), checkedBy:me.id}:x);
+    if(await run(sb.from("beneficiaries").update({docs}).eq("id",bid),"اتعلّم إنه اتراجع ✓")){ await logIt("beneficiary",bid,`مراجعة الملف «${d.name||"ملف"}»: ${r.ok.length} مطابق، ${r.diff.length} مختلف، ${r.extra.length} زيادة`); await refreshPerson(bid); viewPerson(bid); } else dn.disabled=false; };
   const o=$("#cx_open"); if(o) o.onclick=async()=>{ const blob=await docBlob(d.path); if(/Android|iPhone|iPad/i.test(navigator.userAgent)) saveFile(d.name||"ملف.pdf", blob); else window.open(URL.createObjectURL(blob),"_blank"); };
   body.querySelectorAll("[data-addkid]").forEach(el=>el.onclick=async()=>{ const p=parseNID(el.dataset.addkid,now); if(!p.ok) return; el.disabled=true;
     const kids=[...(B.get(bid).children||[]), { name:"", nid:p.nid, birth:p.birth, gender:p.gender==="ذكر"?"ولد":"بنت", school:"" }];
@@ -1221,10 +1228,11 @@ async function manualCheck(bid, d){
         let x=val; if(k==="nationalId"){ const p=parseNID(val,now); if(p.ok) x=p.nid; } if(k==="familySize") x=toNumber(val); if(k==="phone"||k==="phone2") x=cleanPhone(val)||val;
         patch[DB_COL[k]||k]=x; changes.push(`${CHECK_FIELDS.find(f=>f[0]===k)[1]}: ${b[k]||"—"} ← ${x}`); }
       if(kidsChanged) patch.children=kidsNew;
+      patch.docs=(B.get(bid).docs||[]).map(x=>x.path===d.path?{...x, checkedAt:new Date().toISOString(), checkedBy:me.id}:x);
       const okN=Object.values(st).filter(v=>v==="ok").length, badN=Object.values(st).filter(v=>v==="bad").length;
       if(!okN&&!badN){ toast("علّم على الخانات الأول"); return; }
       s.querySelector("#mc_save").disabled=true;
-      if(Object.keys(patch).length&&!await run(sb.from("beneficiaries").update(patch).eq("id",bid))){ s.querySelector("#mc_save").disabled=false; return; }
+      if(!await run(sb.from("beneficiaries").update(patch).eq("id",bid))){ s.querySelector("#mc_save").disabled=false; return; }
       const note=s.querySelector("#mc_note").value.trim();
       await logIt("beneficiary",bid,[`مراجعة الملف «${d.name||"ملف"}» بالعين: ${okN} مطابق، ${badN} مختلف`, ...changes, note].filter(Boolean).join(" · "));
       toast(changes.length?`اتحفظت المراجعة و${changes.length} تصحيح ✓`:"اتحفظت المراجعة ✓"); await refreshPerson(bid); viewPerson(bid);
