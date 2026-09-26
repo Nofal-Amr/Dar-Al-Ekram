@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.18";
+export const VERSION = "1.3.19";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -536,7 +536,48 @@ function vBatches(){
   <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${isMgr()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>
   ${isMgr()?(()=>{ const n=[...K.values()].filter(k=>k.archivedAt).length; return `<div class="bar"><button class="btn sm" data-go="archive">${ic("archive")}الكشوف المؤرشفة (${num(n)})</button></div>`; })():""}`;
 }
-let rep={typeId:"",months:3,month:curMonth};
+let rep={typeId:"",months:3,month:curMonth,famType:""};
+/* ---------- family profile (trips, activities, clothing…) ----------
+   Mothers by age, children by age and sex, and how much of it is actually known. Children's sex comes from what's
+   written, or from their national ID. Everything is counted from active cases and recomputed on every change. */
+const AGE_BANDS=[[0,3],[4,6],[7,9],[10,12],[13,15],[16,17],[18,200]];
+const kidSex=k=>/^(ولد|ذكر)$/.test(k.gender||"")?"ولد":/^(بنت|ب|أنثى)$/.test(k.gender||"")?"بنت":(()=>{ const p=parseNID(k.nid||"",now); return p.ok?(p.gender==="ذكر"?"ولد":"بنت"):""; })();
+function familyProfile(type){
+  const fams=people().filter(b=>b.status==="نشط"&&(!type||(b.caseType||"غير محدد")===type));
+  const heads={f:0,m:0,u:0}, mAges={"أقل من 30":0,"من 30 لـ 39":0,"من 40 لـ 49":0,"من 50 لـ 59":0,"60 وأكتر":0,"مش معروف":0};
+  const grid=AGE_BANDS.map(()=>({ولد:0,بنت:0,"":0})), noAge={ولد:0,بنت:0,"":0}, kids=[];
+  let listed=0, sizeOnly=0, estUnlisted=0, none=0;
+  for(const b of fams){
+    const p=parseNID(b.nationalId||"",now), a=age(b.birth||p.birth||"");
+    if(!p.ok) heads.u++; else if(p.gender==="أنثى"){ heads.f++; mAges[a===""?"مش معروف":a<30?"أقل من 30":a<40?"من 30 لـ 39":a<50?"من 40 لـ 49":a<60?"من 50 لـ 59":"60 وأكتر"]++; } else heads.m++;
+    const ks=b.children||[];
+    if(ks.length){ listed++; ks.forEach(k=>{ const sx=kidSex(k), ka=age(k.birth||parseNID(k.nid||"",now).birth||"");
+      if(ka===""){ noAge[sx]++; } else grid[AGE_BANDS.findIndex(([lo,hi])=>ka>=lo&&ka<=hi)][sx]++;
+      kids.push({b,k,sx,age:ka}); }); }
+    else if(b.familySize){ sizeOnly++; estUnlisted+=Math.max(0,b.familySize-1); } else none++;
+  }
+  return { fams, heads, mAges, grid, noAge, kids, listed, sizeOnly, estUnlisted, none };
+}
+function vProfile(){
+  const P=familyProfile(rep.famType), T=(o)=>o.ولد+o.بنت+o[""];
+  const under=P.grid.slice(0,-1).reduce((a,g)=>({ولد:a.ولد+g.ولد,بنت:a.بنت+g.بنت,"":a[""]+g[""]}),{ولد:0,بنت:0,"":0});
+  const bar=(n,max)=>`<span class="pbar"><i style="width:${max?Math.round(n/max*100):0}%"></i></span>`;
+  const mMax=Math.max(...Object.values(P.mAges),1), kMax=Math.max(...P.grid.map(T),1);
+  return `
+  <h3>تحليل الأسر (للرحلات والأنشطة)</h3>
+  <div class="row" style="margin-bottom:10px"><select id="rFam" style="flex:0 0 220px" aria-label="نوع الحالة"><option value="">كل الحالات النشطة</option>${CASE_TYPES.map(c=>`<option ${rep.famType===c?"selected":""}>${c}</option>`).join("")}</select>
+    <span class="grow"></span><button class="btn sm" id="rFamX" ${P.kids.length?"":"disabled"}>Excel بالأطفال وأعمارهم</button></div>
+  <div class="facts"><div><span>أسر</span><strong>${num(P.fams.length)}</strong></div><div><span>أمهات</span><strong>${num(P.heads.f)}</strong></div><div><span>رجالة (صاحب الحالة)</span><strong>${num(P.heads.m)}</strong></div>
+    <div><span>أطفال متسجلين (تحت 18)</span><strong>${num(T(under))}</strong></div><div><span>بنات / ولاد تحت 18</span><strong>${num(under.بنت)} / ${num(under.ولد)}</strong></div></div>
+  <div class="dash-grid">
+    <section><h4>أعمار الأمهات</h4><div class="tbl"><table><tbody>${Object.entries(P.mAges).filter(([k,v])=>v||k!=="مش معروف").map(([k,v])=>`<tr><td>${k}</td><td class="n">${num(v)}</td><td style="width:50%">${bar(v,mMax)}</td></tr>`).join("")}</tbody></table></div></section>
+    <section><h4>الأطفال المتسجلين حسب السن</h4><div class="tbl"><table><thead><tr><th>السن</th><th>بنات</th><th>ولاد</th><th>المجموع</th><th></th></tr></thead><tbody>
+      ${P.grid.map((g,i)=>{ const [lo,hi]=AGE_BANDS[i]; return `<tr><td>${hi>100?`${lo} وأكتر`:`من ${lo} لـ ${hi}`}</td><td class="n">${num(g.بنت)}</td><td class="n">${num(g.ولد)}</td><td class="n"><b>${num(T(g))}</b></td><td style="width:35%">${bar(T(g),kMax)}</td></tr>`; }).join("")}
+      ${T(P.noAge)?`<tr><td>السن مش متسجل</td><td class="n">${num(P.noAge.بنت)}</td><td class="n">${num(P.noAge.ولد)}</td><td class="n"><b>${num(T(P.noAge))}</b></td><td></td></tr>`:""}
+    </tbody></table></div></section>
+  </div>
+  <div class="note">${ic("info")} <span>الأطفال متسجلين بأساميهم في <b>${num(P.listed)}</b> أسرة بس. <b>${num(P.sizeOnly)}</b> أسرة عدد أفرادها متسجل من غير الأبناء (حوالي <b>${num(P.estUnlisted)}</b> ابن مش معروف سنهم)، و<b>${num(P.none)}</b> أسرة مالهاش بيانات خالص. كل ما الأبناء يتسجلوا بالرقم القومي أو تاريخ الميلاد، الأرقام دي بتدق لوحدها.</span></div>`;
+}
 function vReports(){
   const ts=types(); if(!rep.typeId&&ts[0]) rep.typeId=ts[0].id; const t=T.get(rep.typeId);
   const rs=receipts(); const notList=t?notReceived(t,rep.months):[];
@@ -549,6 +590,7 @@ function vReports(){
   return `
   <h2>التقارير</h2>
   <div class="facts">${STATUSES.map(s=>`<div><span>${s}</span><strong>${num(st[s]||0)}</strong></div>`).join("")}</div>
+  ${vProfile()}
   <h3>مين ماخدش؟</h3>
   <div class="row" style="margin-bottom:10px">
     <select id="rT" style="flex:1 1 160px" aria-label="نوع المساعدة">${ts.map(x=>`<option value="${x.id}" ${x.id===rep.typeId?"selected":""}>${esc(x.name)}</option>`).join("")}</select>
@@ -644,6 +686,11 @@ function bindView(){
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
+  on("#rFam","onchange",e=>{ rep.famType=e.target.value; render(); });
+  on("#rFamX","onclick",()=>{ const P=familyProfile(rep.famType);
+    const rows=[["م","رقم الحالة","الأم / صاحب الحالة","التليفون","اسم الطفل","ولد / بنت","السن","المرحلة الدراسية"]];
+    P.kids.sort((a,b)=>(a.age===""?99:a.age)-(b.age===""?99:b.age)).forEach((x,i)=>rows.push([i+1,x.b.code,x.b.name,cleanPhone(x.b.phone),x.k.name||"",x.sx,x.age,stageOf(x.k)]));
+    xlsx({"الأطفال":rows},`الأطفال وأعمارهم${rep.famType?" - "+rep.famType:""}.xlsx`,[5,10,28,14,20,9,6,20]); });
   on("#rP","onclick",()=>{const t=T.get(rep.typeId); phoneSheet(`لم يستلموا ${t.name} — آخر ${rep.months} شهر`, notReceived(t,rep.months).map(({b})=>({bid:b.id,name:b.name,phone:b.phone,code:b.code})));});
   on("#rX","onclick",()=>{const t=T.get(rep.typeId); const rows=[["م","رقم الحالة","الاسم","الرقم القومي","التليفون","النوع","آخر استلام"]]; notReceived(t,rep.months).forEach(({b,lm},i)=>rows.push([i+1,b.code,b.name,b.nationalId||"",cleanPhone(b.phone),b.caseType||"",lm?mLabel(lm):"لم يستلم"])); xlsx({"كشف":rows},`لم يستلموا ${t.name} - آخر ${rep.months} شهر.xlsx`);});
   on("#dueP","onclick",()=>phoneSheet("حالات محتاجة مراجعة", people().filter(reviewDue).map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
