@@ -1,9 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num,
+import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.15";
+export const VERSION = "1.3.16";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -985,8 +985,8 @@ function viewPerson(id){
     <div class="photos">${photoTile(b.id,"mother","الأم")}${photoTile(b.id,"idcard","البطاقة")}${(b.children||[]).map((k,i)=>photoTile(b.id,"k"+i,k.name||"ابن / ابنة")).join("")}</div>
     <h3>ملفات الحالة (PDF)</h3>
     ${(b.docs||[]).length?`<div class="list" style="margin-bottom:8px">${b.docs.map((d,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(d.name||"ملف")}</span><br><span class="sub">${dLabel(d.at)}${d.by?` · ${esc(who(d.by))}`:""}</span></span>
-      <button class="btn sm" data-dopen="${i}">${ic("eye")}افتح</button>${/pdf$/i.test(d.path)?`<button class="btn sm pri" data-dcheck="${i}">${ic("check")}قارن بالموقع</button>`:""}</div>`).join("")}</div>`:`<p class="sub">مفيش ملفات. ارفع ملف الحالة PDF وهيتقارن بالبيانات اللي هنا.</p>`}
-    ${canWrite()?`<label class="btn" style="cursor:pointer">${ic("plus")}ارفع ملف PDF<input type="file" id="v_doc" accept="application/pdf,image/*" hidden></label>`:""}
+      <button class="btn sm" data-dopen="${i}">${ic("eye")}افتح</button>${canWrite()?`<button class="btn sm" data-dmanual="${i}">${ic("edit")}راجع بعينك</button>`:""}${/pdf$/i.test(d.path)?`<button class="btn sm pri" data-dcheck="${i}">${ic("check")}قارن بالموقع</button>`:""}</div>`).join("")}</div>`:`<p class="sub">مفيش ملفات. ارفع ملف الحالة (PDF أو صورة الورقة) — المكتوب على الكمبيوتر بيتقارن لوحده، والمكتوب بخط الإيد بتراجعه بعينك جنب البيانات.</p>`}
+    ${canWrite()?`<label class="btn" style="cursor:pointer">${ic("plus")}ارفع ملف (PDF أو صورة)<input type="file" id="v_doc" accept="application/pdf,image/*" hidden></label>`:""}
     <h3>الأبناء</h3>
     ${(b.children||[]).length?`<div class="tbl"><table><thead><tr><th>الاسم</th><th>السن</th><th>المرحلة الدراسية</th><th>شهادة القيد ${syLabel(SY)}</th></tr></thead><tbody>${b.children.map((k,i)=>{const a=age(k.birth), st=stageOf(k); return `<tr><td>${esc(k.name)}${k.nid?`<div class="why" dir="ltr" style="text-align:end">${esc(k.nid)}</div>`:""}</td><td class="n">${a===""?"—":a}${a!==""&&a>=18?` <span class="chip red">فوق 18</span>`:a!==""&&a>=17?` <span class="chip gold">قرب 18</span>`:""}</td>
       <td>${esc(st||"—")}${st&&!STAGES.includes(st)?` <span class="chip gold" title="اختارها من القايمة في «تعديل»">مكتوبة بإيد</span>`:""}</td>
@@ -1140,6 +1140,7 @@ function bindDocs(root, bid){
   root.querySelectorAll("[data-dopen]").forEach(el=>el.onclick=async()=>{ const d=B.get(bid).docs[+el.dataset.dopen]; el.disabled=true;
     try{ const blob=await docBlob(d.path); if(/Android|iPhone|iPad/i.test(navigator.userAgent)) await saveFile(d.name||"ملف.pdf", blob); else window.open(URL.createObjectURL(blob),"_blank"); }catch(e){ toast(errMsg(e)); } el.disabled=false; });
   root.querySelectorAll("[data-dcheck]").forEach(el=>el.onclick=()=>checkDoc(bid, B.get(bid).docs[+el.dataset.dcheck]));
+  root.querySelectorAll("[data-dmanual]").forEach(el=>el.onclick=()=>manualCheck(bid, B.get(bid).docs[+el.dataset.dmanual]));
   const up=root.querySelector("#v_doc"); if(up) up.onchange=async()=>{
     const f=up.files?.[0]; up.value=""; if(!f) return;
     if(f.size>15*1024*1024){ toast("الملف أكبر من 15 ميجا"); return; }
@@ -1148,7 +1149,7 @@ function bindDocs(root, bid){
     const r=await sb.storage.from("docs").upload(path, f, { contentType:f.type||"application/pdf" }); if(r.error){ toast(errMsg(r.error)); return; }
     docBlobs.set(path, f);
     const d={ path, name:f.name, at:new Date().toISOString(), by:me.id };
-    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ ✓")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); if(ext==="pdf") checkDoc(bid, d); }
+    if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ ✓")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); ext==="pdf" ? checkDoc(bid, d) : manualCheck(bid, d); }
   };
 }
 async function checkDoc(bid, d){
@@ -1159,19 +1160,81 @@ async function checkDoc(bid, d){
   const li=(arr,cls,icn)=>arr.map(x=>`<li class="${cls}">${ic(icn)} <span>${esc(x)}</span>${cls==="ex"&&/رقم قومي في الملف/.test(x)&&canWrite()?` <button class="btn sm" data-addkid="${esc(x.match(/\d{14}/)[0])}">${ic("plus")}ضيفه ابن/بنت</button>`:""}${cls==="ex"&&/تليفون في الملف/.test(x)&&canWrite()&&!b.phone2?` <button class="btn sm" data-addph="${esc(x.match(/01\d{9}/)[0])}">حطه تليفون تاني</button>`:""}</li>`).join("");
   const body=$("#scrim .sh-body"); if(!body) return;
   body.innerHTML=!r.readable
-    ?`<div class="note">${ic("info")} <span>الملف ده <b>صورة (سكانر)</b> — مفيهوش كلام يتقري أوتوماتيك. افتحه وقارنه بعينك بالبيانات اللي في ملف الحالة.</span></div><div class="bar"><button class="btn pri" id="cx_open">${ic("eye")}افتح الملف</button></div>`
+    ?`<div class="note">${ic("info")} <span>الملف ده <b>صورة (سكانر)</b> — مفيهوش كلام يتقري أوتوماتيك. افتحه وقارنه بعينك بالبيانات اللي في ملف الحالة.</span></div><div class="bar">${canWrite()?`<button class="btn pri" id="cx_manual">${ic("edit")}راجع بعينك جنب البيانات</button>`:""}<button class="btn" id="cx_open">${ic("eye")}افتح الملف</button></div>`
     :`<p class="sub" style="margin-top:0">${esc(d.name||"")}</p>
       ${r.diff.length?`<h3>مختلف (${num(r.diff.length)})</h3><ul class="cx">${li(r.diff,"df","alert")}</ul>`:`<div class="note green">${ic("check")} مفيش اختلافات في اللي قدرنا نقراه.</div>`}
       ${r.extra.length?`<h3>في الملف ومش على الموقع (${num(r.extra.length)})</h3><ul class="cx">${li(r.extra,"ex","plus")}</ul>`:""}
       ${r.ok.length?`<h3>مطابق (${num(r.ok.length)})</h3><ul class="cx">${li(r.ok,"okk","check")}</ul>`:""}
       <details><summary class="sub">الكلام اللي اتقرا من الملف</summary><pre class="pdftxt">${esc(text.slice(0,4000))}</pre></details>
       <p class="sub">البرنامج بيقارن الأرقام القومية والتليفونات والأسامي وعدد الأفراد. باقي الخانات راجعها بعينك.</p>`;
+  const mc=$("#cx_manual"); if(mc) mc.onclick=()=>manualCheck(bid, d);
   const o=$("#cx_open"); if(o) o.onclick=async()=>{ const blob=await docBlob(d.path); if(/Android|iPhone|iPad/i.test(navigator.userAgent)) saveFile(d.name||"ملف.pdf", blob); else window.open(URL.createObjectURL(blob),"_blank"); };
   body.querySelectorAll("[data-addkid]").forEach(el=>el.onclick=async()=>{ const p=parseNID(el.dataset.addkid,now); if(!p.ok) return; el.disabled=true;
     const kids=[...(B.get(bid).children||[]), { name:"", nid:p.nid, birth:p.birth, gender:p.gender==="ذكر"?"ولد":"بنت", school:"" }];
     if(await run(sb.from("beneficiaries").update({children:kids}).eq("id",bid),"اتضاف ✓ — اكتب اسمه من «تعديل»")){ await logIt("beneficiary",bid,`إضافة ابن/بنت من ملف PDF: ${p.nid}`); await refreshPerson(bid); el.textContent="اتضاف ✓"; } else el.disabled=false; });
   body.querySelectorAll("[data-addph]").forEach(el=>el.onclick=async()=>{ el.disabled=true;
     if(await run(sb.from("beneficiaries").update({phone2:el.dataset.addph}).eq("id",bid),"اتحفظ ✓")){ await logIt("beneficiary",bid,`تليفون تاني من ملف PDF: ${el.dataset.addph}`); await refreshPerson(bid); el.textContent="اتحفظ ✓"; } else el.disabled=false; });
+}
+
+/* ---------- checking a handwritten file by eye ----------
+   The paper on one side, the site's data on the other, field by field: ✓ matches, or ✗ and type what the paper says.
+   Corrections are saved to the case and logged; the review itself is logged too. */
+const CHECK_FIELDS = [["name","الاسم"],["nationalId","الرقم القومي"],["birth","تاريخ الميلاد"],["phone","التليفون"],["phone2","تليفون تاني"],["marital","الحالة الاجتماعية"],
+  ["address","العنوان"],["job","العمل"],["income","الدخل"],["pension","المعاش"],["housing","السكن"],["familySize","عدد أفراد الأسرة"]];
+const DB_COL = { nationalId:"national_id", phone2:"phone2", familySize:"family_size" };
+async function docPages(d){
+  const blob=await docBlob(d.path);
+  if(!/pdf$/i.test(d.path)) return [URL.createObjectURL(blob)];
+  await loadPdf();
+  const doc=await window.pdfjsLib.getDocument({ data:new Uint8Array(await blob.arrayBuffer()), cMapUrl:"vendor/pdfjs/cmaps/", cMapPacked:true }).promise, out=[];
+  for(let p=1;p<=Math.min(doc.numPages,8);p++){ const pg=await doc.getPage(p), vp=pg.getViewport({ scale:1.6 }), c=document.createElement("canvas"); c.width=vp.width; c.height=vp.height;
+    await pg.render({ canvasContext:c.getContext("2d"), viewport:vp }).promise; out.push(c.toDataURL("image/jpeg",0.85)); }
+  return out;
+}
+async function manualCheck(bid, d){
+  const b=B.get(bid); if(!b||!canWrite()) return;
+  const st={}; // key → "ok" | "bad"
+  const fix={};
+  const kids=(b.children||[]).map(k=>({...k}));
+  const row=(key,label,val)=>`<div class="mc-row ${st[key]||""}"><div class="grow"><span class="sub">${label}</span><br><b>${esc(val===""||val==null?"—":val)}</b>
+      ${st[key]==="bad"?`<input type="text" data-fix="${key}" value="${esc(fix[key]??"")}" placeholder="اكتب اللي في الورقة" ${/nationalId|phone|birth|income|pension|familySize|nid/.test(key)?'dir="ltr" inputmode="text"':""}>`:""}</div>
+      <span class="mc-btns"><button class="cr ok ${st[key]==="ok"?"on":""}" data-st="${key}" data-v="ok" aria-label="مطابق">✓</button><button class="cr bad ${st[key]==="bad"?"on":""}" data-st="${key}" data-v="bad" aria-label="مختلف">✗</button></span></div>`;
+  const docHTML=pages=>pages?pages.map(u=>`<img src="${u}" alt="صفحة من الملف">`).join("")||`<div class="empty">مقدرناش نفتح الملف</div>`:`<div class="empty"><span class="spin"></span> بنفتح الملف…</div>`;
+  const note0={v:""};
+  const formHTML=()=>`
+        <p class="sub" style="margin-top:0">علّم على كل خانة: ✓ لو زي الورقة، ✗ لو مختلفة واكتب اللي في الورقة.</p>
+        ${CHECK_FIELDS.map(([k,l])=>row(k,l,b[k])).join("")}
+        ${kids.length?`<h3>الأبناء</h3>${kids.map((k,i)=>row(`k${i}.name`,`الاسم (ابن/بنت ${i+1})`,k.name)+row(`k${i}.nid`,`رقمه القومي`,k.nid||"")+row(`k${i}.birth`,`تاريخ ميلاده`,k.birth||"")).join("")}`:""}
+        <label class="f" style="margin-top:10px">ملاحظات المراجعة (اختياري)<input type="text" id="mc_note" value="${esc(note0.v)}" placeholder="مثال: الورقة فيها ابن جديد مش متسجل"></label>
+        <div class="bar"><button class="btn pri" id="mc_save">${ic("save")}حفظ المراجعة</button></div>`;
+  const draw=pages=>`<div class="mc"><div class="mc-doc">${docHTML(pages)}</div><div class="mc-form">${formHTML()}</div></div>`;
+  let pages=null;
+  const mount=s=>{
+    s.querySelectorAll("[data-st]").forEach(el=>el.onclick=()=>{ const k=el.dataset.st; st[k]=st[k]===el.dataset.v?undefined:el.dataset.v; redraw(); });
+    s.querySelectorAll("[data-fix]").forEach(el=>el.oninput=()=>{ fix[el.dataset.fix]=el.value; });
+    s.querySelector("#mc_note").oninput=e=>{ note0.v=e.target.value; };
+    s.querySelector("#mc_save").onclick=async()=>{
+      const patch={}, changes=[]; const kidsNew=kids.map(k=>({...k})); let kidsChanged=false;
+      for(const [k,v] of Object.entries(fix)){ if(st[k]!=="bad"||!String(v).trim()) continue; const val=String(v).trim();
+        const m=/^k(\d+)\.(\w+)$/.exec(k);
+        if(m){ let x=val; if(m[2]==="nid"){ const p=parseNID(val,now); if(p.ok){ x=p.nid; kidsNew[+m[1]].birth=kidsNew[+m[1]].birth||p.birth; } } kidsNew[+m[1]][m[2]]=x; kidsChanged=true; changes.push(`${m[2]==="name"?"اسم":m[2]==="nid"?"رقم":"ميلاد"} ابن/بنت ${+m[1]+1}: ${x}`); continue; }
+        let x=val; if(k==="nationalId"){ const p=parseNID(val,now); if(p.ok) x=p.nid; } if(k==="familySize") x=toNumber(val); if(k==="phone"||k==="phone2") x=cleanPhone(val)||val;
+        patch[DB_COL[k]||k]=x; changes.push(`${CHECK_FIELDS.find(f=>f[0]===k)[1]}: ${b[k]||"—"} ← ${x}`); }
+      if(kidsChanged) patch.children=kidsNew;
+      const okN=Object.values(st).filter(v=>v==="ok").length, badN=Object.values(st).filter(v=>v==="bad").length;
+      if(!okN&&!badN){ toast("علّم على الخانات الأول"); return; }
+      s.querySelector("#mc_save").disabled=true;
+      if(Object.keys(patch).length&&!await run(sb.from("beneficiaries").update(patch).eq("id",bid))){ s.querySelector("#mc_save").disabled=false; return; }
+      const note=s.querySelector("#mc_note").value.trim();
+      await logIt("beneficiary",bid,[`مراجعة الملف «${d.name||"ملف"}» بالعين: ${okN} مطابق، ${badN} مختلف`, ...changes, note].filter(Boolean).join(" · "));
+      toast(changes.length?`اتحفظت المراجعة و${changes.length} تصحيح ✓`:"اتحفظت المراجعة ✓"); await refreshPerson(bid); viewPerson(bid);
+    };
+  };
+  // Only the form side is redrawn on each tap; the page images stay put (and keep their scroll).
+  let mine=-1; const redraw=()=>{ const f=$("#scrim .mc-form"); if(!f||sheetSeq!==mine) return; const sc=f.scrollTop, ws=window.scrollY; f.innerHTML=formHTML(); mount($("#scrim")); f.scrollTop=sc; };
+  const s=sheet(`راجع بعينك — ${b.name}`, draw(null), mount); mine=sheetSeq; s.querySelector(".sheet").classList.add("wide-sheet");
+  try{ pages=await docPages(d); }catch(e){ pages=[]; toast("مقدرناش نفتح الملف"); }
+  const dv=$("#scrim .mc-doc"); if(dv&&sheetSeq===mine) dv.innerHTML=docHTML(pages);
 }
 
 /* ================= tasks ================= */
