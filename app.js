@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.13";
+export const VERSION = "1.3.14";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -15,7 +15,7 @@ const CASE_TYPES = ["أيتام","مساعدات","مرضي","أيتام ومر�
 const STATUSES = ["نشط","انتظار","موقوف","ملغي"];
 const MARITAL = ["أرملة","مطلقة","متزوجة","مهجورة","آنسة","أرمل","متزوج","مطلق"];
 const ROLE_AR = {manager:"مدير", worker:"موظف", helper:"عامل", viewer:"مشاهدة فقط", pending:"مستني تفعيل"};
-const ROLE_DESC = {manager:"كل حاجة: يعتمد الكشوف ويحذف ويضيف موظفين", worker:"موظف مكتب: يضيف ويعدّل الحالات، ويعمل كشوف (مسودة والمدير يعتمدها)، ويطبع ويشوف التقارير", helper:"شاشة بسيطة بزراير كبيرة: يسلّم ويتصل ويطبع بس", viewer:"يشوف بس من غير أي تعديل"};
+const ROLE_DESC = {manager:"كل حاجة: يعدّل الكشوف بعد الاعتماد ويقفلها ويأرشف ويضيف موظفين", worker:"موظف مكتب: يضيف ويعدّل الحالات، ويعمل الكشوف ويعتمدها، ويطبع ويشوف التقارير", helper:"شاشة بسيطة بزراير كبيرة: يسلّم ويتصل ويطبع بس", viewer:"يشوف بس من غير أي تعديل"};
 
 const sb = DEMO ? (await import("./demo.js")).createDemoClient()
   : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -1491,9 +1491,9 @@ function openBatch(id, giveMode){
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
-    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف، والمدير هو اللي بيعتمدها — وبعد الاعتماد بتظهر زراير «سلّم» عشان تعلّموا مين استلم."}</div>`:""}
+    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
-      ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
+      ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
@@ -1517,7 +1517,7 @@ function openBatch(id, giveMode){
   const upd=async(patch,text,okMsg)=>{ if(await run(sb.from("batches").update(patch).eq("id",id),okMsg)){ await logIt("batch",id,text); logs=await loadLog("batch",id); await refreshBatch(id); } };
   const mount=s=>{
     const q=x=>s.querySelector(x);
-    if(q("#b_ok")) q("#b_ok").onclick=()=>upd({status:"معتمد",approved_at:new Date().toISOString(),approved_by:me.id},"اعتماد الكشف","اتعتمد ✓");
+    if(q("#b_ok")) q("#b_ok").onclick=async()=>{ if(!isMgr()&&!await ask("بعد الاعتماد مش هتقدر تعدّل الأسامي أو الكميات — التعديل هيبقى للمدير بس.",{title:"اعتماد الكشف؟",ok:"اعتماد"})) return; upd({status:"معتمد",approved_at:new Date().toISOString(),approved_by:me.id},`اعتماد الكشف${isMgr()?"":` (${me.full_name||"موظف"})`}`,"اتعتمد ✓"); };
     if(q("#b_paid")) q("#b_paid").onclick=()=>upd({status:"مصروف",paid_at:new Date().toISOString()},"إغلاق الكشف — تم الصرف","تمام ✓");
     if(q("#b_back")) q("#b_back").onclick=()=>upd({status:"مسودة"},"إرجاع لمسودة");
     s.querySelectorAll("[data-only]").forEach(el=>el.onclick=()=>{ only=el.dataset.only; refreshSheet(); });
