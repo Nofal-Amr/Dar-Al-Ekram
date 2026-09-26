@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num,
-  STAGE_GROUPS, STAGES, countStudents, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.10";
+export const VERSION = "1.3.11";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1444,7 +1444,7 @@ function openBatch(id, giveMode){
     <div class="bar">
       ${draft&&isMgr()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -1482,6 +1482,7 @@ function openBatch(id, giveMode){
     if(q("#b_printLeft")) q("#b_printLeft").onclick=()=>{ const k=K.get(id); doPrint(batchHTML({...k, items:k.items.filter(i=>!i.received), left:true}),k.title); };
     q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
     q("#b_xlsx").onclick=()=>batchXlsx(K.get(id));
+    if(q("#b_up")) q("#b_up").onchange=e=>{ const fs=[...e.target.files]; e.target.value=""; if(fs.length) importToBatch(id, fs); };
   };
   if(!K.get(id)) return;
   let mine=-1;
@@ -1489,6 +1490,52 @@ function openBatch(id, giveMode){
   sheet(K.get(id).title, draw(), mount, redraw); mine=sheetSeq;
   if(giveMode) setTimeout(()=>$("#b_q")?.focus(),60);
   loadLog("batch",id).then(l=>{ logs=l; redraw(); });
+}
+
+/* ================= Excel → list =================
+   Upload one or more of the office's Excel lists into a list that's still being made. Names are matched to the
+   cases on file (national ID first, then name); nothing is added until the preview is confirmed. */
+async function importToBatch(id, files){
+  try{ if(!window.XLSX){ toast("بنجهّز قراية الإكسيل…"); await loadXlsx(); } }catch(e){ toast("مقدرناش نقرا الإكسيل — جرّب تاني"); return; }
+  const k=K.get(id), all=people(), inList=new Set(k.items.map(i=>i.bid)), seen=new Map(), missing=[], dupInList=[];
+  let rowsRead=0;
+  for(const f of files){
+    // .csv is read as text so Arabic isn't garbled; real Excel files are read as they are
+    let wb; try{ wb=/\.csv$/i.test(f.name) ? XLSX.read(await f.text(), { type:"string" }) : XLSX.read(await f.arrayBuffer(), { type:"array" }); }catch(e){ toast(`الملف «${f.name}» مش إكسيل`); continue; }
+    for(const sn of wb.SheetNames){
+      for(const r of rowsFromSheet(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header:1, raw:false, defval:"" }))){
+        rowsRead++;
+        const m=matchPerson(r, all), src=`${f.name}${wb.SheetNames.length>1?` · ${sn}`:""}`;
+        if(!m.b){ if(!missing.some(x=>x.name===r.name&&x.nid===r.nid)) missing.push({...r, src}); continue; }
+        if(inList.has(m.b.id)){ if(!dupInList.includes(m.b.id)) dupInList.push(m.b.id); continue; }
+        if(!seen.has(m.b.id)) seen.set(m.b.id, { b:m.b, how:m.how, count:r.count, src, fileName:r.name });
+      }
+    }
+  }
+  const found=[...seen.values()], hasCount=found.some(x=>x.count!=null), pick=new Set(found.map(x=>x.b.id));
+  let useCount=false;
+  const valueOf=x=>{ if(useCount&&x.count!=null) return x.count; const stu=studentsOf(x.b); return k.basis?shareFor(k.basis,famSize(x.b),stu.n):(T.get(k.typeId)?.amount??1); };
+  const HOW={nid:"بالرقم القومي",name:"بالاسم",name3:"بأول 3 أسامي"};
+  const draw=()=>`
+    <div class="note">${ic("info")} <span>قريت <b>${num(rowsRead)}</b> اسم من ${num(files.length)} ملف. <b>${num(found.length)}</b> متسجلين على الموقع ومش في الكشف${dupInList.length?` · ${num(dupInList.length)} موجودين في الكشف أصلاً`:""}${missing.length?` · <b>${num(missing.length)}</b> مش متسجلين`:""}.</span></div>
+    ${hasCount?`<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="im_c" ${useCount?"checked":""} style="width:20px;height:20px"> الكمية من عمود «عدد» في الملف (بدل طريقة الكشف)</label>`:""}
+    <div class="bar"><button class="btn pri" id="im_go" ${pick.size?"":"disabled"}>${ic("plus")}ضيف ${num(pick.size)} للكشف</button></div>
+    ${found.length?`<h3>هيتضافوا (${num(found.length)})</h3><div class="list">${found.map(x=>`<label class="item"><input type="checkbox" data-pick="${x.b.id}" ${pick.has(x.b.id)?"checked":""} style="width:20px;height:20px"><span class="code">${esc(x.b.code)}</span><span class="grow"><span class="nm">${esc(x.b.name)}</span><br><span class="sub">${HOW[x.how]}${x.how!=="nid"?` — في الملف: «${esc(x.fileName)}»`:""} · ${num(valueOf(x))} ${esc(k.unit)}</span></span></label>`).join("")}</div>`:""}
+    ${missing.length?`<h3>مش متسجلين على الموقع (${num(missing.length)})</h3><p class="sub" style="margin-top:0">دول مش هيتضافوا. لو محتاجينهم سجّلوهم كحالة جديدة الأول، وبعدين ارفع الملف تاني.</p>
+      <div class="list">${missing.map(x=>`<div class="item"><span class="grow"><span class="nm">${esc(x.name)}</span><br><span class="sub" dir="ltr" style="text-align:end;display:block">${esc(x.nid||x.sheetNid||"بدون رقم قومي")}</span></span><span class="sub">${esc(x.src)}</span></div>`).join("")}</div>`:""}`;
+  const mount=s=>{
+    const re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
+    s.querySelectorAll("[data-pick]").forEach(el=>el.onchange=()=>{ el.checked?pick.add(el.dataset.pick):pick.delete(el.dataset.pick); re(); });
+    const c=s.querySelector("#im_c"); if(c) c.onchange=()=>{ useCount=c.checked; re(); };
+    s.querySelector("#im_go").onclick=async()=>{
+      const go=s.querySelector("#im_go"); go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
+      let pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
+      const rows=found.filter(x=>pick.has(x.b.id)).map(x=>{ const stu=studentsOf(x.b); return toI(itemFor(x.b,+valueOf(x)||0,`من ملف إكسيل: ${x.src}`,stu.src==="none"?null:stu.n),id,pos++); });
+      if(await run(sb.from("batch_items").insert(rows),`اتضاف ${num(rows.length)} ✓`)){ await logIt("batch",id,`رفع إكسيل: اتضاف ${rows.length} اسم${missing.length?` · ${missing.length} مش متسجلين`:""}`); await refreshBatch(id); openBatch(id); }
+      else { go.disabled=false; re(); }
+    };
+  };
+  sheet(`رفع إكسيل — ${k.title}`, draw(), mount);
 }
 
 /* ================= phone lists ================= */

@@ -158,3 +158,21 @@ test("per-student shares: a family with no students gets nothing", () => {
   const r = planShares([{ b:{code:"1",familySize:4}, students:2 }, { b:{code:"2",familySize:3}, students:0 }], { mode:"student", per:1 });
   assert.equal(r.used, 2);
 });
+
+import { rowsFromSheet, matchPerson } from "../core.js";
+test("reads an office Excel list and matches people", () => {
+  const aoa = [["جمعيه دار الاكرام"],["المسجله تحت رقم 1401 لسنه 2009"],["كشف صرف وجبات مدرسية"],["عن شهر سبتمبر / 2026"],[],
+    ["م","الاســــــــم","الــرقم القـــومي","التوقيع","عدد"],
+    [1,"نـــورا عرفه سليمان عبدالنــعيم","29903201401304","",3],
+    [2,"سحر السيد رزق مصطفي","","",4],
+    [3,"فلانة مش موجودة خالص","29001011201234","",2],
+    ["الاجمــــالي","","","",9],["تم الصرف بمعرفه","أمين الصندوق","رئيس الجمعيه"]];
+  const rows = rowsFromSheet(aoa);
+  assert.deepEqual(rows.map(r => [r.name, r.nid, r.count]), [["نورا عرفه سليمان عبدالنعيم","29903201401304",3],["سحر السيد رزق مصطفي","",4],["فلانة مش موجودة خالص","29001011201234",2]]);
+  const P = [{ name:"نورا عرفه سليمان", nationalId:"29903201401304" }, { name:"سحر السيد رزق مصطفى", nationalId:"28307071402286" }];
+  assert.equal(matchPerson(rows[0], P).how, "nid");
+  assert.equal(matchPerson(rows[1], P).how, "name");           // ي/ى spelled differently still matches
+  assert.equal(matchPerson(rows[2], P).b, null);
+  // no header row at all: any 14 digits = ID, longest Arabic text = name
+  assert.deepEqual(rowsFromSheet([["", "هبه محمد عبده السيد", "29601311400145"]]).map(r => r.nid), ["29601311400145"]);
+});

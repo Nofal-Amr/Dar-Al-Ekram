@@ -176,3 +176,40 @@ export function countStudents(children, today = new Date()){
     const a = age(k.birth, today); return a !== "" && a >= 6 && a <= 17;
   }).length;
 }
+
+/* ---------- reading names out of an Excel list ----------
+   Works on the office's sheets as they are: finds the header row («الاسم», «الرقم القومي», «عدد») if there is one,
+   otherwise takes any 14-digit number as the national ID and the longest Arabic text as the name.
+   Titles, totals and signature lines are skipped. */
+const SKIP_ROW = /اجمال|تم الصرف|نموذج|جمعي[هة]|المسجل[هة]|^كشف|كشف (صرف|توزيع)|عن شهر|امين الصندوق|رئيس|التوقيع|^الاسم$/;
+export function rowsFromSheet(aoa){
+  const rows = (aoa || []).map(r => (r || []).map(c => String(c ?? "").trim()));
+  let head = -1, cName = -1, cNid = -1, cCount = -1;
+  for(let i = 0; i < Math.min(rows.length, 20) && head < 0; i++){
+    rows[i].forEach((c, j) => { const n = norm(c); if(/^الاس+م|اسم المستفيد/.test(n)) cName = j; if(/القوم/.test(n)) cNid = j; if(/^(عدد|العدد)/.test(n)) cCount = j; });
+    if(cName >= 0) head = i; else { cNid = -1; cCount = -1; }
+  }
+  const out = [];
+  for(let i = head + 1; i < rows.length; i++){
+    const r = rows[i]; if(!r.some(Boolean)) continue;
+    const nidCell = cNid >= 0 ? latinDigits(r[cNid]).replace(/\D/g,"") : "";
+    const nid = nidCell.length === 14 ? nidCell : (r.map(c => latinDigits(c).replace(/\D/g,"")).find(d => d.length === 14) || "");
+    let name = cName >= 0 ? r[cName] : "";
+    if(!name || !/[؀-ۿ]/.test(name)) name = r.filter(c => /[؀-ۿ]{2}/.test(c)).sort((a,b) => b.length - a.length)[0] || "";
+    name = name.replace(/ـ+/g,"").replace(/\s+/g," ").trim();
+    if(!name || SKIP_ROW.test(norm(name))) continue;
+    if(!nid && name.split(" ").length < 2) continue;
+    const count = cCount >= 0 ? toNumber(r[cCount]) : null;
+    out.push({ name, nid, count, sheetNid: nidCell && nidCell.length !== 14 ? nidCell : "" });
+  }
+  return out;
+}
+// Finds the family for a row: national ID first, then the exact name, then the first three names if only one family has them.
+export function matchPerson(row, people){
+  if(row.nid){ const b = people.find(p => p.nationalId === row.nid); if(b) return { b, how:"nid" }; }
+  const n = norm(row.name); if(!n) return { b:null, how:"" };
+  const exact = people.filter(p => norm(p.name) === n); if(exact.length === 1) return { b:exact[0], how:"name" };
+  const k3 = n.split(" ").slice(0,3).join(" ");
+  if(k3.split(" ").length === 3){ const m = people.filter(p => norm(p.name).split(" ").slice(0,3).join(" ") === k3); if(m.length === 1) return { b:m[0], how:"name3" }; }
+  return { b:null, how:"" };
+}
