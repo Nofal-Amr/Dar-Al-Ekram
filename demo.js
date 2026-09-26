@@ -7,7 +7,8 @@ let seed = 20260924;
 const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
 const pick = a => a[Math.floor(rnd() * a.length)];
 const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
-const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.floor(rnd() * 16); return (c === "x" ? r : (r & 3) | 8).toString(16); });
+// Real random ids: the seeded generator repeated ids across lists.
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.floor(rnd() * 16); return (c === "x" ? r : (r & 3) | 8).toString(16); }));
 const pad = (n, l = 2) => String(n).padStart(l, "0");
 
 const WOMEN = ["فاطمة","مروة","هبة","نادية","سعاد","أمل","إيمان","رشا","دعاء","منى","سماح","عبير","نجلاء","هالة","ياسمين","شيماء","آية","رحاب","وفاء","سلوى","نورا","إسراء","غادة","زينب","صفاء"];

@@ -9,6 +9,8 @@ export const norm = s => latinDigits(s).replace(/[أإآ]/g,"ا").replace(/ى/g,
 
 /* ---------- phones ---------- */
 export const cleanPhone = p => { let d = latinDigits(p).replace(/\D/g,""); if(d.startsWith("20") && d.length===12) d = d.slice(1); if(d.length===10 && d.startsWith("1")) d = "0"+d; return d; };
+// "" = looks fine (mobile 01x + 8 digits, or a landline), "none" = empty, "bad" = too short/long or not a phone.
+export const phoneIssue = p => { const d = cleanPhone(p || ""); if(!d) return "none"; return /^01[0125]\d{8}$/.test(d) || /^0[2-9]\d{7,8}$/.test(d) ? "" : "bad"; };
 export const validPhone = p => /^01[0125]\d{8}$/.test(cleanPhone(p));
 
 /* ---------- Egyptian national ID ----------

@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, age, mIdx, mLabel, toNumber } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, age, mIdx, mLabel, toNumber } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -206,4 +206,16 @@ test("which case a file is for, from its name", () => {
   assert.equal(matchFileName("45 سحر.pdf", P).b.code, "045");                  // «سحر» alone fits two cases → falls back to the case number
   assert.equal(matchFileName("سحر.pdf", P).b, null);
   assert.equal(matchFileName("scan0001.pdf", P).b, null);
+});
+
+test("phoneIssue flags missing and broken numbers", () => {
+  assert.equal(phoneIssue("01012345678"), "");
+  assert.equal(phoneIssue("+20 101 234 5678"), "");
+  assert.equal(phoneIssue("٠١١٢٣٤٥٦٧٨٩"), "");
+  assert.equal(phoneIssue("0224567890"), "");
+  assert.equal(phoneIssue(""), "none");
+  assert.equal(phoneIssue(null), "none");
+  assert.equal(phoneIssue("0101234567"), "bad");
+  assert.equal(phoneIssue("010123456789"), "bad");
+  assert.equal(phoneIssue("01812345678"), "bad");
 });

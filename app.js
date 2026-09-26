@@ -1,9 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
+import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.20";
+export const VERSION = "1.3.21";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -56,7 +56,24 @@ const simple = () => role === "helper";
 const cleanUser = u => latinDigits(u).trim().toLowerCase().replace(/[^a-z0-9._-]/g,"");
 const who = id => id ? (P.get(id)?.full_name || P.get(id)?.username || "مستخدم") : "";
 
-function toast(msg){ document.querySelectorAll(".toast").forEach(t => t.remove()); const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3200); }
+function toast(msg, action){ document.querySelectorAll(".toast").forEach(t => t.remove()); const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); t.textContent = msg;
+  if(action){ const b = document.createElement("button"); b.className = "undo"; b.textContent = action.label; b.onclick = () => { t.remove(); action.fn(); }; t.appendChild(b); }
+  document.body.appendChild(t); setTimeout(() => t.remove(), action ? 7000 : 3200); }
+/* ---------- undo ----------
+   Changes inside lists (remove, add, received, archive) can be taken back: «تراجع» on the message, or Ctrl+Z outside text boxes.
+   Each entry undoes itself against the current data, so it still works after other changes. */
+const undoStack = [];
+function undoable(msg, fn){ undoStack.push({ msg, fn }); if(undoStack.length > 30) undoStack.shift(); toast(msg, { label:"تراجع ↶", fn:undoLast }); }
+let undoing = false;
+async function undoLast(){
+  if(undoing) return; const u = undoStack.pop(); if(!u){ toast("مفيش حاجة ترجع فيها"); return; }
+  undoing = true; try{ if(await u.fn() !== false) toast(`اترجع: ${u.msg}`); }catch(e){ toast(errMsg(e)); } finally { undoing = false; }
+}
+document.addEventListener("keydown", e => {
+  if(!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== "KeyZ") return;
+  if(e.target.closest?.("input,textarea,select,[contenteditable]") || document.querySelector(".ask-scrim") || !me) return;
+  e.preventDefault(); undoLast();
+});
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|network|Load failed|fetch/i.test(String(e?.message || e || ""));
 function errMsg(e){
   const m = String(e?.message || e || "");
@@ -100,7 +117,7 @@ const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, ph
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemId:r.item_id||null, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
   createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
-const fromI = r => ({ id:r.id, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
+const fromI = r => ({ id:r.id, position:r.position??0, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
 const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||null, result:r.result, at:r.at, by:r.by });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
 const toI = (it, batchId, i) => ({ batch_id:batchId, beneficiary_id:it.bid||null, position:i, code:it.code, name:it.name, national_id:it.nationalId||null, phone:it.phone||null, family_size:+it.familySize||null, students:it.students??null, value:+it.value||0, reason:it.reason||"", received:!!it.received, received_at:it.received?new Date().toISOString():null });
@@ -209,6 +226,7 @@ async function markReceived(it, v){
   if(isNetErr(error)){ writeQ(readQ().filter(x => x.id !== it.id).concat({ id: it.id, v, at: it.receivedAt })); it.pending = true; changed(); netBanner(); return "queued"; }
   it.received = !v; it.receivedAt = null; changed(); toast(errMsg(error)); return "error";
 }
+async function undoReceive(itemId, v, batchId){ const it = batchId ? K.get(batchId)?.items.find(x => x.id === itemId) : findItem(itemId).it; if(!it || it.received === v) return false; const r = await markReceived(it, v); if(r === "error") return false; logCache.clear(); render(); refreshSheet(); }
 let flushing = false;
 async function flushQueue(){
   if(flushing || !navigator.onLine || !me) return; const q = readQ(); if(!q.length) return;
@@ -484,7 +502,7 @@ const statusChip = s => `<span class="chip ${s==="مسودة"?"grey":s==="معت
 function filteredPeople(){
   const q=norm(peopleQ);
   const miss=new Set(missingData().map(b=>b.id));
-  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF==="docs"?(b.docs||[]).some(d=>!d.checkedAt): peopleF==="nodocs"?!(b.docs||[]).length: peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
+  let list=people().filter(b=>peopleF==="all"?true: peopleF==="due"?reviewDue(b): peopleF==="missing"?miss.has(b.id): peopleF==="docs"?(b.docs||[]).some(d=>!d.checkedAt): peopleF==="nodocs"?!(b.docs||[]).length: peopleF==="nophone"?phoneIssue(b.phone)==="none": peopleF==="badphone"?phoneIssue(b.phone)==="bad": peopleF==="phoneany"?!!phoneIssue(b.phone): peopleF.startsWith("tag:")?(b.tags||[]).includes(peopleF.slice(4)): STATUSES.includes(peopleF)?b.status===peopleF:(b.caseType||"غير محدد")===peopleF);
   if(q) list=list.filter(b=>norm(b.name).includes(q)||(b.nationalId||"").includes(q)||(q.replace(/^0/,"").length>3&&cleanPhone(b.phone).includes(q.replace(/^0/,"")))||String(b.code)===q.padStart(3,"0")||String(b.code)===q);
   const S=PEOPLE_SORT[peopleSort]; if(S&&S.fn) list=[...list].sort((a,b)=>S.fn(a,b)||String(a.code).localeCompare(String(b.code),"en",{numeric:true}));
   return list;
@@ -512,6 +530,7 @@ function vPeople(){
       <option value="missing" ${peopleF==="missing"?"selected":""}>ناقصها بيانات</option>
       <option value="docs" ${peopleF==="docs"?"selected":""}>ليها ملف لسه ماتراجعش</option>
       <option value="nodocs" ${peopleF==="nodocs"?"selected":""}>مالهاش ملف مرفوع</option>
+      ${(()=>{ const c={none:0,bad:0}; all.forEach(b=>{ const x=phoneIssue(b.phone); if(x) c[x]++; }); return `<optgroup label="التليفون"><option value="phoneany" ${peopleF==="phoneany"?"selected":""}>رقمها ناقص أو غلط (${num(c.none+c.bad)})</option><option value="nophone" ${peopleF==="nophone"?"selected":""}>مالهاش رقم خالص (${num(c.none)})</option><option value="badphone" ${peopleF==="badphone"?"selected":""}>رقمها غلط (${num(c.bad)})</option></optgroup>`; })()}
       <optgroup label="الحالة">${STATUSES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       <optgroup label="النوع">${CASE_TYPES.map(s=>`<option ${peopleF===s?"selected":""}>${s}</option>`).join("")}</optgroup>
       ${allTags().length?`<optgroup label="قايمة المتبرع">${allTags().map(t=>`<option value="tag:${esc(t)}" ${peopleF==="tag:"+t?"selected":""}>${esc(t)}</option>`).join("")}</optgroup>`:""}
@@ -525,7 +544,7 @@ function vPeople(){
     ${canWrite()?`<button class="btn sm pri" id="addP">${ic("plus")}حالة جديدة</button>`:""}
   </div>
   ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>الدرجة</th><th>الملف</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
-    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${esc(cleanPhone(b.phone))}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td>${FILE_CHIP[fileState(b)]}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
+    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${phoneIssue(b.phone)==="none"?`<span class="chip red">مفيش رقم</span>`:esc(cleanPhone(b.phone))+(phoneIssue(b.phone)==="bad"?` <span class="chip red">غلط</span>`:"")}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td>${FILE_CHIP[fileState(b)]}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
   </tbody></table></div>`:""}
   <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,peopleLimit).map(b=>`
     <button class="item" data-open="${b.id}">
@@ -533,6 +552,7 @@ function vPeople(){
       <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${famSize(b)?` · ${famSize(b)} أفراد`:""}${peopleSort==="score"&&b.score!=null?` · الدرجة ${b.score}%`:""}${peopleSort==="last"?` · آخر استلام ${lastAnyMap().get(b.id)?mLabel(lastAnyMap().get(b.id)):"—"}`:""}</span></span>
       ${reviewDue(b)?`<span class="chip red">مراجعة</span>`:""}
       ${fileState(b)!=="none"?FILE_CHIP[fileState(b)]:""}
+      ${phoneIssue(b.phone)==="none"?`<span class="chip red">مفيش رقم</span>`:phoneIssue(b.phone)==="bad"?`<span class="chip red">رقم غلط: <span dir="ltr">${esc(cleanPhone(b.phone))}</span></span>`:""}
       ${b.caseType?`<span class="chip">${esc(b.caseType)}</span>`:""}
       ${b.status!=="نشط"?`<span class="chip ${b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span>`:""}
     </button>`).join(""):`<div class="empty">${all.length?"مفيش نتيجة — جرّب جزء من الاسم بس":"لا توجد حالات بعد"}</div>`}
@@ -894,7 +914,7 @@ function bindSimple(){
     const r=await markReceived(it,true);
     if(r==="error"){ el.disabled=false; el.textContent="سلّم"; return; }
     if(navigator.vibrate) navigator.vibrate(40);
-    toast(r==="queued"?`${it.name} — اتسجل، وهيترفع لما النت يرجع`:`✓ ${it.name} استلم`);
+    if(r==="queued") toast(`${it.name} — اتسجل، وهيترفع لما النت يرجع`); else undoable(`✓ ${it.name} استلم`, ()=>undoReceive(it.id,false,bid));
   });
   const big=$("#s_big"); if(big) big.onclick=()=>{ document.body.classList.toggle("big"); try{localStorage.setItem("big",document.body.classList.contains("big")?"1":"");}catch(e){} render(); };
   const out=$("#s_out"); if(out) out.onclick=logout;
@@ -1081,7 +1101,8 @@ function viewPerson(id){
     bindCalls(s, redraw); bindPhotos(s, id, redraw); bindDocs(s, id);
     if(q("#v_del")) q("#v_del").onclick=async()=>{
       if(!await ask("الحالة هتختفي من القوائم والكشوف الجديدة، بس سجلها وكل اللي صرفته يفضل محفوظ.\nتقدر ترجّعها في أي وقت من «الإعدادات ← الأرشيف».",{title:"أرشفة الحالة؟",ok:"أرشفة"})) return;
-      if(await run(sb.from("beneficiaries").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشفت ✓")){ await logIt("beneficiary",id,"أرشفة الحالة"); closeSheet(); refreshPerson(id); }
+      if(await run(sb.from("beneficiaries").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id))){ await logIt("beneficiary",id,"أرشفة الحالة"); closeSheet(); await refreshPerson(id);
+        undoable(`${B.get(id)?.name||"الحالة"} اتأرشفت`, async()=>{ if(!await run(sb.from("beneficiaries").update({archived_at:null,archived_by:null}).eq("id",id))) return false; await logIt("beneficiary",id,"إرجاع من الأرشيف (تراجع)"); await refreshPerson(id); }); }
     };
   };
   if(!B.get(id)) return;
@@ -1605,7 +1626,8 @@ function newBatch(){
         ${c.excluded.length?`<button class="btn sm" id="n_outT" style="margin-top:10px">${st.showOut?"اخفي":"اعرض"} المستبعدين (${num(c.excluded.length)})</button>${st.showOut?`<div class="list" style="margin-top:8px">${c.excluded.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(x.why)}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
         <div class="bar" style="margin-top:16px"><button class="btn pri" id="n_save" ${picked.length?"":"disabled"}>${ic("save")}حفظ كمسودة (${num(picked.length)} أسرة)</button></div>`;
       const R=q("#n_res");
-      R.querySelectorAll("[data-rm]").forEach(el=>el.onclick=()=>{ const id=el.dataset.rm; st.added=st.added.filter(x=>x!==id); st.removed.add(id); draw(); });
+      R.querySelectorAll("[data-rm]").forEach(el=>el.onclick=()=>{ const id=el.dataset.rm, wasAdded=st.added.includes(id); st.added=st.added.filter(x=>x!==id); st.removed.add(id); draw();
+        undoable(`${B.get(id)?.name||"الحالة"} اتشالت`, ()=>{ if(!R.isConnected) return false; st.removed.delete(id); if(wasAdded) st.added.push(id); draw(); }); });
       R.querySelectorAll("[data-v]").forEach(el=>el.onchange=()=>{ st.values[el.dataset.v]=+el.value||0; draw(); });
       R.querySelectorAll("[data-addr]").forEach(el=>el.onclick=()=>{ const id=el.dataset.addr; st.removed.delete(id); if(!st.added.includes(id)) st.added.push(id); draw(); });
       const rt=q("#n_restT"); if(rt) rt.onclick=()=>{ st.showRest=!st.showRest; draw(); };
@@ -1760,13 +1782,17 @@ function openBatch(id, giveMode){
     if(q("#b_back")) q("#b_back").onclick=()=>upd({status:"مسودة"},"إرجاع لمسودة");
     s.querySelectorAll("[data-only]").forEach(el=>el.onclick=()=>{ only=el.dataset.only; refreshSheet(); });
     bindCalls(s, ()=>refreshSheet());
-    if(q("#b_del")) q("#b_del").onclick=async()=>{ const kk=K.get(id); if(await ask(kk.status==="مسودة"?"المسودة هتختفي من القوايم، وتفضل محفوظة في الأرشيف.":"الكشف هيختفي من القوايم، وماحدش هيتحسب إنه استلمه منه لحد ما ترجّعه.\nتلاقيه في «الإعدادات ← الأرشيف» وترجّعه في أي وقت.",{title:"أرشفة الكشف؟",ok:"أرشفة"})&&await run(sb.from("batches").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id),"اتأرشف ✓")){ await logIt("batch",id,"أرشفة الكشف"); closeSheet(); refreshBatch(id); } };
-    s.querySelectorAll("[data-rm]").forEach(el=>el.onclick=async()=>{ const it=K.get(id).items.find(x=>x.id===el.dataset.rm); if(K.get(id).status!=="مسودة"&&!await ask(`${it.name} هتتشال من الكشف ده.`,{title:"شيل من الكشف؟",ok:"شيل",danger:true})) return; if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); logs=await loadLog("batch",id); refreshBatch(id); } });
+    if(q("#b_del")) q("#b_del").onclick=async()=>{ const kk=K.get(id); if(await ask(kk.status==="مسودة"?"المسودة هتختفي من القوايم، وتفضل محفوظة في الأرشيف.":"الكشف هيختفي من القوايم، وماحدش هيتحسب إنه استلمه منه لحد ما ترجّعه.\nتلاقيه في «الإعدادات ← الأرشيف» وترجّعه في أي وقت.",{title:"أرشفة الكشف؟",ok:"أرشفة"})&&await run(sb.from("batches").update({archived_at:new Date().toISOString(),archived_by:me.id}).eq("id",id))){ await logIt("batch",id,"أرشفة الكشف"); closeSheet(); await refreshBatch(id);
+      undoable(`«${kk.title}» اتأرشف`, async()=>{ if(!await run(sb.from("batches").update({archived_at:null,archived_by:null}).eq("id",id))) return false; await logIt("batch",id,"إرجاع من الأرشيف (تراجع)"); await refreshBatch(id); }); } };
+    s.querySelectorAll("[data-rm]").forEach(el=>el.onclick=async()=>{ const it=K.get(id).items.find(x=>x.id===el.dataset.rm); if(K.get(id).status!=="مسودة"&&!await ask(`${it.name} هتتشال من الكشف ده.`,{title:"شيل من الكشف؟",ok:"شيل",danger:true})) return; const row={ id:it.id, ...toI(it,id,it.position), received_at:it.receivedAt||null, received_by:it.receivedBy||null };
+      if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); logs=await loadLog("batch",id); await refreshBatch(id);
+        undoable(`${it.name} اتشالت من الكشف`, async()=>{ if(!K.get(id)||K.get(id).items.some(x=>x.id===row.id||x.bid===row.beneficiary_id)) return false;
+          if(!await run(sb.from("batch_items").insert(row))) return false; await logIt("batch",id,`رجوع ${it.name} (تراجع)`); logs=await loadLog("batch",id); await refreshBatch(id); }); } });
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
       if(!v&&!await ask(`${it.name} هيرجع «ماستلمش».`,{title:"إلغاء الاستلام؟",ok:"إلغاء الاستلام",danger:true})) return;
-      const r=await markReceived(it,v);
-      if(r==="ok"&&v) toast(`${it.name} — استلم ✓`); if(r==="queued") toast(`${it.name} — اتسجل، وهيترفع لما النت يرجع`); logCache.delete("batch"+id);
+      const r=await markReceived(it,v); logCache.delete("batch"+id);
+      if(r==="ok") undoable(v?`${it.name} — استلم ✓`:`${it.name} — رجعت «ماستلمش»`, ()=>undoReceive(it.id,!v,id)); if(r==="queued") toast(`${it.name} — اتسجل، وهيترفع لما النت يرجع`);
     });
     const bq=q("#b_q"); bq.oninput=()=>{ q_=bq.value; const pos=bq.selectionStart; refreshSheet(); const n=$("#b_q"); if(n){n.focus(); n.setSelectionRange(pos,pos);} };
     q("#b_print").onclick=()=>doPrint(batchHTML(K.get(id)),K.get(id).title);
@@ -1776,7 +1802,10 @@ function openBatch(id, giveMode){
     const addTo=async bid=>{ const k=K.get(id), b=B.get(bid); if(!b||k.items.some(i=>i.bid===bid)) return;
       const stu=studentsOf(b), v=k.basis?shareFor(k.basis,famSize(b),stu.n):(k.items[0]?.value??T.get(k.typeId)?.amount??1);
       const pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
-      if(await run(sb.from("batch_items").insert(toI(itemFor(b,v,"إضافة بإيدك",stu.src==="none"?null:stu.n),id,pos)),`${b.name} اتضافت ✓`)){ await logIt("batch",id,`إضافة ${b.name}`); logs=await loadLog("batch",id); addQ=""; await refreshBatch(id); } };
+      const row=await run(sb.from("batch_items").insert(toI(itemFor(b,v,"إضافة بإيدك",stu.src==="none"?null:stu.n),id,pos)).select().single());
+      if(row){ await logIt("batch",id,`إضافة ${b.name}`); logs=await loadLog("batch",id); addQ=""; await refreshBatch(id);
+        undoable(`${b.name} اتضافت للكشف`, async()=>{ const it=K.get(id)?.items.find(x=>x.id===row.id); if(!it||it.received) return false;
+          if(!await run(sb.from("batch_items").delete().eq("id",row.id))) return false; await logIt("batch",id,`شيل ${b.name} (تراجع)`); logs=await loadLog("batch",id); await refreshBatch(id); }); } };
     s.querySelectorAll("[data-addb]").forEach(el=>el.onclick=()=>{ el.disabled=true; addTo(el.dataset.addb); });
     const ab=q("#b_add"); if(ab){ const res=()=>{ const qq=norm(addQ); const k=K.get(id), inIt=new Set(k.items.map(i=>i.bid));
         const r=qq.length<2?[]:people().filter(b=>!inIt.has(b.id)&&(norm(b.name).includes(qq)||(b.nationalId||"").includes(qq)||b.code===qq.padStart(3,"0"))).slice(0,8);
