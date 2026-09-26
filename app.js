@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, latinDigits, parseNID
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.22";
+export const VERSION = "1.3.23";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1238,7 +1238,7 @@ function bindDocs(root, bid){
     else if(!m.b){ if(!await ask(`اسم الملف «${f.name}» مافيهوش اسم ${b.name} ولا رقمها القومي ولا رقم الحالة.\nمتأكد إنه ملفها؟`,{title:"اتأكد من الملف",ok:"أيوه، ارفعه",cancel:"رجوع"})) return; }
     toast(m.b?.id===bid?"اسم الملف مطابق للحالة ✓ — بنرفع…":"بنرفع الملف…");
     const path=`${bid}/${Date.now()}.${g.ext}`;
-    const err=await putDoc(path, g); if(err){ toast(err); return; }
+    let lastPct=-1; const err=await putDoc(path, g, f=>{ const pc=Math.round(f*100); if(pc>=lastPct+10){ lastPct=pc; toast(`بنرفع الملف… ${pc}%`); } }); if(err){ toast(err); return; }
     docBlobs.set(path, g.blob);
     const d={ path, name:f.name, at:new Date().toISOString(), by:me.id, nameOk:m.b?.id===bid };
     if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), d] }).eq("id",bid),"الملف اتحفظ مع الحالة ✓ — تقدر تراجعه بعدين")){ await logIt("beneficiary",bid,`رفع ملف: ${f.name}`); await refreshPerson(bid); }
@@ -1256,11 +1256,30 @@ async function grabFile(f){
     return { f, ext, blob:new Blob([buf],{ type:DOC_TYPES[ext] }) }; }
   catch(e){ return { f, err:"الموبايل مش قادر يقرا الملف — لو من واتساب أو درايف نزّله على الموبايل الأول وبعدين ارفعه" }; }
 }
-async function putDoc(path, g){
+// Straight upload with progress (the library's fetch shows nothing while a big scan crawls up over mobile data).
+// Gives up when no bytes move for a minute; the reason is written to the activity log so it can be looked at later.
+function xhrUpload(path, g, onProg){
+  return new Promise(async res=>{
+    const { data:{ session } } = await sb.auth.getSession(); if(!session) return res({ message:"مش مسجل دخول" });
+    const x=new XMLHttpRequest(); let stall=null; const kick=()=>{ clearTimeout(stall); stall=setTimeout(()=>{ x.abort(); res({ net:true, message:"stalled 60s" }); },60000); };
+    x.open("POST", `${SUPABASE_URL}/storage/v1/object/docs/${path.split("/").map(encodeURIComponent).join("/")}`);
+    x.setRequestHeader("Authorization", "Bearer "+session.access_token); x.setRequestHeader("apikey", SUPABASE_KEY);
+    x.setRequestHeader("Content-Type", DOC_TYPES[g.ext]); x.setRequestHeader("x-upsert", "false");
+    x.upload.onprogress=e=>{ kick(); if(e.lengthComputable&&onProg) onProg(e.loaded/e.total); };
+    x.onload=()=>{ clearTimeout(stall); res(x.status<300?null:{ status:x.status, message:(x.responseText||"").slice(0,200) }); };
+    x.onerror=()=>{ clearTimeout(stall); res({ net:true, message:"network error" }); };
+    kick(); x.send(g.blob);
+  });
+}
+async function putDoc(path, g, onProg){
   let last=null;
-  for(let i=0;i<3;i++){ const r=await sb.storage.from("docs").upload(path, g.blob, { contentType:DOC_TYPES[g.ext] });
-    if(!r.error||(i&&/exists|duplicate/i.test(r.error.message||""))) return null; last=r.error; if(!isNetErr(r.error)) break; await new Promise(z=>setTimeout(z,1500*(i+1))); }
-  return isNetErr(last)?"النت فصل أثناء الرفع — جرّب تاني على واي فاي":errMsg(last);
+  for(let i=0;i<3;i++){
+    const r=sb.demo?(await sb.storage.from("docs").upload(path, g.blob, { contentType:DOC_TYPES[g.ext] })).error:await xhrUpload(path, g, onProg);
+    if(!r||(i&&/exists|duplicate/i.test(r.message||""))) return null; last=r;
+    if(!(r.net||isNetErr(r))) break; await new Promise(z=>setTimeout(z,1500*(i+1)));
+  }
+  try{ await sb.from("activity_log").insert({ entity:"upload", entity_id:path.split("/")[0], text:`فشل رفع ${g.f.name} (${(g.blob.size/1048576).toFixed(1)} ميجا): ${last.status||""} ${last.message||""} · ${navigator.connection?.effectiveType||""}` }); }catch(e){}
+  return (last.net||isNetErr(last))?(/stalled/.test(last.message)?"الرفع وقف دقيقة كاملة — النت بطيء، جرّب على واي فاي":"النت فصل أثناء الرفع — جرّب تاني على واي فاي"):last.status===413?"الملف كبير على السيرفر":`ماترفعش (${last.status||""} ${last.message||""})`;
 }
 /* Many case files at once (e.g. a folder of scans): each file goes to the case its name points to
    (national ID, name, or case number). Files that can't be placed are listed to pick the case by hand. */
@@ -1273,7 +1292,7 @@ function bulkDocs(grabbed){
     return `<div class="note">${ic("info")} <span>${num(files.length)} ملف — <b>${num(rows.filter(r=>r.b).length)}</b> عرفنا حالتهم من اسم الملف${un?`، و<b>${num(un)}</b> اختار حالتهم بإيدك`:""}.</span></div>
     <datalist id="bd_list">${all.map(b=>`<option value="${esc(label(b))}">`).join("")}</datalist>
     <div class="list">${rows.map((r,i)=>`<div class="item col"><div class="row" style="width:100%"><input type="checkbox" data-on="${i}" ${r.on?"checked":""} ${r.b&&!r.big?"":"disabled"} style="width:20px;height:20px">
-        <span class="grow"><span class="nm">${esc(r.f.name)}</span><br><span class="sub">${r.err?`${r.b?esc(label(r.b))+" · ":""}<b style="color:var(--red)">${esc(r.err)}</b>`:r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
+        <span class="grow"><span class="nm">${esc(r.f.name)}</span> <span class="sub">(${(r.f.size/1048576).toFixed(1)} ميجا)</span><br><span class="sub">${r.err?`${r.b?esc(label(r.b))+" · ":""}<b style="color:var(--red)">${esc(r.err)}</b>`:r.b?`${esc(label(r.b))} · ${r.how==="hand"?"اخترتها بإيدك":HOW[r.how]||""}${(r.b.docs||[]).length?` · عندها ${r.b.docs.length} ملف قبل كده`:""}`:`<b style="color:var(--red)">مش عارفين بتاع مين</b>`}</span></span></div>
       ${!r.b&&!r.err?`<input type="search" list="bd_list" data-pick="${i}" placeholder="اكتب اسم الحالة أو رقمها واختار" style="margin-top:6px">`:""}</div>`).join("")}</div>
     <div class="bar"><button class="btn pri" id="bd_go" ${ok?"":"disabled"}>${ic("plus")}ارفع ${num(ok)} ملف</button></div>`; };
   const mount=s=>{ const re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
@@ -1282,9 +1301,9 @@ function bulkDocs(grabbed){
     s.querySelector("#bd_go").onclick=async()=>{
       const go=s.querySelector("#bd_go"); go.disabled=true; const todo=rows.filter(r=>r.on&&r.b); let done=0, failed=0;
       const byCase=new Map();
-      for(const r of todo){ go.innerHTML=`<span class="spin"></span> ${num(done+1)} من ${num(todo.length)}`;
+      for(const r of todo){ go.innerHTML=`<span class="spin"></span> ${num(done+failed+1)} من ${num(todo.length)}`;
         const path=`${r.b.id}/${Date.now()}-${done+failed}.${r.g.ext}`;
-        const err=await putDoc(path, r.g);
+        const err=await putDoc(path, r.g, f=>{ go.innerHTML=`<span class="spin"></span> ${num(done+failed+1)} من ${num(todo.length)} — ${Math.round(f*100)}%`; });
         if(err){ failed++; r.err=err; r.on=false; continue; } docBlobs.set(path, r.g.blob); r.done=true;
         (byCase.get(r.b.id)||byCase.set(r.b.id,[]).get(r.b.id)).push({ path, name:r.f.name, at:new Date().toISOString(), by:me.id, nameOk:r.how!=="hand" }); done++; }
       for(const [bid,ds] of byCase){ if(await run(sb.from("beneficiaries").update({ docs:[...(B.get(bid).docs||[]), ...ds] }).eq("id",bid))){ await logIt("beneficiary",bid,`رفع ${ds.length} ملف: ${ds.map(d=>d.name).join("، ")}`); await refreshPerson(bid); } }
