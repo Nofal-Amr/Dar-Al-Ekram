@@ -81,6 +81,11 @@ test("next stage after the yearly certificate", () => {
   assert.equal(nextStage("سادسة ابتدائي"), "أولى إعدادي");
   assert.equal(nextStage("تالتة إعدادي"), "");            // family picks the ثانوي track
   assert.equal(nextStage("تانية ثانوي تجاري"), "تالتة ثانوي تجاري");
+  assert.equal(nextStage("تالتة ثانوي تجاري"), "");                 // تجاري: 3 سنين
+  assert.equal(nextStage("تالتة ثانوي صناعي"), "رابعة ثانوي صناعي");  // صنايع: لحد 5 سنين
+  assert.equal(nextStage("خامسة ثانوي صناعي"), "");
+  assert.equal(normalizeStage("5 ثانوي صناعي"), "خامسة ثانوي صناعي");
+  assert.equal(normalizeStage("4 ث ع"), "");
   assert.equal(nextStage("رياض أطفال ٢"), "أولى ابتدائي");
   assert.equal(nextStage("كلام قديم"), "");
   assert.equal(inSchool("أولى جامعة"), true);

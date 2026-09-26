@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.0";
+export const VERSION = "1.3.1";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
