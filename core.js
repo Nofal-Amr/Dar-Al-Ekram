@@ -108,8 +108,9 @@ export const syLabel = y => `${y}/${+y + 1}`;
 /* ---------- distribution planning ----------
    basis.mode: "fixed" (same for every family) · "member" (per × family size) · "tiers" (≤ cut members → small, more → big) */
 export const famSize = b => +b?.familySize || ((b?.children || []).length ? b.children.length + 1 : 0);
-export function shareFor(basis, fam){
+export function shareFor(basis, fam, students = 0){
   const f = +fam || 1, per = +basis?.per || 0;
+  if(basis?.mode === "student") return per * (+students || 0);   // no students → nothing (unlike family size, 0 is a real count)
   if(basis?.mode === "member") return per * f;
   if(basis?.mode === "tiers") return f <= (+basis.cut || 3) ? +basis.small || 0 : +basis.big || 0;
   return per;
@@ -135,7 +136,7 @@ export function sortPool(pool, by = "score", missedFirst = true){
 export function planShares(sorted, basis, { total = null, count = null } = {}){
   const picked = [], rest = []; let used = 0, members = 0;
   for(const x of sorted){
-    const fam = famSize(x.b), v = shareFor(basis, fam);
+    const fam = famSize(x.b), v = shareFor(basis, fam, x.students);
     const full = (count != null && picked.length >= count) || (total != null && used + v > total + 1e-9) || rest.length;
     if(full){ rest.push({ ...x, fam, value:v }); continue; }
     picked.push({ ...x, fam, value:v }); used += v; members += fam || 1;

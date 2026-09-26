@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, latinDigits, parseNID, isoDay, mI
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.9";
+export const VERSION = "1.3.10";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -246,7 +246,7 @@ function studentsOf(b){
 const slotText = k => k.days?.length ? daysText(k.days) : k.week ? `الأسبوع ${k.week}` : "";
 // Does list k already cover this month/day? A list with days only clashes on those days.
 const sameSlot = (k, month, week, day) => day && k.days?.length ? k.days.includes(day) : k.month===month && (!k.week || !week || k.week===week);
-function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBatch = "", onlyLeft = false, need = "" }){
+function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBatch = "", onlyLeft = false, need = "", minStu = 0 }){
   const src = fromBatch ? K.get(fromBatch) : null;
   const srcIds = src ? new Set(src.items.filter(i=>i.bid && (!onlyLeft || !i.received)).map(i=>i.bid)) : null;
   const last=lastByType(t.id), taken=new Set(), out=[], excluded=[];
@@ -264,6 +264,7 @@ function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBat
     const stu=studentsOf(b);
     if(need==="kids" && !(b.children||[]).length && stu.src!=="list"){ excluded.push({b,why:"مفيش أطفال متسجلين"}); continue; }
     if(need==="students" && !stu.n){ excluded.push({b,why:stu.src==="none"?"مفيش أطفال متسجلين":"مفيش طلاب في المدارس"}); continue; }
+    if(minStu>0 && stu.n<minStu){ excluded.push({b,why:stu.src==="none"?"مفيش أطفال متسجلين":`عندها ${stu.n} طالب بس (أقل من ${minStu})`}); continue; }
     const lm=last.get(b.id);
     if(taken.has(b.id)){ excluded.push({b,why:"موجودة في كشف تاني لنفس "+(week?"اليوم":"الشهر")}); continue; }
     if(lm&&cooldown>0&&(mIdx(month)-mIdx(lm))<=cooldown){ excluded.push({b,why:`أخدت ${t.name} في ${mLabel(lm)}`}); continue; }
@@ -1276,7 +1277,7 @@ function newBatch(){
   const t0=ts[0];
   const st={ typeId:t0.id, month:curMonth, week:"", dow:6, donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
     mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, total:"", count:"", by:"score", missedFirst:true,
-    fromBatch:"", onlyLeft:true, need:"",
+    fromBatch:"", onlyLeft:true, need:"", minStu:"",
     removed:new Set(), added:[], values:{}, showRest:false, showOut:false };
   const srcLists=batches().filter(k=>counts(k)&&!k.single);
   const donors=[...new Set([...DONORS, ...batches().map(k=>k.donor).filter(Boolean)])];
@@ -1293,6 +1294,7 @@ function newBatch(){
       <label class="f">من فين (لو اخترت كشف، نوع الحالة وقايمة المتبرع مش بيتطبقوا)<select id="n_src"><option value="">كل الحالات النشطة</option>${srcLists.map(k=>`<option value="${k.id}">من كشف: ${esc(k.title)}</option>`).join("")}</select></label>
       <label class="f" style="display:flex;gap:8px;align-items:center;margin-top:22px"><input type="checkbox" id="n_left" checked style="width:20px;height:20px"> اللي ماستلموش من الكشف ده بس</label>
       <label class="f">شيل الأسر<select id="n_need"><option value="">ماتشيلش حد</option><option value="kids">اللي معندهاش أطفال</option><option value="students">اللي معندهاش طلاب في المدارس</option></select></label>
+      <label class="f">أقل عدد طلاب في الأسرة (اختياري)<input type="number" id="n_minstu" min="0" placeholder="مثال: 2 = طالبين أو أكتر"></label>
     </div>
     <div class="sub">نوع الحالة (لو ما اخترتش حاجة: كل الحالات النشطة)</div>
     <div class="checks" id="n_ct">${CASE_TYPES.map(c=>`<label><input type="checkbox" value="${c}"> ${c}</label>`).join("")}</div>
@@ -1320,10 +1322,10 @@ function newBatch(){
     const fillDays=()=>{ const ds=weekdaysOf(st.month, st.dow); if(+st.week>ds.length) st.week="";
       q("#n_w").innerHTML=`<option value="">الشهر كله</option>${ds.map((d,i)=>`<option value="${i+1}">${dayLabel(d)}</option>`).join("")}`; q("#n_w").value=st.week; };
     const put=()=>{ q("#n_t").value=st.typeId; q("#n_m").value=st.month; q("#n_dow").value=st.dow; fillDays(); q("#n_d").value=st.donor; q("#n_cd").value=st.cooldown; q("#n_tag").value=st.tag;
-      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").checked=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
+      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").checked=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
       q("#n_total").value=st.total; q("#n_count").value=st.count; q("#n_by").value=st.by; q("#n_missed").checked=st.missedFirst; fillType(); };
     const read=()=>{ const prevType=st.typeId; st.typeId=q("#n_t").value; const pm=st.month, pd=st.dow; st.month=q("#n_m").value||curMonth; st.dow=+q("#n_dow").value; st.week=q("#n_w").value; if(pm!==st.month||pd!==st.dow) fillDays(); st.donor=q("#n_d").value.trim(); st.cooldown=+q("#n_cd").value||0; st.tag=q("#n_tag").value;
-      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; st.fromBatch=q("#n_src").value; st.onlyLeft=q("#n_left").checked; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
+      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; st.fromBatch=q("#n_src").value; st.onlyLeft=q("#n_left").checked; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
       st.total=q("#n_total").value; st.count=q("#n_count").value; st.by=q("#n_by").value; st.missedFirst=q("#n_missed").checked;
       st.caseTypes=[...s.querySelectorAll("#n_ct input:checked")].map(i=>i.value);
       if(prevType!==st.typeId){ const t=T.get(st.typeId); st.per=t.amount||1; st.caseTypes=[...(t.caseTypes||[])]; st.removed.clear(); st.added=[]; st.values={}; put(); } };
@@ -1334,21 +1336,17 @@ function newBatch(){
     let plan=null;
     function compute(){
       const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big};
-      const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag, fromBatch:st.fromBatch, onlyLeft:st.onlyLeft, need:st.need});
+      const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag, fromBatch:st.fromBatch, onlyLeft:st.onlyLeft, need:st.need, minStu:+st.minStu||0});
       const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)), st.by, st.missedFirst);
-      // "per student": shares are worked out on the student count instead of the family size
-      const perStu = st.mode==="student", sz = x => perStu ? {...x, b:{...x.b, familySize:x.students||0, children:[]}} : x;
-      const rr=planShares(sorted.map(sz), perStu?{mode:"member",per:st.per}:basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
-      const back = x => ({...x, b:B.get(x.b.id), fam:famSize(B.get(x.b.id))});
-      const r = perStu ? {...rr, picked:rr.picked.map(back), rest:rr.rest.map(back)} : rr;
-      const added=st.added.map(id=>B.get(id)).filter(Boolean).map(b=>{ const stu=studentsOf(b); return {b, lm:lastByType(t.id).get(b.id), fam:famSize(b), students:stu.n, stuSrc:stu.src, value:perStu?st.per*stu.n:shareFor(basis,famSize(b)), manual:true}; });
+      const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
+      const added=st.added.map(id=>B.get(id)).filter(Boolean).map(b=>{ const stu=studentsOf(b); return {b, lm:lastByType(t.id).get(b.id), fam:famSize(b), students:stu.n, stuSrc:stu.src, value:shareFor(basis,famSize(b),stu.n), manual:true}; });
       const picked=[...r.picked, ...added].map(x=>({...x, value:st.values[x.b.id]??x.value}));
       return { t, basis, c, r, picked, all:c.pool.length };
     }
     function draw(){
       plan=compute(); const { t, c, r, picked }=plan, u=esc(t.unit);
       const used=picked.reduce((a,x)=>a+(+x.value||0),0), mem=picked.reduce((a,x)=>a+(x.fam||1),0), stu=picked.reduce((a,x)=>a+(+x.students||0),0);
-      const noSize=picked.filter(x=>!x.fam).length, need=c.pool.reduce((a,x)=>a+shareFor(plan.basis,famSize(x.b)),0);
+      const noSize=picked.filter(x=>!x.fam).length, need=c.pool.reduce((a,x)=>a+shareFor(plan.basis,famSize(x.b),x.students),0);
       const sizes=[1,2,3,4,5,6].map(n=>c.pool.filter(x=>n<6?famSize(x.b)===n:famSize(x.b)>=6).length), unknown=c.pool.filter(x=>!famSize(x.b)).length;
       const rule=`الترتيب: ${st.missedFirst?"اللي ماجاش يستلم المرة اللي فاتت، بعدين ":""}${PRIORITY[st.by]}${st.by==="score"?" (ولو الدرجة زي بعض: الأسرة الأكبر)":""}.`;
       q("#n_res").innerHTML=`

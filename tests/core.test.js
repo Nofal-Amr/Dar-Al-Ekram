@@ -151,3 +151,10 @@ test("students in a family", () => {
   assert.equal(countStudents([{school:"",birth:"2015-09-05"},{school:"-",birth:"2022-09-18"}], t), 1);   // no stage: counted by age
   assert.equal(countStudents([], t), 0);
 });
+
+test("per-student shares: a family with no students gets nothing", () => {
+  assert.equal(shareFor({ mode:"student", per:1 }, 5, 0), 0);
+  assert.equal(shareFor({ mode:"student", per:2 }, 5, 3), 6);
+  const r = planShares([{ b:{code:"1",familySize:4}, students:2 }, { b:{code:"2",familySize:3}, students:0 }], { mode:"student", per:1 });
+  assert.equal(r.used, 2);
+});
