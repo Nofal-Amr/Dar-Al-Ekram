@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, latinDigi
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.28";
+export const VERSION = "1.3.29";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2431,7 +2431,7 @@ function openEvent(id){
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
           ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>`:""}
           ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
-          ${showN&&+r.kids?`<span class="ages"><small>أعمار الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="number" min="0" max="25" inputmode="numeric" data-age="${r.id}" data-i="${i}" value="${k.a??""}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}"><button class="sx ${k.sex==="ولد"?"boy":k.sex==="بنت"?"girl":""}" data-sx="${r.id}" data-i="${i}" ${edit?"":"disabled"} aria-label="الطفل ${i+1}: ${k.sex||"ولد ولا بنت؟"}">${k.sex||"ولد/بنت"}</button></span>`).join("")}</span>`:""}
+          ${showN&&+r.kids?`<span class="ages"><small>أعمار الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="number" min="0" max="25" inputmode="numeric" data-age="${r.id}" data-i="${i}" value="${k.a??""}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
           ${cw?`<button class="btn sm danger" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الرحلة" title="شيل من الرحلة">×</button>`:""}</div>
         ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
         ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
@@ -2451,7 +2451,7 @@ function openEvent(id){
     s.querySelectorAll("[data-note]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.note,{ note:el.value.trim() }));
     s.querySelectorAll("[data-mom]").forEach(el=>el.onchange=()=>{ const v=el.value===""?null:Math.round(+el.value); if(v!=null&&(v<10||v>110)){ toast("سن الأم لازم يبقى بين 10 و110"); return; } setRsvp(el.dataset.mom,{ mother_age:v }); });
     s.querySelectorAll("[data-sx]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sx), sx=Array.from({length:+r.kids||0},(_,i)=>(r.kid_sexes||[])[i]||null), i=+el.dataset.i;
-      sx[i]=sx[i]===null?"ولد":sx[i]==="ولد"?"بنت":null; setRsvp(r.id,{ kid_sexes:sx }, true); });
+      sx[i]=sx[i]===el.dataset.v?null:el.dataset.v; setRsvp(r.id,{ kid_sexes:sx }); });
     s.querySelectorAll("[data-age]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.age), ag=Array.from({length:+r.kids||0},(_,i)=>(r.kid_ages||[])[i]??null);
       ag[+el.dataset.i]=el.value===""?null:Math.max(0,Math.min(25,Math.round(+el.value))); setRsvp(r.id,{ kid_ages:ag }); });
     s.querySelectorAll("[data-evrm]").forEach(el=>el.onclick=async()=>{ const r=EP.get(el.dataset.evrm), b=B.get(r.beneficiary_id);
