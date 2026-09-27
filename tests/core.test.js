@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, age, mIdx, mLabel, toNumber } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, age, mIdx, mLabel, toNumber } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -232,4 +232,28 @@ test("jpegsToPdf builds a PDF whose xref points at every object", () => {
   const offs = [...txt.slice(startx).matchAll(/^(\d{10}) 00000 n $/gm)].map(m => +m[1]);
   assert.equal(offs.length, 8);
   offs.forEach((o, i) => assert.equal(txt.slice(o, o + String(i + 1).length + 6), `${i + 1} 0 obj`));
+});
+
+test("assignKids splits kids by sex and age range, balanced, siblings together", () => {
+  const kids = [
+    { id:"1", fam:"A", a:5, sex:"ولد" }, { id:"2", fam:"A", a:7, sex:"ولد" }, { id:"3", fam:"B", a:6, sex:"ولد" }, { id:"4", fam:"C", a:8, sex:"ولد" },
+    { id:"5", fam:"B", a:9, sex:"بنت" }, { id:"6", fam:"D", a:12, sex:"بنت" }, { id:"7", fam:"E", a:null, sex:"بنت" }, { id:"8", fam:"F", a:4, sex:null },
+    { id:"9", fam:"G", a:15, sex:"ولد" },
+  ];
+  const sups = [ { id:"m1", takes:"ولاد", min:0, max:10 }, { id:"m2", takes:"ولاد", min:0, max:10 }, { id:"w1", takes:"بنات", min:"", max:"" } ];
+  const { groups, left } = assignKids(kids, sups);
+  const ids = s => groups.get(s).map(k => k.id);
+  assert.equal(ids("m1").length + ids("m2").length, 4);                 // the four boys up to 10
+  assert.ok(Math.abs(ids("m1").length - ids("m2").length) <= 1);         // balanced
+  const withA = ["m1","m2"].find(s => ids(s).includes("1"));
+  assert.ok(ids(withA).includes("2"));                                    // brothers together
+  assert.deepEqual(ids("w1").sort(), ["5","6","7"]);                       // girls, any age (even unknown)
+  assert.deepEqual(left.map(x => x.kid.id).sort(), ["8","9"]);
+  assert.equal(left.find(x => x.kid.id === "8").why, "مش محدد ولد ولا بنت");
+  assert.match(left.find(x => x.kid.id === "9").why, /مفيش مشرف ولاد لسن 15/);
+  assert.deepEqual(groups.get("w1").map(k => k.a), [9, 12, null]);        // sorted by age, unknown last
+});
+test("assignKids: no supervisors → everyone left with a reason", () => {
+  const { left } = assignKids([{ id:"1", fam:"A", a:3, sex:"ولد" }], []);
+  assert.equal(left[0].why, "مفيش مشرفين لسه");
 });

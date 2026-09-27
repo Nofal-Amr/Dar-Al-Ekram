@@ -285,3 +285,32 @@ export function jpegsToPdf(pages){
   put(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
   const out = new Uint8Array(len); let at = 0; for(const b of parts){ out.set(b, at); at += b.length; } return out;
 }
+
+/* Trip groups: split the coming kids between the supervisors.
+   kids: [{ id, fam, a (age or null), sex ("ولد" | "بنت" | null) }]
+   sups: [{ id, takes: "ولاد" | "بنات" | "الكل", min?, max? }]
+   A kid only goes to a supervisor who fits (boys / girls, age range). Hardest-to-place kids go first, the least
+   loaded supervisor gets the next one, and brothers & sisters stay with one supervisor unless that unbalances things.
+   → { groups: Map(supId → kids sorted by age), left: [{ kid, why }] } */
+export function assignKids(kids, sups){
+  const groups = new Map(sups.map(s => [s.id, []])), left = [];
+  const has = v => v !== null && v !== undefined && v !== "";
+  const fits = (s, k) => !(s.takes === "ولاد" && k.sex !== "ولد") && !(s.takes === "بنات" && k.sex !== "بنت")
+    && !(has(s.min) && (!has(k.a) || k.a < +s.min)) && !(has(s.max) && (!has(k.a) || k.a > +s.max));
+  const why = k => {
+    if(!sups.length) return "مفيش مشرفين لسه";
+    if(!has(k.sex) && sups.every(s => s.takes !== "الكل")) return "مش محدد ولد ولا بنت";
+    if(!has(k.a) && sups.filter(s => s.takes === "الكل" || s.takes === (k.sex === "ولد" ? "ولاد" : "بنات")).every(s => has(s.min) || has(s.max))) return "سنه مش مكتوب";
+    return `مفيش مشرف ${k.sex === "بنت" ? "بنات" : k.sex === "ولد" ? "ولاد" : ""} لسن ${has(k.a) ? k.a : "؟"}`.replace(/\s+/g, " ");
+  };
+  const order = kids.map(k => ({ k, el: sups.filter(s => fits(s, k)) }))
+    .sort((x, y) => x.el.length - y.el.length || String(x.k.fam).localeCompare(String(y.k.fam)) || (y.k.a ?? -1) - (x.k.a ?? -1));
+  for(const { k, el } of order){
+    if(!el.length){ left.push({ kid: k, why: why(k) }); continue; }
+    const n = s => groups.get(s.id).length, min = Math.min(...el.map(n));
+    const sib = el.find(s => groups.get(s.id).some(x => x.fam === k.fam) && n(s) <= min + 1);
+    groups.get((sib || el.reduce((b, s) => n(s) < n(b) ? s : b)).id).push(k);
+  }
+  for(const g of groups.values()) g.sort((x, y) => (x.a ?? 99) - (y.a ?? 99));
+  return { groups, left };
+}
