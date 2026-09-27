@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, latinDigi
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.25";
+export const VERSION = "1.3.26";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -326,20 +326,61 @@ const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ fo
 function lastCall(bid, batchId){ const c=callIndex().get(bid+"|"+(batchId||"*")); if(!c) return null; if(!batchId && c.at<addDays(today,-3)) return null; return c; }
 let dialed=null;   // {bid, batchId}: the row whose dialer we just opened — it shows the three answer buttons
 function callCell(bid, phone, batchId, big){
-  const ph=cleanPhone(phone), c=lastCall(bid,batchId), open=dialed&&dialed.bid===bid&&(dialed.batchId||"")===(batchId||"");
+  const cur=cleanPhone(B.get(bid)?.phone), ph=validPhone(cur)?cur:cleanPhone(phone), c=lastCall(bid,batchId), open=dialed&&dialed.bid===bid&&(dialed.batchId||"")===(batchId||"");
+  const fix=canWrite()?`<button class="cfix" data-cfix="${bid}" data-cbatch="${batchId||""}">${ic("edit")}${!validPhone(ph)?"ضيف رقم":c?.result==="رقم غلط"?"صحّح الرقم":"لقيت رقم صح"}</button>`:"";
   const chip=c?`<span class="cchip ${CALL_RES[c.result].cls}">${CALL_RES[c.result].label}<small>${c.at.slice(0,10)===today?"النهارده":dLabel(c.at)}</small></span>`:"";
-  if(!validPhone(ph)) return `<span class="ccell">${chip}<span class="sub">مفيش رقم</span></span>`;
+  if(!validPhone(ph)) return `<span class="ccell">${chip}<span class="sub">مفيش رقم</span>${fix}</span>`;
   const canLog=role!=="viewer";
   // If this number didn't work, the family's second number is one tap away.
   const b=B.get(bid), alt=[b?.phone,b?.phone2].map(cleanPhone).find(x=>validPhone(x)&&x!==ph);
   const altName = alt===cleanPhone(b?.phone2) ? phone2Name(b) : "رقمها";
-  return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}</span>`
-    :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>`:""}
-    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ب${esc(altName)} ${alt}">${ic("phone")}${esc(altName)}</a>`:""}</span>`;
+  return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}${fix}</span>`
+    :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>${c.result==="رقم غلط"?fix:""}`:""}
+    <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${ph===cleanPhone(b?.phone2)&&ph!==cleanPhone(b?.phone)?esc(phone2Name(b)):big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ب${esc(altName)} ${alt}">${ic("phone")}${esc(altName)}</a>`:""}</span>`;
 }
 const rowCallCls = (bid,batchId) => { const c=lastCall(bid,batchId); return c?"c-"+CALL_RES[c.result].cls:""; };
+/* Found the right number during a call: save it on the spot as her number, or as someone else's (husband, son…).
+   A small window over the list, so the list stays open. The old values come back with «تراجع». */
+function phoneFix(bid){
+  const b=B.get(bid); if(!b) return Promise.resolve(false);
+  const wrong=lastCall(bid)?.result==="رقم غلط"||!validPhone(b.phone);
+  return new Promise(resolve=>{
+    const prev=document.activeElement, w=document.createElement("div"); w.className="ask-scrim";
+    w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="pfT"><h2 id="pfT">رقم صح لـ${esc(b.name)}</h2>
+      <p class="sub" style="margin:0 0 8px">${validPhone(b.phone)?`رقمها دلوقتي: <span dir="ltr">${esc(cleanPhone(b.phone))}</span>`:"مالهاش رقم متسجل"}${b.phone2?` · ${esc(phone2Name(b))}: <span dir="ltr">${esc(cleanPhone(b.phone2))}</span>`:""}</p>
+      <label class="f">الرقم الجديد<input type="tel" id="pf_n" inputmode="tel" dir="ltr" placeholder="01xxxxxxxxx" autocomplete="off"></label>
+      <label class="f">ده رقم مين؟<select id="pf_who"><option value="">رقمها هي${validPhone(b.phone)?" (بدل القديم)":""}</option>${PHONE_OWNERS.filter(o=>!o.startsWith("رقم")).map(o=>`<option>${o}</option>`).join("")}</select></label>
+      <label class="chk"><input type="checkbox" id="pf_wa" ${!waNum(b)||cleanPhone(b.whatsapp)===cleanPhone(b.phone)?"checked":""}> ده كمان رقم الواتساب</label>
+      <div class="sub" id="pf_msg" style="min-height:1.2em"></div>
+      <div class="bar"><button class="btn pri" id="pf_ok">${ic("save")}حفظ الرقم</button><button class="btn" id="pf_no">رجوع</button></div></div>`;
+    const q=x=>w.querySelector(x);
+    const done=v=>{ w.remove(); document.removeEventListener("keydown",key,true); prev?.focus?.(); resolve(v); };
+    const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); done(false); } };
+    const check=()=>{ const n=cleanPhone(q("#pf_n").value), other=n&&people().find(x=>x.id!==bid&&[x.phone,x.phone2].map(cleanPhone).includes(n));
+      q("#pf_msg").innerHTML=!n?"":phoneIssue(n)?`<b style="color:var(--red)">الرقم ده ناقص أو غلط</b>`:other?`<b style="color:var(--gold-ink)">الرقم ده متسجل كمان عند ${esc(other.code)} — ${esc(other.name)}</b>`:"✓"; return n; };
+    q("#pf_n").oninput=check;
+    q("#pf_who").onchange=()=>{ if(q("#pf_who").value) q("#pf_wa").checked=false; };
+    w.onclick=e=>{ if(e.target===w) done(false); };
+    q("#pf_no").onclick=()=>done(false);
+    q("#pf_ok").onclick=async()=>{ const n=check(); if(!n||phoneIssue(n)){ q("#pf_n").focus(); return; }
+      const who=q("#pf_who").value, old={ phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null };
+      const patch=who?{ phone2:n, phone2_owner:who }:{ phone:n };
+      // her old number stays as the second one if it wasn't wrong and nothing is there yet
+      if(!who&&validPhone(b.phone)&&!wrong&&!b.phone2&&cleanPhone(b.phone)!==n){ patch.phone2=cleanPhone(b.phone); patch.phone2_owner="رقم تاني ليها"; }
+      if(q("#pf_wa").checked) patch.whatsapp=n;
+      q("#pf_ok").disabled=true;
+      const { error } = await sb.from("beneficiaries").update(patch).eq("id",bid);
+      if(error){ q("#pf_ok").disabled=false; q("#pf_msg").textContent=errMsg(error); return; }
+      await logIt("beneficiary",bid,who?`رقم ${who}: ${n}`:`تصحيح الرقم: ${old.phone?cleanPhone(old.phone):"مكانش فيه"} ← ${n}`); await refreshPerson(bid);
+      done(true);
+      undoable(`رقم ${b.name} اتحفظ`, async()=>{ const r=await sb.from("beneficiaries").update(old).eq("id",bid); if(r.error){ toast(errMsg(r.error)); return false; } await logIt("beneficiary",bid,"رجوع الرقم القديم (تراجع)"); await refreshPerson(bid); });
+    };
+    document.addEventListener("keydown",key,true); document.body.appendChild(w); q("#pf_n").focus();
+  });
+}
 function bindCalls(root, redraw){
   root.querySelectorAll("[data-dial]").forEach(a=>a.addEventListener("click",()=>{ dialed={bid:a.dataset.dial,batchId:a.dataset.cbatch||null}; setTimeout(redraw,400); }));
+  root.querySelectorAll("[data-cfix]").forEach(b=>b.onclick=async()=>{ if(await phoneFix(b.dataset.cfix)){ dialed={ bid:b.dataset.cfix, batchId:b.dataset.cbatch||null }; redraw(); } });
   root.querySelectorAll("[data-copen]").forEach(b=>b.onclick=()=>{ dialed={bid:b.dataset.copen,batchId:b.dataset.cbatch||null}; redraw(); });
   root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
