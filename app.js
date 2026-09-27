@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, latinDigi
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.24";
+export const VERSION = "1.3.25";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -27,6 +27,10 @@ const B = new Map(), T = new Map(), K = new Map(), P = new Map(), C = new Map(),
 // money & stock: donors, stock items, donations, ledger (accounts), stock moves — kept as the rows the database returns
 const DN = new Map(), IT = new Map(), DO = new Map(), LG = new Map(), SM = new Map();
 const MONEY_TABLES = { donors:DN, items:IT, donations:DO, ledger:LG, stock_moves:SM };   // beneficiaries, types, batches(with items), profiles, calls, tasks
+// trips & activities: the event, and one row per invited family (answer + how many adults / kids are coming)
+const EV = new Map(), EP = new Map();
+const EVENT_TABLES = { events:EV, event_people:EP };
+const ROW_TABLES = { ...MONEY_TABLES, ...EVENT_TABLES };
 let loaded = false, view = "home", peopleQ = "", peopleF = "all", peopleSort = "code", peopleLimit = 100;
 const PAGE = 100;   // rows drawn at a time — keeps the Windows 7 PC responsive
 const logCache = new Map();
@@ -118,7 +122,7 @@ const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemI
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
   createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
 const fromI = r => ({ id:r.id, position:r.position??0, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
-const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||null, result:r.result, at:r.at, by:r.by });
+const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||(r.event_id?"ev:"+r.event_id:null), result:r.result, at:r.at, by:r.by });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
 const toI = (it, batchId, i) => ({ batch_id:batchId, beneficiary_id:it.bid||null, position:i, code:it.code, name:it.name, national_id:it.nationalId||null, phone:it.phone||null, family_size:+it.familySize||null, students:it.students??null, value:+it.value||0, reason:it.reason||"", received:!!it.received, received_at:it.received?new Date().toISOString():null });
 
@@ -137,6 +141,7 @@ function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout((
 function memo(fn){ let v = -1, out; return () => { if(v !== dataVer){ out = fn(); v = dataVer; } return out; }; }
 
 function setMoney(m = {}){ for(const [t,map] of Object.entries(MONEY_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } }
+function setEvents(m = {}){ for(const [t,map] of Object.entries(EVENT_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } }
 function setAll(bs, ts, ks, is, ps, cs = [], tk = []){
   B.clear(); bs.forEach(r => B.set(r.id, fromB(r)));
   T.clear(); ts.forEach(r => T.set(r.id, fromT(r)));
@@ -153,13 +158,16 @@ async function reload(){
   reloading = (async () => {
     try{
       const [bs, ts, ks, is, ps, cs, tk, ...mm] = await Promise.all([fetchAll("beneficiaries"), fetchAll("aid_types"), fetchAll("batches"), fetchAll("batch_items"), fetchAll("profiles"), fetchAll("calls").catch(() => []), fetchAll("tasks").catch(() => []),
-        ...Object.keys(MONEY_TABLES).map(t => seeMoney() ? fetchAll(t).catch(() => []) : Promise.resolve([]))]);
+        ...Object.keys(MONEY_TABLES).map(t => seeMoney() ? fetchAll(t).catch(() => []) : Promise.resolve([])),
+        ...Object.keys(EVENT_TABLES).map(t => fetchAll(t).catch(() => []))]);
+      const nm = Object.keys(MONEY_TABLES).length;
       const money = Object.fromEntries(Object.keys(MONEY_TABLES).map((t,i) => [t, mm[i]]));
-      setAll(bs, ts, ks, is, ps, cs, tk); setMoney(money); snapRaw = { bs, ts, ks, is, ps, cs, tk, money };
+      const events = Object.fromEntries(Object.keys(EVENT_TABLES).map((t,i) => [t, mm[nm+i]]));
+      setAll(bs, ts, ks, is, ps, cs, tk); setMoney(money); setEvents(events); snapRaw = { bs, ts, ks, is, ps, cs, tk, money, events };
       loaded = true; loadError = null; fromSnapshot = null; dataVer++; render(); refreshSheet(); saveSnapshotSoon();
     }catch(e){
       loadError = e;
-      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); setMoney(snap.money); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
+      if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); setMoney(snap.money); setEvents(snap.events); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
       render(); netBanner(); if(loaded) toast(errMsg(e));
     }
     finally{ reloading = null; }
@@ -187,14 +195,14 @@ function applyChange(table, p){
   }
   else if(table === "calls"){ if(row){ C.set(row.id, fromC(row)); upsertRaw("cs", row); } }
   else if(table === "tasks"){ if(row){ TK.set(row.id, fromTk(row)); upsertRaw("tk", row); } }
-  else if(MONEY_TABLES[table]){ if(row) MONEY_TABLES[table].set(row.id, row); }
+  else if(ROW_TABLES[table]){ if(row) ROW_TABLES[table].set(row.id, row); else if(oldId) ROW_TABLES[table].delete(oldId); }
   overlayQueue(); logCache.clear(); changed();
 }
 let rt = null;
 function subscribeRealtime(){
   if(rt) return;
   rt = sb.channel("all-changes");
-  ["beneficiaries","batches","batch_items","aid_types","calls","tasks",...Object.keys(MONEY_TABLES)].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
+  ["beneficiaries","batches","batch_items","aid_types","calls","tasks",...Object.keys(ROW_TABLES)].forEach(t => rt.on("postgres_changes", {event:"*", schema:"public", table:t}, p => applyChange(t, p)));
   rt.subscribe();
 }
 
@@ -335,9 +343,13 @@ function bindCalls(root, redraw){
   root.querySelectorAll("[data-copen]").forEach(b=>b.onclick=()=>{ dialed={bid:b.dataset.copen,batchId:b.dataset.cbatch||null}; redraw(); });
   root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
-    const { data, error } = await sb.from("calls").insert({beneficiary_id:bid, batch_id:batchId, result:b.dataset.cres, by:me.id}).select().single();
+    const ctx=batchId?.startsWith("ev:")?{ event_id:batchId.slice(3) }:{ batch_id:batchId };
+    const { data, error } = await sb.from("calls").insert({beneficiary_id:bid, ...ctx, result:b.dataset.cres, by:me.id}).select().single();
     if(error){ b.disabled=false; toast(errMsg(error)); return; }
-    C.set(data.id, fromC(data)); upsertRaw("cs", data); dialed=null; changed(); redraw();
+    C.set(data.id, fromC(data)); upsertRaw("cs", data); dialed=null; changed();
+    // on a trip list, «مش هيعرف ييجي» is also her answer
+    if(ctx.event_id&&b.dataset.cres==="مش هييجي"){ const r=[...EP.values()].find(x=>x.event_id===ctx.event_id&&x.beneficiary_id===bid); if(r&&r.answer!=="مش جاية") await setRsvp(r.id,{ answer:"مش جاية", adults:0, kids:0 }); }
+    redraw();
   });
 }
 // Coming back from the phone app: redraw so the answer buttons show on the row that was called.
@@ -559,9 +571,12 @@ function vPeople(){
   </div>
   ${list.length>peopleLimit?`<div class="more"><button class="btn" id="pMore">عرض ${num(Math.min(PAGE,list.length-peopleLimit))} كمان <span class="sub">(معروض ${num(peopleLimit)} من ${num(list.length)})</span></button></div>`:""}`;
 }
+let batchTab="lists";
 function vBatches(){
+  const tabs=`<div class="seg" role="tablist"><button class="${batchTab==="lists"?"on":""}" data-btab="lists">${ic("list")} كشوف الصرف</button><button class="${batchTab==="events"?"on":""}" data-btab="events">${ic("users")} رحلات وأنشطة${events().length?` (${num(events().length)})`:""}</button></div>`;
+  if(batchTab==="events") return tabs+vEvents();
   const list=batches();
-  return `
+  return `${tabs}
   <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${canDraft()?`<button class="btn pri" id="newK">${ic("list")}كشف جديد</button>`:""}</div>
   <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${isMgr()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>
   ${isMgr()?(()=>{ const n=[...K.values()].filter(k=>k.archivedAt).length; return `<div class="bar"><button class="btn sm" data-go="archive">${ic("archive")}الكشوف المؤرشفة (${num(n)})</button></div>`; })():""}`;
@@ -696,12 +711,15 @@ function bindView(){
   v.querySelectorAll("[data-open]").forEach(el=>el.onclick=e=>{e.preventDefault(); viewPerson(el.dataset.open);});
   v.querySelectorAll("tr[data-open]").forEach(el=>el.onkeydown=e=>{ if(e.key==="Enter") viewPerson(el.dataset.open); });
   v.querySelectorAll("[data-batch]").forEach(el=>el.onclick=()=>openBatch(el.dataset.batch));
+  v.querySelectorAll("[data-btab]").forEach(el=>el.onclick=()=>{ batchTab=el.dataset.btab; render(); });
+  v.querySelectorAll("[data-event]").forEach(el=>el.onclick=()=>openEvent(el.dataset.event));
   v.querySelectorAll("[data-type]").forEach(el=>el.onclick=()=>openType(el.dataset.type));
   v.querySelectorAll("[data-user]").forEach(el=>el.onclick=()=>openUser(el.dataset.user));
   v.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>go(el.dataset.go));
   v.querySelectorAll("[data-task]").forEach(el=>el.onclick=()=>taskSheet(el.dataset.task));
   v.querySelectorAll("[data-done]").forEach(el=>el.onclick=()=>doneTask(el.dataset.done,el));
   const on=(id,ev,fn)=>{const el=$(id); if(el) el[ev]=fn;};
+  on("#newEv","onclick",()=>newEvent());
   on("#pq","oninput",e=>{ peopleQ=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ peopleLimit=PAGE; const pos=$("#pq")?.selectionStart; render(); const n=$("#pq"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } },180); });
   on("#pf","onchange",e=>{peopleF=e.target.value; peopleLimit=PAGE; render();});
   on("#ps","onchange",e=>{peopleSort=e.target.value; peopleLimit=PAGE; render();});
@@ -2011,7 +2029,7 @@ const donors = () => [...DN.values()].filter(d=>!d.archived_at).sort((a,b)=>a.na
 const lowStock = memo(() => items().filter(i=>(stockOf().get(i.id)||0) < (+i.min_qty||0)));
 const money = n => `${num(Math.round(n*100)/100)} ج`;
 const byDate = (a,b) => (b.date||"").localeCompare(a.date||"") || (b.created_at||"").localeCompare(a.created_at||"");
-async function ins(table, row){ const { data, error } = await sb.from(table).insert(row).select().single(); if(error) throw error; MONEY_TABLES[table].set(data.id, data); return data; }
+async function ins(table, row){ const { data, error } = await sb.from(table).insert(row).select().single(); if(error) throw error; ROW_TABLES[table].set(data.id, data); return data; }
 async function cancelRow(table, id){ const { data, error } = await sb.from(table).update({ cancelled_at:new Date().toISOString(), cancelled_by:me.id }).eq("id",id).select().single(); if(error) throw error; MONEY_TABLES[table].set(id, data); }
 
 function vMoney(){
@@ -2248,6 +2266,159 @@ async function settleBatch(k){
     await sb.from("batches").update({ settled_at:new Date().toISOString() }).eq("id",k.id); await logIt("batch",k.id,cash?`تسجيل الصرف في الحسابات: ${money(total)}`:`خروج من المخزن: ${num(total)} ${item.unit}`);
     await refreshBatch(k.id); toast("اتسجل ✓");
   }catch(e){ toast(errMsg(e)); }
+}
+
+/* ================= trips & activities =================
+   A trip invites families; whoever calls records her answer and how many adults / kids are coming, right next to the
+   call button. Everything saves as you tap (several people can call at once), and the totals update for everyone. */
+const ANSWERS = { "جاية":{cls:"ok",label:"جاية ✓"}, "مش متأكدة":{cls:"maybe",label:"مش متأكدة"}, "مش جاية":{cls:"no",label:"مش جاية"} };
+const events = memo(() => [...EV.values()].filter(e=>!e.archived_at).sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created_at||"").localeCompare(a.created_at||"")));
+const rsvpsOf = memo(() => { const m=new Map(); for(const r of EP.values()) (m.get(r.event_id)||m.set(r.event_id,[]).get(r.event_id)).push(r); return m; });
+const rsvps = id => rsvpsOf().get(id)||[];
+const kidsOf = b => (b.children||[]).filter(k=>{ const a=age(k.birth); return a===""||a<18; }).length;
+// What she probably brings, to start from when she says «جاية»: herself + the kids on file (or the family minus her).
+const guessCounts = b => { const k=kidsOf(b); return { adults:1, kids:k||(famSize(b)?Math.max(famSize(b)-1,0):0) }; };
+function eventTotals(id){
+  const rs=rsvps(id), yes=rs.filter(r=>r.answer==="جاية"), maybe=rs.filter(r=>r.answer==="مش متأكدة");
+  const sum=(a,f)=>a.reduce((s,r)=>s+(+r[f]||0),0);
+  return { n:rs.length, yes:yes.length, no:rs.filter(r=>r.answer==="مش جاية").length, maybe:maybe.length, open:rs.filter(r=>!r.answer).length,
+    adults:sum(yes,"adults"), kids:sum(yes,"kids"), people:sum(yes,"adults")+sum(yes,"kids"), maybePeople:sum(maybe,"adults")+sum(maybe,"kids") };
+}
+const canRsvp = () => role==="manager"||role==="worker"||role==="helper";
+// Save one family's answer. Taps show at once; the stepper waits half a second so + + + is one save.
+const rsvpTimers=new Map(), rsvpPending=new Map();
+function setRsvp(id, patch, wait){
+  const cur=EP.get(id); if(!cur) return; EP.set(id,{ ...cur, ...patch }); changed();
+  rsvpPending.set(id,{ ...(rsvpPending.get(id)||{}), ...patch }); clearTimeout(rsvpTimers.get(id));
+  return new Promise(res=>rsvpTimers.set(id,setTimeout(async()=>{ const p=rsvpPending.get(id); rsvpPending.delete(id);
+    const { data, error } = await sb.from("event_people").update(p).eq("id",id).select().single();
+    if(error){ toast(errMsg(error)); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,fresh); }
+    else if(data&&!rsvpPending.has(id)) EP.set(id,data);
+    changed(); res(); }, wait?500:0)));
+}
+function vEvents(){
+  const list=events();
+  return `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">رحلات وأنشطة</h2>${canWrite()?`<button class="btn pri" id="newEv">${ic("plus")}رحلة / نشاط جديد</button>`:""}</div>
+  <div class="list">${list.map(e=>{ const t=eventTotals(e.id); return `<button class="item" data-event="${e.id}"><span class="grow"><span class="nm">${esc(e.title)}</span><br>
+    <span class="sub">${e.date?dLabel(e.date)+" · ":""}${e.place?esc(e.place)+" · ":""}جاية ${num(t.yes)} أسرة · ${num(t.people)} فرد (${num(t.adults)} كبار، ${num(t.kids)} أطفال) · اتردّ ${num(t.n-t.open)} من ${num(t.n)}</span></span>
+    ${e.capacity?`<span class="chip ${t.people>e.capacity?"red":""}">${num(t.people)}/${num(e.capacity)} كرسي</span>`:""}</button>`; }).join("")||`<div class="empty">مفيش رحلات لسه${canWrite()?" — اضغط «رحلة / نشاط جديد»":""}</div>`}</div>`;
+}
+function newEvent(){
+  const st={ types:new Set(CASE_TYPES), activeOnly:true, kidsOnly:false };
+  const pick=()=>people().filter(b=>(!st.activeOnly||b.status==="نشط")&&st.types.has(b.caseType||"غير محدد")&&(!st.kidsOnly||kidsOf(b)>0||famSize(b)>1));
+  sheet("رحلة / نشاط جديد",`
+    <div class="grid2">
+      <label class="f">الاسم<input type="text" id="ev_t" placeholder="مثال: رحلة الإسكندرية"></label>
+      <label class="f">اليوم<input type="date" id="ev_d"></label>
+      <label class="f">المكان (اختياري)<input type="text" id="ev_p"></label>
+      <label class="f">عدد الكراسي / الأماكن (اختياري)<input type="number" id="ev_c" min="1" placeholder="مثال: 50"></label>
+    </div>
+    <h4>مين يتعزم</h4>
+    <div class="seg" id="ev_types">${CASE_TYPES.map(t=>`<button class="on" data-ty="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+    <label class="chk"><input type="checkbox" id="ev_act" checked> الحالات النشطة بس</label>
+    <label class="chk"><input type="checkbox" id="ev_kids"> اللي عندها أطفال بس</label>
+    <div class="note" id="ev_n"></div>
+    <label class="f">ملاحظات<input type="text" id="ev_notes" placeholder="مثال: التجمع 7 الصبح قدام الجمعية"></label>
+    <div class="bar"><button class="btn pri" id="ev_go">${ic("save")}اعمل الكشف</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    const cnt=()=>{ q("#ev_n").innerHTML=`${ic("info")} <span>هيتعزم <b>${num(pick().length)}</b> أسرة — تقدر تضيف أو تشيل بعدين.</span>`; };
+    s.querySelectorAll("[data-ty]").forEach(el=>el.onclick=()=>{ const t=el.dataset.ty; st.types.has(t)?st.types.delete(t):st.types.add(t); el.classList.toggle("on"); cnt(); });
+    q("#ev_act").onchange=e=>{ st.activeOnly=e.target.checked; cnt(); }; q("#ev_kids").onchange=e=>{ st.kidsOnly=e.target.checked; cnt(); }; cnt();
+    q("#ev_go").onclick=async()=>{ const title=q("#ev_t").value.trim(); if(!title){ toast("اكتب اسم الرحلة"); return; } const fams=pick(); const go=q("#ev_go"); go.disabled=true;
+      try{ const e=await ins("events",{ title, date:q("#ev_d").value||null, place:q("#ev_p").value.trim(), capacity:+q("#ev_c").value||null, notes:q("#ev_notes").value.trim() });
+        for(let i=0;i<fams.length;i+=300){ const { data, error } = await sb.from("event_people").insert(fams.slice(i,i+300).map(b=>({ event_id:e.id, beneficiary_id:b.id }))).select(); if(error) throw error; data.forEach(r=>EP.set(r.id,r)); }
+        await logIt("event",e.id,`رحلة جديدة: ${title} (${fams.length} أسرة)`); changed(); openEvent(e.id); toast(`اتعمل ✓ ${num(fams.length)} أسرة`); }
+      catch(err){ go.disabled=false; toast(errMsg(err)); } };
+  });
+}
+function editEvent(id){
+  const e=EV.get(id);
+  sheet("تعديل الرحلة",`<div class="grid2"><label class="f">الاسم<input type="text" id="ee_t" value="${esc(e.title)}"></label><label class="f">اليوم<input type="date" id="ee_d" value="${esc(e.date||"")}"></label>
+    <label class="f">المكان<input type="text" id="ee_p" value="${esc(e.place||"")}"></label><label class="f">عدد الكراسي<input type="number" id="ee_c" min="1" value="${e.capacity||""}"></label></div>
+    <label class="f">ملاحظات<input type="text" id="ee_n" value="${esc(e.notes||"")}"></label>
+    <div class="bar"><button class="btn pri" id="ee_go">${ic("save")}حفظ</button><button class="btn" id="ee_back">رجوع</button><span class="grow"></span><button class="btn danger" id="ee_arch">${ic("archive")}أرشفة الرحلة</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#ee_back").onclick=()=>openEvent(id);
+    q("#ee_go").onclick=async()=>{ const patch={ title:q("#ee_t").value.trim()||e.title, date:q("#ee_d").value||null, place:q("#ee_p").value.trim(), capacity:+q("#ee_c").value||null, notes:q("#ee_n").value.trim() };
+      const { data, error } = await sb.from("events").update(patch).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; } EV.set(id,data); changed(); openEvent(id); toast("اتحفظ ✓"); };
+    q("#ee_arch").onclick=async()=>{ if(!await ask("الرحلة هتختفي من القايمة. تقدر ترجّعها بـ«تراجع».",{title:"أرشفة الرحلة؟",ok:"أرشفة"})) return;
+      const { data, error } = await sb.from("events").update({ archived_at:new Date().toISOString(), archived_by:me.id }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; }
+      EV.set(id,data); changed(); closeSheet(); undoable(`«${e.title}» اتأرشفت`, async()=>{ const r=await sb.from("events").update({ archived_at:null, archived_by:null }).eq("id",id).select().single(); if(r.error){ toast(errMsg(r.error)); return false; } EV.set(id,r.data); changed(); }); };
+  });
+}
+function openEvent(id){
+  let q_="", only="all", addQ="";
+  const ctx="ev:"+id;
+  const FIL={ all:"الكل", open:"لسه ماردّتش", noans:"ماردتش على التليفون", "جاية":"جاية", "مش متأكدة":"مش متأكدة", "مش جاية":"مش جاية" };
+  const stp=(r,f,lbl,on)=>`<span class="stp"><small>${lbl}</small>${on?`<button data-st="${r.id}" data-f="${f}" data-d="-1" aria-label="${lbl} ناقص">−</button>`:""}<input type="number" min="0" max="50" inputmode="numeric" data-num="${r.id}" data-f="${f}" value="${+r[f]||0}" ${on?"":"disabled"} aria-label="${lbl}">${on?`<button data-st="${r.id}" data-f="${f}" data-d="1" aria-label="${lbl} زيادة">+</button>`:""}</span>`;
+  const draw=()=>{
+    const e=EV.get(id); if(!e) return ""; const t=eventTotals(id), edit=canRsvp(), cw=canWrite();
+    const qq=norm(q_);
+    const rows=rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
+      .filter(({r,b})=>(!qq||norm(b.name).includes(qq)||String(b.code)===qq.padStart(3,"0")||cleanPhone(b.phone).includes(qq))
+        &&(only==="all"||(only==="open"?!r.answer:only==="noans"?!r.answer&&lastCall(b.id,ctx)?.result==="مردش":r.answer===only)));
+    const seats=e.capacity?e.capacity-t.people:null;
+    return `<div class="sub">${e.date?dLabel(e.date):"من غير يوم"}${e.place?" · "+esc(e.place):""}${e.notes?" · "+esc(e.notes):""}</div>
+    <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong></div><div><span>كبار</span><strong>${num(t.adults)}</strong></div><div><span>أطفال</span><strong>${num(t.kids)}</strong></div>
+      <div class="${seats!=null&&seats<0?"neg":""}"><span>الإجمالي${e.capacity?` من ${num(e.capacity)} كرسي`:""}</span><strong>${num(t.people)}</strong>${seats!=null?`<small>${seats>=0?`فاضل ${num(seats)}`:`زيادة ${num(-seats)}`}</small>`:""}</div>
+      <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
+    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
+    <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
+    <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
+    <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
+      return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}">
+        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}</div>
+        <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
+          ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>`:""}
+          ${cw?`<button class="btn sm danger" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الرحلة" title="شيل من الرحلة">×</button>`:""}</div>
+        ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
+        ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
+      </div>`; }).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>
+    ${cw?`<details class="addbox" ${addQ?"open":""}><summary>${ic("plus")}ضيف أسرة للرحلة</summary><input type="search" id="e_add" placeholder="اكتب الاسم أو رقم الحالة" value="${esc(addQ)}"><div id="e_addRes"></div></details>`:""}`;
+  };
+  const mount=s=>{
+    const q=x=>s.querySelector(x);
+    bindCalls(s, ()=>refreshSheet());
+    s.querySelectorAll("[data-evf]").forEach(el=>el.onclick=()=>{ only=el.dataset.evf; refreshSheet(); });
+    const eq=q("#e_q"); eq.oninput=()=>{ q_=eq.value; const pos=eq.selectionStart; refreshSheet(); const n=$("#e_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
+    s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids };
+      const next=r.answer===ans?{ answer:"" }:ans==="مش جاية"?{ answer:ans, adults:0, kids:0 }:{ answer:ans, ...((+r.adults||0)+(+r.kids||0)?{}:guessCounts(b)) };
+      setRsvp(r.id,next); undoable(`${b.name}: ${next.answer?`«${next.answer}»`:"اتشال الرد"}`, ()=>setRsvp(r.id,prev)); });
+    s.querySelectorAll("[data-st]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.st), f=el.dataset.f; setRsvp(r.id,{ [f]:Math.max(0,Math.min(50,(+r[f]||0)+(+el.dataset.d))) }, true); });
+    s.querySelectorAll("[data-num]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.num,{ [el.dataset.f]:Math.max(0,Math.min(50,Math.round(+el.value||0))) }));
+    s.querySelectorAll("[data-note]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.note,{ note:el.value.trim() }));
+    s.querySelectorAll("[data-evrm]").forEach(el=>el.onclick=async()=>{ const r=EP.get(el.dataset.evrm), b=B.get(r.beneficiary_id);
+      const { error } = await sb.from("event_people").delete().eq("id",r.id); if(error){ toast(errMsg(error)); return; } EP.delete(r.id); changed();
+      undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
+    if(q("#e_edit")) q("#e_edit").onclick=()=>editEvent(id);
+    q("#e_print").onclick=()=>doPrint(eventHTML(id), EV.get(id).title);
+    q("#e_phones").onclick=()=>{ const rs=rsvps(id).filter(r=>r.answer==="جاية").map(r=>B.get(r.beneficiary_id)).filter(Boolean); phoneSheet(`${EV.get(id).title} — اللي جايين`, rs.map(b=>({ bid:b.id, name:b.name, phone:b.phone, code:b.code })), false, ctx); };
+    q("#e_x").onclick=()=>eventXlsx(id);
+    const ab=q("#e_add"); if(ab){ const res=()=>{ const qq=norm(addQ), inIt=new Set(rsvps(id).map(r=>r.beneficiary_id));
+        const found=qq.length<2?[]:people().filter(b=>!inIt.has(b.id)&&(norm(b.name).includes(qq)||b.code===qq.padStart(3,"0"))).slice(0,8);
+        q("#e_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${found.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm pri" data-evadd="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة أصلاً</div>`}</div>`;
+        q("#e_addRes").querySelectorAll("[data-evadd]").forEach(el=>el.onclick=async()=>{ el.disabled=true; const { data, error } = await sb.from("event_people").insert({ event_id:id, beneficiary_id:el.dataset.evadd }).select().single();
+          if(error){ el.disabled=false; toast(errMsg(error)); return; } EP.set(data.id,data); addQ=""; changed(); toast(`${B.get(data.beneficiary_id)?.name} اتضافت ✓`); }); };
+      ab.oninput=()=>{ addQ=ab.value; res(); }; if(addQ) res(); }
+  };
+  if(!EV.get(id)) return;
+  let mine=-1;
+  const redraw=()=>{ const body=$("#scrim .sh-body"); if(body&&EV.get(id)&&sheetSeq===mine){ const ae=document.activeElement, keep=ae?.classList?.contains("evnote")||ae?.dataset?.num?ae:null; if(keep) return; body.innerHTML=draw(); mount($("#scrim")); } };
+  sheet(EV.get(id).title, draw(), mount, redraw); mine=sheetSeq;
+}
+function eventHTML(id){
+  const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}));
+  return `<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>أطفال</th><th>الإجمالي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${num(+r.kids||0)}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td>${num(t.kids)}</td><td>${num(t.people)}</td><td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
+    ${signsHTML()}</div>`;
+}
+function eventXlsx(id){
+  const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","كبار","أطفال","الإجمالي","ملاحظة","آخر مكالمة","أطفال متسجلين","عدد الأفراد"]];
+  rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
+    .forEach(({r,b})=>{ const c=lastCall(b.id,"ev:"+id); rows.push([b.code,b.name,cleanPhone(b.phone),waNum(b),r.answer||"لسه",+r.adults||0,+r.kids||0,(+r.adults||0)+(+r.kids||0),r.note||"",c?CALL_RES[c.result].label:"",kidsOf(b),famSize(b)||""]); });
+  xlsx({"الرحلة":rows},`${e.title}.xlsx`);
 }
 
 /* ================= printing ================= */
