@@ -314,3 +314,19 @@ export function assignKids(kids, sups){
   for(const g of groups.values()) g.sort((x, y) => (x.a ?? 99) - (y.a ?? 99));
   return { groups, left };
 }
+
+/* What was typed in a trip's age box: a number ("9"), or a school year ("3 ثانوي", "تانية ابتدائي", "KG2").
+   → { age: number | null, stage: text | null } — a school year gives the usual age for it. */
+export function stageAge(stage){
+  const st = normalizeStage(stage) || stage; if(!st) return null;
+  const pre = { "تحت السن":3, "حضانة":4, "رياض أطفال ١":4, "رياض أطفال ٢":5 }; if(st in pre) return pre[st];
+  const lv = ORD.indexOf(st.split(" ")[0]); if(lv < 0) return null;
+  return /ابتدائي/.test(st) ? 6 + lv : /إعدادي/.test(st) ? 12 + lv : /ثانوي|معهد/.test(st) ? 15 + lv : /جامعة/.test(st) ? 18 + lv : null;
+}
+export function parseKidAge(raw){
+  const t = latinDigits(String(raw ?? "")).trim(); if(!t) return { age: null, stage: null };
+  if(/^\d{1,2}$/.test(t)) return { age: Math.min(+t, 25), stage: null };
+  const kg = /^(kg|كي ?جي)\s*([12])$/i.exec(t);
+  const stage = kg ? `رياض أطفال ${kg[2] === "1" ? "١" : "٢"}` : normalizeStage(t);
+  return stage ? { age: stageAge(stage), stage } : { age: null, stage: t };
+}

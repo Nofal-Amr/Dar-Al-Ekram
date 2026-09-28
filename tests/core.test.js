@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, age, mIdx, mLabel, toNumber } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, age, mIdx, mLabel, toNumber } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -256,4 +256,16 @@ test("assignKids splits kids by sex and age range, balanced, siblings together",
 test("assignKids: no supervisors → everyone left with a reason", () => {
   const { left } = assignKids([{ id:"1", fam:"A", a:3, sex:"ولد" }], []);
   assert.equal(left[0].why, "مفيش مشرفين لسه");
+});
+
+test("parseKidAge reads a number or a school year", () => {
+  assert.deepEqual(parseKidAge("9"), { age:9, stage:null });
+  assert.deepEqual(parseKidAge("١٢"), { age:12, stage:null });
+  assert.deepEqual(parseKidAge("3 ثانوي"), { age:17, stage:"تالتة ثانوي عام" });
+  assert.deepEqual(parseKidAge("تانية ابتدائي"), { age:7, stage:"تانية ابتدائي" });
+  assert.deepEqual(parseKidAge("1 اع"), { age:12, stage:"أولى إعدادي" });
+  assert.deepEqual(parseKidAge("KG2"), { age:5, stage:"رياض أطفال ٢" });
+  assert.deepEqual(parseKidAge("حضانة"), { age:4, stage:"حضانة" });
+  assert.deepEqual(parseKidAge("مش عارفة"), { age:null, stage:"مش عارفة" });
+  assert.deepEqual(parseKidAge(""), { age:null, stage:null });
 });
