@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.30";
+export const VERSION = "1.3.31";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2319,14 +2319,14 @@ const rsvps = id => rsvpsOf().get(id)||[];
 const kidsOf = b => (b.children||[]).filter(k=>{ const a=age(k.birth); return a===""||a<18; }).length;
 // What she probably brings, to start from when she says «جاية»: herself + the kids on file (or the family minus her).
 // her kids under 18 (or of unknown age), oldest first: [{ a: age or null, sex: "ولد" / "بنت" / null }]
-const kidsInfo = b => (b.children||[]).map(k=>({ a:age(k.birth), sex:kidSex(k)||null })).filter(k=>k.a===""||k.a<18).map(k=>({ ...k, a:k.a===""?null:k.a })).sort((x,y)=>(y.a??-1)-(x.a??-1));
+const kidsInfo = b => (b.children||[]).map(k=>({ a:age(k.birth), sex:kidSex(k)||null, name:(k.name||"").trim().split(/\s+/)[0]||null })).filter(k=>k.a===""||k.a<18).map(k=>({ ...k, a:k.a===""?null:k.a })).sort((x,y)=>(y.a??-1)-(x.a??-1));
 const momAge = b => { const p=parseNID(b.nationalId||"",now), a=age(b.birth||p.birth||""); return a===""||a<15||a>100?null:a; };
-const guessCounts = b => { const k=kidsOf(b), kids=k||(famSize(b)?Math.max(famSize(b)-1,0):0); const ki=kidsInfo(b).slice(0,kids); return { adults:1, kids, kid_ages:ki.map(k=>k.a), kid_sexes:ki.map(k=>k.sex), mother_age:momAge(b) }; };
+const guessCounts = b => { const k=kidsOf(b), kids=k||(famSize(b)?Math.max(famSize(b)-1,0):0); const ki=kidsInfo(b).slice(0,kids); return { adults:1, kids, kid_ages:ki.map(k=>k.a), kid_sexes:ki.map(k=>k.sex), kid_names:ki.map(k=>k.name), mother_age:momAge(b) }; };
 const kidBand = a => { const i=AGE_BANDS.findIndex(([lo,hi])=>a>=lo&&a<=hi); return i<0?"":AGE_BANDS[i][1]>=200?`${AGE_BANDS[i][0]} وأكبر`:`من ${AGE_BANDS[i][0]} لـ ${AGE_BANDS[i][1]}`; };
 // the ages typed for the kids actually coming (the list can be longer if «أطفال» went down)
 const agesComing = r => (r.kid_ages||[]).slice(0,+r.kids||0);
-const kidsComing = r => Array.from({length:+r.kids||0},(_,i)=>({ a:(r.kid_ages||[])[i]??null, sex:(r.kid_sexes||[])[i]||null }));
-const kidsText = r => kidsComing(r).map(k=>`${k.a??"؟"}${k.sex?" "+k.sex:""}`).join("، ");
+const kidsComing = r => Array.from({length:+r.kids||0},(_,i)=>({ a:(r.kid_ages||[])[i]??null, sex:(r.kid_sexes||[])[i]||null, name:(r.kid_names||[])[i]||"" }));
+const kidsText = r => kidsComing(r).map(k=>`${k.name?k.name+" ":""}${k.a??"؟"}${k.sex?" "+k.sex:""}`).join("، ");
 function eventTotals(id){
   const rs=rsvps(id), yes=rs.filter(r=>r.answer==="جاية"), maybe=rs.filter(r=>r.answer==="مش متأكدة");
   const sum=(a,f)=>a.reduce((s,r)=>s+(+r[f]||0),0);
@@ -2433,7 +2433,7 @@ function openEvent(id){
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
           ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>`:""}
           ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
-          ${showN&&+r.kids?`<span class="ages"><small>أعمار الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="number" min="0" max="25" inputmode="numeric" data-age="${r.id}" data-i="${i}" value="${k.a??""}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
+          ${showN&&+r.kids?`<span class="ages"><small>الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="number" min="0" max="25" inputmode="numeric" data-age="${r.id}" data-i="${i}" value="${k.a??""}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
           ${cw?`<button class="btn sm danger" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الرحلة" title="شيل من الرحلة">×</button>`:""}</div>
         ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
         ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
@@ -2447,13 +2447,15 @@ function openEvent(id){
     s.querySelectorAll("[data-etab]").forEach(el=>el.onclick=()=>{ etab=el.dataset.etab; supEdit=null; refreshSheet(); });
     bindSup(s, id, v=>{ supEdit=v; refreshSheet(); });
     const eq=q("#e_q"); if(eq) eq.oninput=()=>{ q_=eq.value; const pos=eq.selectionStart; refreshSheet(); const n=$("#e_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
-    s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], mother_age:r.mother_age??null };
+    s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], mother_age:r.mother_age??null };
       const next=r.answer===ans?{ answer:"" }:ans==="مش جاية"?{ answer:ans, adults:0, kids:0 }:{ answer:ans, ...((+r.adults||0)+(+r.kids||0)?(r.mother_age==null&&momAge(b)!=null?{ mother_age:momAge(b) }:{}):guessCounts(b)) };
       setRsvp(r.id,next); undoable(`${b.name}: ${next.answer?`«${next.answer}»`:"اتشال الرد"}`, ()=>setRsvp(r.id,prev)); });
     s.querySelectorAll("[data-st]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.st), f=el.dataset.f; setRsvp(r.id,{ [f]:Math.max(0,Math.min(50,(+r[f]||0)+(+el.dataset.d))) }, true); });
     s.querySelectorAll("[data-num]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.num,{ [el.dataset.f]:Math.max(0,Math.min(50,Math.round(+el.value||0))) }));
     s.querySelectorAll("[data-note]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.note,{ note:el.value.trim() }));
     s.querySelectorAll("[data-mom]").forEach(el=>el.onchange=()=>{ const v=el.value===""?null:Math.round(+el.value); if(v!=null&&(v<10||v>110)){ toast("سن الأم لازم يبقى بين 10 و110"); return; } setRsvp(el.dataset.mom,{ mother_age:v }); });
+    s.querySelectorAll("[data-kn]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.kn), nm=Array.from({length:+r.kids||0},(_,i)=>(r.kid_names||[])[i]||null);
+      nm[+el.dataset.i]=el.value.trim()||null; setRsvp(r.id,{ kid_names:nm }); });
     s.querySelectorAll("[data-sx]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sx), sx=Array.from({length:+r.kids||0},(_,i)=>(r.kid_sexes||[])[i]||null), i=+el.dataset.i;
       sx[i]=sx[i]===el.dataset.v?null:el.dataset.v; setRsvp(r.id,{ kid_sexes:sx }); });
     s.querySelectorAll("[data-age]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.age), ag=Array.from({length:+r.kids||0},(_,i)=>(r.kid_ages||[])[i]??null);
@@ -2476,7 +2478,7 @@ function openEvent(id){
   let mine=-1;
   // Redraw without losing the box being typed in (other callers' changes arrive while you type).
   const redraw=()=>{ const body=$("#scrim .sh-body"); if(!(body&&EV.get(id)&&sheetSeq===mine)) return;
-    const ae=document.activeElement, keyOf=el=>["note","num","age","mom","f","i"].filter(k=>el.dataset[k]!=null).map(k=>`[data-${k}="${el.dataset[k]}"]`).join("");
+    const ae=document.activeElement, keyOf=el=>["note","num","age","mom","kn","f","i"].filter(k=>el.dataset[k]!=null).map(k=>`[data-${k}="${el.dataset[k]}"]`).join("");
     const key=ae&&body.contains(ae)&&ae.tagName==="INPUT"&&ae.type!=="search"?keyOf(ae):"", val=key?ae.value:null, pos=key&&ae.type==="text"?ae.selectionStart:null;
     body.innerHTML=draw(); mount($("#scrim"));
     if(key){ const n=body.querySelector(key); if(n){ n.value=val; n.focus(); if(pos!=null) n.setSelectionRange(pos,pos); } } };
@@ -2490,11 +2492,11 @@ const supRule = s => `${s.sex==="ست"?"بتاخد":"بياخد"} ${s.takes==="�
 function tripGroups(id){
   const kids=[];
   rsvps(id).filter(r=>r.answer==="جاية").forEach(r=>{ const b=B.get(r.beneficiary_id); if(!b) return;
-    kidsComing(r).forEach((k,i)=>kids.push({ id:r.id+":"+i, fam:b.id, a:k.a, sex:k.sex, mom:b.name, code:b.code, phone:cleanPhone(b.phone) })); });
+    kidsComing(r).forEach((k,i)=>kids.push({ id:r.id+":"+i, fam:b.id, a:k.a, sex:k.sex, name:k.name, mom:b.name, code:b.code, phone:cleanPhone(b.phone) })); });
   const sups=EV.get(id)?.supervisors||[];
   return { kids, sups, ...assignKids(kids, sups) };
 }
-const kidLine = k => `${k.sex||"ولد/بنت ؟"} · ${k.a!=null?`سن ${num(k.a)}`:"السن ؟"} — ${k.sex==="بنت"?"بنت":k.sex==="ولد"?"ابن":"ابن/بنت"} ${esc(k.mom)} (${esc(k.code)})`;
+const kidLine = k => `${k.name?`<b>${esc(k.name)}</b> · `:""}${k.sex||"ولد/بنت ؟"} · ${k.a!=null?`سن ${num(k.a)}`:"السن ؟"} — ${k.sex==="بنت"?"بنت":k.sex==="ولد"?"ابن":"ابن/بنت"} ${esc(k.mom)} (${esc(k.code)})`;
 const sexCount = g => { const b=g.filter(k=>k.sex==="ولد").length, gi=g.filter(k=>k.sex==="بنت").length; return [b?`${num(b)} ولد`:"",gi?`${num(gi)} بنت`:""].filter(Boolean).join("، "); };
 function supPanel(id, editing){
   const e=EV.get(id), cw=canWrite(), { kids, sups, groups, left } = tripGroups(id), ed=editing?(sups.find(x=>x.id===editing)||null):null;
@@ -2538,24 +2540,24 @@ function bindSup(s, id, setEdit){
   s.querySelectorAll("[data-surm]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const cur=EV.get(id).supervisors||[], sp=cur.find(x=>x.id===el.dataset.surm);
     saveSups(id, cur.filter(x=>x.id!==sp.id), `${sp.name} اتشال — الأطفال بتوعه اتوزعوا على الباقيين`, cur); });
   if(q("#su_print")) q("#su_print").onclick=()=>doPrint(groupsHTML(id), EV.get(id).title+" — المجموعات");
-  if(q("#su_x")) q("#su_x").onclick=()=>{ const { sups, groups, left } = tripGroups(id), rows=[["المشرف","راجل/ست","السن","ولد/بنت","الأم","رقم الحالة","تليفون الأم"]];
-    sups.forEach(sp=>(groups.get(sp.id)||[]).forEach(k=>rows.push([sp.name,sp.sex,k.a??"",k.sex||"",k.mom,k.code,k.phone])));
-    left.forEach(x=>rows.push(["مش متوزع: "+x.why,"",x.kid.a??"",x.kid.sex||"",x.kid.mom,x.kid.code,x.kid.phone]));
+  if(q("#su_x")) q("#su_x").onclick=()=>{ const { sups, groups, left } = tripGroups(id), rows=[["المشرف","راجل/ست","اسم الطفل","السن","ولد/بنت","الأم","رقم الحالة","تليفون الأم"]];
+    sups.forEach(sp=>(groups.get(sp.id)||[]).forEach(k=>rows.push([sp.name,sp.sex,k.name||"",k.a??"",k.sex||"",k.mom,k.code,k.phone])));
+    left.forEach(x=>rows.push(["مش متوزع: "+x.why,"",x.kid.name||"",x.kid.a??"",x.kid.sex||"",x.kid.mom,x.kid.code,x.kid.phone]));
     xlsx({"المجموعات":rows},`${EV.get(id).title} — المجموعات.xlsx`); };
 }
 function groupsHTML(id){
   const e=EV.get(id), { sups, groups, left } = tripGroups(id);
   return `<div class="ps">${hdr()}<h1>${esc(e.title)} — مجموعات المشرفين</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
     ${sups.map(sp=>{ const g=groups.get(sp.id)||[]; return `<h3 style="margin:12px 0 4px">${esc(sp.name)} (${sp.sex})${sp.phone?` — ${esc(sp.phone)}`:""} — ${num(g.length)} طفل${g.length?` (${sexCount(g)})`:""}</h3>
-      <table><thead><tr><th>م</th><th>السن</th><th>ولد/بنت</th><th>الأم</th><th>رقم الحالة</th><th>تليفون الأم</th><th>حضر</th><th>رجع</th></tr></thead><tbody>
-      ${g.map((k,i)=>`<tr><td>${i+1}</td><td>${k.a??""}</td><td>${k.sex||""}</td><td class="nm">${esc(k.mom)}</td><td>${esc(k.code)}</td><td>${esc(k.phone)}</td><td class="sig"></td><td class="sig"></td></tr>`).join("")}</tbody></table>`; }).join("")}
-    ${left.length?`<h3>مش متوزعين (${num(left.length)})</h3><table><tbody>${left.map((x,i)=>`<tr><td>${i+1}</td><td>${x.kid.a??""}</td><td>${x.kid.sex||""}</td><td class="nm">${esc(x.kid.mom)}</td><td>${esc(x.kid.code)}</td><td>${esc(x.why)}</td></tr>`).join("")}</tbody></table>`:""}
+      <table><thead><tr><th>م</th><th>الاسم</th><th>السن</th><th>ولد/بنت</th><th>الأم</th><th>رقم الحالة</th><th>تليفون الأم</th><th>حضر</th><th>رجع</th></tr></thead><tbody>
+      ${g.map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(k.name||"")}</td><td>${k.a??""}</td><td>${k.sex||""}</td><td class="nm">${esc(k.mom)}</td><td>${esc(k.code)}</td><td>${esc(k.phone)}</td><td class="sig"></td><td class="sig"></td></tr>`).join("")}</tbody></table>`; }).join("")}
+    ${left.length?`<h3>مش متوزعين (${num(left.length)})</h3><table><tbody>${left.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.kid.name||"")}</td><td>${x.kid.a??""}</td><td>${x.kid.sex||""}</td><td class="nm">${esc(x.kid.mom)}</td><td>${esc(x.kid.code)}</td><td>${esc(x.why)}</td></tr>`).join("")}</tbody></table>`:""}
     ${signsHTML()}</div>`;
 }
 function eventHTML(id){
   const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}));
   return `<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>أعمارهم (ولد / بنت)</th><th>الإجمالي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(t.people)}</td><td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
     ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}</p>`:""}
