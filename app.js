@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.33";
+export const VERSION = "1.3.34";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -122,7 +122,7 @@ const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemI
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
   createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
 const fromI = r => ({ id:r.id, position:r.position??0, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by });
-const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||(r.event_id?"ev:"+r.event_id:null), result:r.result, at:r.at, by:r.by });
+const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||(r.event_id?"ev:"+r.event_id:null), result:r.result, at:r.at, by:r.by, cancelledAt:r.cancelled_at||null });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
 const toI = (it, batchId, i) => ({ batch_id:batchId, beneficiary_id:it.bid||null, position:i, code:it.code, name:it.name, national_id:it.nationalId||null, phone:it.phone||null, family_size:+it.familySize||null, students:it.students??null, value:+it.value||0, reason:it.reason||"", received:!!it.received, received_at:it.received?new Date().toISOString():null });
 
@@ -331,7 +331,8 @@ const PHONE_OWNERS = ["جوزها","ابنها","بنتها","أخوها","أخ�
 // "رقم جوزها" — says whose phone the family's second number is.
 const phone2Name = b => b?.phone2Owner ? (b.phone2Owner.startsWith("رقم") ? b.phone2Owner : "رقم "+b.phone2Owner) : "رقم تاني";
 const CALL_RES = { "رد":{cls:"ok",label:"ردّت ✓"}, "مردش":{cls:"no",label:"ماردتش"}, "رقم غلط":{cls:"bad",label:"رقم غلط"}, "مش هييجي":{cls:"away",label:"مش هيعرف ييجي"} };
-const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ for(const key of [c.bid+"|"+(c.batchId||""), c.bid+"|*"]){ const p=m.get(key); if(!p||c.at>p.at) m.set(key,c); } } return m; });
+// A cancelled call (logged by mistake) counts nowhere.
+const callIndex = memo(() => { const m=new Map(); for(const c of C.values()){ if(c.cancelledAt) continue; for(const key of [c.bid+"|"+(c.batchId||""), c.bid+"|*"]){ const p=m.get(key); if(!p||c.at>p.at) m.set(key,c); } } return m; });
 // Inside a list: the latest call for that list. Elsewhere: the latest call in the last 3 days.
 function lastCall(bid, batchId){ const c=callIndex().get(bid+"|"+(batchId||"*")); if(!c) return null; if(!batchId && c.at<addDays(today,-3)) return null; return c; }
 let dialed=null;   // {bid, batchId}: the row whose dialer we just opened — it shows the three answer buttons
@@ -344,7 +345,7 @@ function callCell(bid, phone, batchId, big){
   // If this number didn't work, the family's second number is one tap away.
   const b=B.get(bid), alt=[b?.phone,b?.phone2].map(cleanPhone).find(x=>validPhone(x)&&x!==ph);
   const altName = alt===cleanPhone(b?.phone2) ? phone2Name(b) : "رقمها";
-  return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}${fix}</span>`
+  return `<span class="ccell ${big?"big":""}">${open&&canLog?`<span class="cres" role="group" aria-label="نتيجة المكالمة">${Object.entries(CALL_RES).map(([r,v])=>`<button class="cr ${v.cls}" data-cres="${r}" data-cb="${bid}" data-cbatch="${batchId||""}">${v.label}</button>`).join("")}${c&&(c.by===me?.id||canWrite())?`<button class="cr undo" data-ccancel="${c.id}" title="اتسجلت بالغلط">${ic("x")}امسح «${CALL_RES[c.result].label}»</button>`:""}${fix}</span>`
     :chip?`<button class="cchipb" data-copen="${bid}" data-cbatch="${batchId||""}" ${canLog?"":"disabled"}>${chip}</button>${c.result==="رقم غلط"?fix:""}`:""}
     <a class="cdial" href="tel:${ph}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ${ph}">${ic("phone")}${ph===cleanPhone(b?.phone2)&&ph!==cleanPhone(b?.phone)?esc(phone2Name(b)):big?"اتصل":""}</a>${alt?`<a class="cdial alt" href="tel:${alt}" data-dial="${bid}" data-cbatch="${batchId||""}" aria-label="اتصل ب${esc(altName)} ${alt}">${ic("phone")}${esc(altName)}</a>`:""}</span>`;
 }
@@ -392,6 +393,15 @@ function bindCalls(root, redraw){
   root.querySelectorAll("[data-dial]").forEach(a=>a.addEventListener("click",()=>{ dialed={bid:a.dataset.dial,batchId:a.dataset.cbatch||null}; setTimeout(redraw,400); }));
   root.querySelectorAll("[data-cfix]").forEach(b=>b.onclick=async()=>{ if(await phoneFix(b.dataset.cfix)){ dialed={ bid:b.dataset.cfix, batchId:b.dataset.cbatch||null }; redraw(); } });
   root.querySelectorAll("[data-copen]").forEach(b=>b.onclick=()=>{ dialed={bid:b.dataset.copen,batchId:b.dataset.cbatch||null}; redraw(); });
+  // «ردّت» tapped by mistake (or no call was made): cancel that call — it stays in the database, marked cancelled.
+  root.querySelectorAll("[data-ccancel]").forEach(b=>b.onclick=async()=>{
+    b.disabled=true; const id=b.dataset.ccancel, before=C.get(id);
+    const setCancel=async on=>{ const { data, error } = await sb.from("calls").update({ cancelled_at:on?new Date().toISOString():null, cancelled_by:on?me.id:null }).eq("id",id).select().single();
+      if(error||!data){ toast(error?errMsg(error):"مش مسموحلك تمسح المكالمة دي"); return false; } C.set(id, fromC(data)); upsertRaw("cs", data); changed(); redraw(); return true; };
+    if(!await setCancel(true)){ b.disabled=false; return; }
+    dialed=null; redraw();
+    undoable(`اتمسحت «${CALL_RES[before?.result]?.label||"المكالمة"}»`, ()=>setCancel(false));
+  });
   root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
     const ctx=batchId?.startsWith("ev:")?{ event_id:batchId.slice(3) }:{ batch_id:batchId };
@@ -2611,7 +2621,29 @@ function eventXlsx(id){
   const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","كبار","سن الأم","أطفال","الأطفال (السن والنوع)","ولاد","بنات","الإجمالي","ملاحظة","آخر مكالمة","أطفال متسجلين","عدد الأفراد"]];
   rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
     .forEach(({r,b})=>{ const c=lastCall(b.id,"ev:"+id); rows.push([b.code,b.name,cleanPhone(b.phone),waNum(b),r.answer||"لسه",+r.adults||0,r.mother_age??"",+r.kids||0,kidsText(r),kidsComing(r).filter(k=>k.sex==="ولد").length,kidsComing(r).filter(k=>k.sex==="بنت").length,(+r.adults||0)+(+r.kids||0),r.note||"",c?CALL_RES[c.result].label:"",kidsOf(b),famSize(b)||""]); });
-  xlsx({"الرحلة":rows},`${e.title}.xlsx`);
+  xlsx({"الرحلة":rows, "بيانات الأسر":familySheet(rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b))},`${e.title}.xlsx`);
+}
+/* The families' own data for a trip, one row per family: the mother and her age (from her birth date, or from the national ID),
+   then her daughters and her sons in separate columns, each with an age — exact when a birth date is known,
+   «~9 (تالتة ابتدائي)» when it's only estimated from the school year. */
+function kidAge(k){
+  const birth=k.birth||parseNID(k.nid||"",now).birth||"", a=age(birth);
+  if(a!=="") return { a, txt:a };
+  const st=stageOf(k), sa=st?stageAge(st):null;
+  return sa!=null ? { a:sa, txt:`~${sa} (تقريبي من ${st})` } : { a:null, txt:"مش معروف" };
+}
+function familySheet(list){
+  const fams=list.sort((x,y)=>String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true})).map(({r,b})=>{
+    const p=parseNID(b.nationalId||"",now), fromBirth=age(b.birth||""), fromNid=p.ok?age(p.birth):"";
+    const mom=fromBirth!==""?{a:fromBirth,src:"تاريخ الميلاد"}:fromNid!==""?{a:fromNid,src:"الرقم القومي"}:{a:"",src:""};
+    const kids=(b.children||[]).map(k=>({ name:(k.name||"").trim()||"—", sex:kidSex(k), ...kidAge(k) })).sort((x,y)=>(y.a??-1)-(x.a??-1));
+    return { r, b, mom, girls:kids.filter(k=>k.sex==="بنت"), boys:kids.filter(k=>k.sex==="ولد"), other:kids.filter(k=>!k.sex) };
+  });
+  const G=Math.max(0,...fams.map(f=>f.girls.length)), Bn=Math.max(0,...fams.map(f=>f.boys.length)), O=Math.max(0,...fams.map(f=>f.other.length));
+  const cols=(n,label)=>Array.from({length:n},(_,i)=>[`${label} ${i+1}`,`سن ${label} ${i+1}`]).flat();
+  const head=["رقم الحالة","اسم الأم","سن الأم","السن من","الرد","التليفون","عدد البنات","عدد الولاد",...cols(G,"بنت"),...cols(Bn,"ولد"),...cols(O,"ابن/بنت (النوع مش متسجل)")];
+  const cells=(arr,n)=>Array.from({length:n},(_,i)=>arr[i]?[arr[i].name,arr[i].txt]:["",""]).flat();
+  return [head, ...fams.map(f=>[f.b.code,f.b.name,f.mom.a,f.mom.src,f.r.answer||"لسه",cleanPhone(f.b.phone),f.girls.length,f.boys.length,...cells(f.girls,G),...cells(f.boys,Bn),...cells(f.other,O)])];
 }
 
 /* ================= printing ================= */
