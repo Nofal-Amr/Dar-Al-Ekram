@@ -106,7 +106,9 @@ export function normalizeStage(raw){
   if(lv < 0) return "";
   const has = re => words.some(w => re.test(w));
   if(has(/^(ابت|ابتدائي|الابتدائي|ابتدائ[يى]|الابتددائي|الايتدائي|ابتدايي)$/)) return lv < 6 ? `${ORD[lv]} ابتدائي` : "";
-  if(has(/^(اع|اعدادي|الاعدادي|اعدادى)$/)) return lv < 3 ? `${ORD[lv]} إعدادي` : "";
+  // «١ ع» = أولى إعدادي — but in «٢ ث ع» the ع means عام (ثانوي عام), so a lone ع only counts when there's no ث
+  const sec = has(/^(ث|ثانوي|الثانوي|الثنوي|ثانوى)$/);
+  if(has(/^(اع|اعدادي|الاعدادي|اعدادى)$/) || (!sec && has(/^ع$/))) return lv < 3 ? `${ORD[lv]} إعدادي` : "";
   if(has(/^(ث|ثانوي|الثانوي|الثنوي|ثانوى)$/)){
     const tr0 = has(/^(ص|صناعي)$/);
     if(lv > (tr0 ? 4 : 2)) return "";

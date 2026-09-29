@@ -315,3 +315,9 @@ test("Excel: a national ID stored as a number keeps all 14 digits", () => {
   const rows = rowsFromSheet([["م","الاسم","الرقم القومي"],[1,"نورا عرفه سليمان",29903201401304]]);
   assert.equal(rows[0].nid, "29903201401304");
 });
+
+test("«١ ع» is أولى إعدادي, while «٢ ث ع» stays ثانوي عام", () => {
+  assert.equal(normalizeStage("١ ع"), "أولى إعدادي");
+  assert.equal(normalizeStage("3 ع"), "تالتة إعدادي");
+  assert.equal(normalizeStage("2ث ع"), "تانية ثانوي عام");
+});
