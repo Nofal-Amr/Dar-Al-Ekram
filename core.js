@@ -36,7 +36,21 @@ export const isoDay = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOf
 export const mIdx = m => { const [y,mm] = String(m).split("-").map(Number); return y*12 + (mm-1); };
 export const mLabel = m => { if(!m) return ""; const [y,mm] = String(m).split("-").map(Number); return `${MONTHS[mm-1]} ${y}`; };
 export const dLabel = d => { if(!d) return "—"; const x = new Date(d); if(isNaN(x)) return String(d); return `${x.getDate()} ${MONTHS[x.getMonth()]} ${x.getFullYear()}`; };
-export const addDays = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); };
+// Calendar maths on "YYYY-MM-DD" is done in UTC: local-time setDate() + toISOString() slips a day around Egypt's DST switch.
+const ymd = d => String(d).slice(0,10).split("-").map(Number);
+export const addDays = (d,n) => { const [y,m,dd] = ymd(d); return new Date(Date.UTC(y, m-1, dd+n)).toISOString().slice(0,10); };
+// A date typed by hand → "YYYY-MM-DD", or "" if it isn't a real date. Accepts 1980-05-01, 1/5/1980, 01-05-1980, ١/٥/١٩٨٠ (day first).
+export function parseDate(raw, today = new Date()){
+  const t = latinDigits(raw).trim(); let y, m, d, x;
+  if((x = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(t))) [, y, m, d] = x.map(Number);
+  else if((x = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(t))) [, d, m, y] = x.map(Number);
+  else return "";
+  const dt = new Date(Date.UTC(y, m-1, d));
+  if(dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m-1 || dt.getUTCDate() !== d || y < 1900 || dt > today) return "";
+  return dt.toISOString().slice(0,10);
+}
+// Same day n months later, clamped to the month's last day (31 Aug + 6 months → 28/29 Feb, not 3 Mar).
+export const addMonths = (d,n) => { const [y,m,dd] = ymd(d); const last = new Date(Date.UTC(y, m-1+n+1, 0)).getUTCDate(); return new Date(Date.UTC(y, m-1+n, Math.min(dd, last))).toISOString().slice(0,10); };
 export function age(birth, today = new Date()){
   if(!birth) return ""; const b = new Date(birth); if(isNaN(b)) return "";
   let a = today.getFullYear() - b.getFullYear();
@@ -136,14 +150,15 @@ export function sortPool(pool, by = "score", missedFirst = true){
 /* Walks the sorted pool and gives each family its share until the available quantity (total) or the family count runs out.
    Stops at the first family that doesn't fit, so nobody jumps the queue. */
 export function planShares(sorted, basis, { total = null, count = null } = {}){
-  const picked = [], rest = []; let used = 0, members = 0;
+  const picked = [], rest = [], zero = []; let used = 0, members = 0;
   for(const x of sorted){
     const fam = famSize(x.b), v = shareFor(basis, fam, x.students);
+    if(basis?.mode === "student" && !(v > 0)){ zero.push({ ...x, fam, value:0 }); continue; }   // per-student shares: no students → not on the list at all
     const full = (count != null && picked.length >= count) || (total != null && used + v > total + 1e-9) || rest.length;
     if(full){ rest.push({ ...x, fam, value:v }); continue; }
     picked.push({ ...x, fam, value:v }); used += v; members += fam || 1;
   }
-  return { picked, rest, used, members, left: total != null ? total - used : null };
+  return { picked, rest, zero, used, members, left: total != null ? total - used : null };
 }
 
 /* ---------- passwords ---------- */
@@ -185,7 +200,10 @@ export function countStudents(children, today = new Date()){
    Titles, totals and signature lines are skipped. */
 const SKIP_ROW = /اجمال|تم الصرف|نموذج|جمعي[هة]|المسجل[هة]|^كشف|كشف (صرف|توزيع)|عن شهر|امين الصندوق|رئيس|التوقيع|^الاسم$/;
 export function rowsFromSheet(aoa){
-  const rows = (aoa || []).map(r => (r || []).map(c => String(c ?? "").trim()));
+  // Cells may arrive as real numbers (sheet read with raw:true): a national ID typed into a General cell is
+  // the number 29903201401304 — String() keeps every digit, whereas the sheet's own text is "2.99032E+13".
+  const cell = c => typeof c === "number" ? (Number.isInteger(c) ? c.toFixed(0) : String(c)) : String(c ?? "").trim();
+  const rows = (aoa || []).map(r => (r || []).map(cell));
   let head = -1, cName = -1, cNid = -1, cCount = -1;
   for(let i = 0; i < Math.min(rows.length, 20) && head < 0; i++){
     rows[i].forEach((c, j) => { const n = norm(c); if(/^الاس+م|اسم المستفيد/.test(n)) cName = j; if(/القوم/.test(n)) cNid = j; if(/^(عدد|العدد)/.test(n)) cCount = j; });
@@ -222,7 +240,8 @@ export function matchPerson(row, people){
 export function crossCheck(text, b, today = new Date()){
   text = String(text || "").normalize("NFKC");
   const t = latinDigits(text), n = norm(text);
-  const digits = t.replace(/(\d)[  ](?=\d)/g, "$1");            // «2 9 9 0 3 …» typed in boxes
+  // «2 9 9 0 3 …» typed one digit per box: join only runs of single digits, never two whole numbers side by side
+  const digits = t.replace(/\b\d(?:[  ]\d\b){3,}/g, m => m.replace(/[  ]/g, ""));
   const nids = [...new Set((digits.match(/\d{14}/g) || []).filter(x => parseNID(x, today).ok))];
   const phones = [...new Set((digits.match(/(?:^|\D)(0?1[0125]\d{8})(?!\d)/g) || []).map(x => cleanPhone(x.replace(/^\D/,""))))].filter(validPhone);
   const has = s => s && n.includes(norm(s));
@@ -325,7 +344,8 @@ export function stageAge(stage){
 }
 export function parseKidAge(raw){
   const t = latinDigits(String(raw ?? "")).trim(); if(!t) return { age: null, stage: null };
-  if(/^\d{1,2}$/.test(t)) return { age: Math.min(+t, 25), stage: null };
+  const yrs = /^(\d{1,2})\s*(سنة|سنه|سنين|سنوات|سنتين|س)?$/.exec(t);   // «9», «9 سنين», «٩ سنه», «12 سنة»
+  if(yrs) return { age: Math.min(+yrs[1], 25), stage: null };
   const kg = /^(kg|كي ?جي)\s*([12])$/i.exec(t);
   const stage = kg ? `رياض أطفال ${kg[2] === "1" ? "١" : "٢"}` : normalizeStage(t);
   return stage ? { age: stageAge(stage), stage } : { age: null, stage: t };

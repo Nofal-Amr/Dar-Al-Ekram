@@ -269,3 +269,49 @@ test("parseKidAge reads a number or a school year", () => {
   assert.deepEqual(parseKidAge("مش عارفة"), { age:null, stage:"مش عارفة" });
   assert.deepEqual(parseKidAge(""), { age:null, stage:null });
 });
+
+/* ---------- regressions fixed in the v1.3.33 review ---------- */
+import { addDays, addMonths, parseDate } from "../core.js";
+
+test("date maths is calendar-exact (no DST slip), months clamp to the month's end", () => {
+  assert.equal(addDays("2026-04-20", 10), "2026-04-30");      // across Egypt's spring DST switch
+  assert.equal(addDays("2026-03-01", -1), "2026-02-28");
+  assert.equal(addMonths("2026-01-15", 6), "2026-07-15");
+  assert.equal(addMonths("2026-08-31", 6), "2027-02-28");
+  assert.equal(addMonths("2026-12-10", 1), "2027-01-10");
+});
+
+test("hand-typed dates", () => {
+  assert.equal(parseDate("1/5/1980", today), "1980-05-01");
+  assert.equal(parseDate("١٥/٣/٢٠١٢", today), "2012-03-15");
+  assert.equal(parseDate("2012-03-15", today), "2012-03-15");
+  assert.equal(parseDate("31/2/2012", today), "");
+  assert.equal(parseDate("1/1/2030", today), "");             // future
+  assert.equal(parseDate("مش عارفة", today), "");
+});
+
+test("trip ages written with a word", () => {
+  assert.equal(parseKidAge("9 سنين").age, 9);
+  assert.equal(parseKidAge("٩ سنه").age, 9);
+  assert.equal(parseKidAge("12 سنة").age, 12);
+  assert.equal(parseKidAge("7").age, 7);
+});
+
+test("PDF check never glues two numbers together", () => {
+  const b = { name:"نورا عرفه سليمان عبدالنعيم", nationalId:"29903201401304", phone:"01123456789" };
+  const r = crossCheck("الاسم نورا عرفه سليمان عبدالنعيم التليفون 01098945258 01123456789 الرقم 2 9 9 0 3 2 0 1 4 0 1 3 0 4 وكلام كفاية", b, today);
+  assert.equal(r.diff.length, 0);
+  assert.ok(r.ok.some(x => x.includes("01123456789")));
+  assert.ok(r.ok.some(x => x.includes("29903201401304")));
+});
+
+test("per-student shares: families with no students are left out, not listed with 0", () => {
+  const r = planShares([{ b:{code:"1",familySize:4}, students:2 }, { b:{code:"2",familySize:3}, students:0 }], { mode:"student", per:1 });
+  assert.deepEqual(r.picked.map(x => x.b.code), ["1"]);
+  assert.equal(r.zero.length, 1);
+});
+
+test("Excel: a national ID stored as a number keeps all 14 digits", () => {
+  const rows = rowsFromSheet([["م","الاسم","الرقم القومي"],[1,"نورا عرفه سليمان",29903201401304]]);
+  assert.equal(rows[0].nid, "29903201401304");
+});
