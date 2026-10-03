@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.36";
+export const VERSION = "1.3.37";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2814,7 +2814,39 @@ function caseHTML(b,logs){
     <h2>سجل التغييرات</h2><table><tbody>${logs.slice(0,20).map(l=>`<tr><td style="width:22%">${dLabel(l.at)}</td><td class="l">${esc(l.text)}</td></tr>`).join("")||`<tr><td>لا يوجد</td></tr>`}</tbody></table>
     <div class="signs"><div>الباحث الاجتماعي<span></span></div><div>مجلس الإدارة<span></span></div></div></div>`;
 }
-function doPrint(html){ $("#print").innerHTML=html; setTimeout(()=>window.print(),50); }
+/* Before printing: how many rows on each sheet of paper (empty = as many as fit). Remembered on this computer.
+   Long tables are cut into pages of that many rows; each page repeats the table's header row, and the totals go on the last. */
+const ROWS_KEY="printRows";
+function printRows(){ try{ return +localStorage.getItem(ROWS_KEY)||0; }catch(e){ return 0; } }
+function askRows(rowsInTables){
+  return new Promise(resolve=>{
+    const w=document.createElement("div"); w.className="ask-scrim";
+    w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="prT"><h2 id="prT">طباعة</h2>
+      <label class="f">عدد الصفوف في كل ورقة<input type="number" id="pr_n" min="1" max="200" inputmode="numeric" value="${printRows()||""}" placeholder="فاضي = على قد ما الورقة تساع"></label>
+      <p class="sub" id="pr_h" style="margin-top:0"></p>
+      <div class="bar"><button class="btn pri" data-a="1">${ic("printer")}اطبع</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+    const inp=w.querySelector("#pr_n"), hint=()=>{ const n=+inp.value||0; w.querySelector("#pr_h").textContent=n&&rowsInTables?(p=>`${num(rowsInTables)} صف ← حوالي ${num(p)} ${p>2&&p<11?"ورقات":"ورقة"}`)(Math.ceil(rowsInTables/n)):`${num(rowsInTables)} صف`; };
+    const done=v=>{ w.remove(); document.removeEventListener("keydown",key,true); resolve(v); };
+    const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); done(null); } else if(e.key==="Enter"&&e.target===inp){ e.preventDefault(); go(); } };
+    const go=()=>{ const n=Math.max(0,Math.min(200,Math.round(+inp.value||0))); try{ n?localStorage.setItem(ROWS_KEY,n):localStorage.removeItem(ROWS_KEY); }catch(e){} done(n); };
+    w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(a) a.dataset.a==="1"?go():done(null); else if(e.target===w) done(null); };
+    inp.oninput=hint; hint(); document.addEventListener("keydown",key,true); document.body.appendChild(w); inp.focus(); inp.select();
+  });
+}
+function splitRows(root, n){
+  if(!n) return;
+  root.querySelectorAll("table").forEach(t=>{ const rows=[...(t.tBodies[0]?.rows||[])]; if(rows.length<=n) return;
+    const foot=t.tFoot; if(foot) foot.remove();
+    for(let i=n;i<rows.length;i+=n){ const p=t.cloneNode(false); if(t.tHead) p.appendChild(t.tHead.cloneNode(true)); const b=document.createElement("tbody");
+      rows.slice(i,i+n).forEach(r=>b.appendChild(r)); p.appendChild(b); p.style.pageBreakBefore="always"; (t._last||t).after(p); t._last=p; }
+    if(foot) (t._last||t).appendChild(foot); delete t._last; });
+}
+async function doPrint(html){
+  const box=$("#print"); box.innerHTML=html;
+  const rows=[...box.querySelectorAll("table")].reduce((s,t)=>s+(t.tBodies[0]?.rows.length||0),0);
+  const n=await askRows(rows); if(n==null){ box.innerHTML=""; return; }
+  splitRows(box,n); setTimeout(()=>window.print(),50);
+}
 
 /* ================= excel / files ================= */
 function batchXlsx(k){
