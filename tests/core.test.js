@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, age, mIdx, mLabel, toNumber } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, age, mIdx, mLabel, toNumber, pickFromText } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -320,4 +320,11 @@ test("«١ ع» is أولى إعدادي, while «٢ ث ع» stays ثانوي ع
   assert.equal(normalizeStage("١ ع"), "أولى إعدادي");
   assert.equal(normalizeStage("3 ع"), "تالتة إعدادي");
   assert.equal(normalizeStage("2ث ع"), "تانية ثانوي عام");
+});
+
+test("a handwritten list typed in: case numbers, IDs and names", () => {
+  const P = [{ id:"a", code:"004", name:"امينه السيد محمد", nationalId:"28001010101010" }, { id:"b", code:"156", name:"فاطمة علي حسن" }, { id:"c", code:"18", name:"سارة محمود" }];
+  const r = pickFromText("4 ١٥٦\n18\nفاطمه علي حسن\n999\nاسم مش موجود خالص\n28001010101010", P);
+  assert.deepEqual(r.found.map(x => x.b.id), ["a", "b", "c"]);
+  assert.deepEqual(r.unknown, ["999", "اسم مش موجود خالص"]);
 });

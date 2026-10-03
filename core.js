@@ -235,6 +235,23 @@ export function matchPerson(row, people){
   if(k3.split(" ").length === 3){ const m = people.filter(p => norm(p.name).split(" ").slice(0,3).join(" ") === k3); if(m.length === 1) return { b:m[0], how:"name3" }; }
   return { b:null, how:"" };
 }
+/* A list typed off a handwritten paper: case numbers («4 18 ١٥٦»), national IDs, or one name per line.
+   A short number is a case number only if a case has it; anything not found comes back so it can be fixed. */
+// codes:false for text read out of a printed PDF, where short numbers are row numbers and counts, not case numbers.
+export function pickFromText(text, people, { codes = true } = {}){
+  const found = [], unknown = [], seen = new Set();
+  const add = (b, how, token) => { if(seen.has(b.id)) return; seen.add(b.id); found.push({ b, how, token }); };
+  for(const line of latinDigits(text).split(/[\n،,;]+/)){
+    const nums = line.match(/\d+/g) || [];
+    for(const t of nums){
+      if(t.length === 14){ const b = people.find(p => p.nationalId === t); b ? add(b, "nid", t) : unknown.push(t); }
+      else if(codes && t.length <= 4){ const b = people.find(p => /^\d+$/.test(String(p.code)) && +p.code === +t); b ? add(b, "code", t) : unknown.push(t); }
+    }
+    const name = line.replace(/[\d.\-–_/\\()]+/g, " ").replace(/\s+/g, " ").trim();
+    if(name.split(" ").length >= 2){ const m = matchPerson({ name }, people); m.b ? add(m.b, m.how, name) : !nums.length && unknown.push(name); }
+  }
+  return { found, unknown };
+}
 
 /* ---------- checking a case's PDF against the site ----------
    Takes the text read out of the PDF and the case as it is on the site; reports what matches, what's different,

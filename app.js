@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.35";
+export const VERSION = "1.3.36";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -317,8 +317,12 @@ function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBat
   }
   return { pool:out, excluded, prev };
 }
-function whyLine(x, t, unit){
-  const p=[x.missed?"ماجاتش تستلم المرة اللي فاتت":"", x.students!=null&&x.stuSrc!=="none"?`${x.students} طالب${x.stuSrc==="list"?" (من كشف المدارس)":""}`:"", x.b.score!=null?`الدرجة ${x.b.score}%`:x.b.grade?`تقدير ${x.b.grade}`:"", x.fam?`${x.fam} أفراد`:"عدد الأفراد مش متسجل", x.lm?`آخر ${t.name}: ${mLabel(x.lm)}`:`ماخدتش ${t.name} قبل كده`];
+// Students only matter for a list that is about them (school meals, «لكل طالب», or a filter on students) — not for fish or oil.
+const stuType = (id, name) => id==="schoolmeals" || /مدرس|مدارس|طالب|طلاب|دراس/.test(name||"");
+const stuPlan = (st, t) => st.mode==="student" || st.need==="students" || +st.minStu>0 || stuType(t?.id, t?.name);
+const stuOn = k => !!(k.basis?.stu || k.basis?.mode==="student" || stuType(k.typeId, k.typeName));
+function whyLine(x, t, stu = true){
+  const p=[x.missed?"ماجاتش تستلم المرة اللي فاتت":"", stu&&x.students!=null&&x.stuSrc!=="none"?`${x.students} طالب${x.stuSrc==="list"?" (من كشف المدارس)":""}`:"", x.b.score!=null?`الدرجة ${x.b.score}%`:x.b.grade?`تقدير ${x.b.grade}`:"", x.fam?`${x.fam} أفراد`:"عدد الأفراد مش متسجل", x.lm?`آخر ${t.name}: ${mLabel(x.lm)}`:`ماخدتش ${t.name} قبل كده`];
   return p.filter(Boolean).join(" · ");
 }
 /* ---------- calls ----------
@@ -1711,7 +1715,7 @@ function newBatch(){
       <label class="f">من فين<select id="n_src"><option value="">كل الحالات النشطة</option>${srcLists.map(k=>`<option value="${k.id}">من كشف: ${esc(k.title)}</option>`).join("")}</select></label>
       <label class="f">من الكشف ده<select id="n_left"><option value="no">اللي ماستلموش بس</option><option value="yes">اللي استلموا بس</option><option value="all">الكل</option></select></label>
       <label class="f">شيل الأسر<select id="n_need"><option value="">ماتشيلش حد</option><option value="kids">اللي معندهاش أطفال</option><option value="students">اللي معندهاش طلاب في المدارس</option></select></label>
-      <label class="f">أقل عدد طلاب في الأسرة (اختياري)<input type="number" id="n_minstu" min="0" placeholder="مثال: 2 = طالبين أو أكتر"></label>
+      <label class="f" id="n_minstuL">أقل عدد طلاب في الأسرة (اختياري)<input type="number" id="n_minstu" min="0" placeholder="مثال: 2 = طالبين أو أكتر"></label>
     </div>
     <div class="sub">نوع الحالة (لو ما اخترتش حاجة: كل الحالات النشطة)</div>
     <div class="checks" id="n_ct">${CASE_TYPES.map(c=>`<label><input type="checkbox" value="${c}"> ${c}</label>`).join("")}</div>
@@ -1763,24 +1767,25 @@ function newBatch(){
       return { t, basis, c, r, picked, all:c.pool.length };
     }
     function draw(){
-      plan=compute(); const { t, c, r, picked }=plan, u=esc(t.unit);
+      plan=compute(); const { t, c, r, picked }=plan, u=esc(t.unit), su=stuPlan(st,t);
+      q("#n_minstuL").hidden=!(su||st.need==="students");
       const used=picked.reduce((a,x)=>a+(+x.value||0),0), mem=picked.reduce((a,x)=>a+(x.fam||1),0), stu=picked.reduce((a,x)=>a+(+x.students||0),0);
       const noSize=picked.filter(x=>!x.fam).length, need=c.pool.reduce((a,x)=>a+shareFor(plan.basis,famSize(x.b),x.students),0);
       const sizes=[1,2,3,4,5,6].map(n=>c.pool.filter(x=>n<6?famSize(x.b)===n:famSize(x.b)>=6).length), unknown=c.pool.filter(x=>!famSize(x.b)).length;
       const rule=`الترتيب: ${st.missedFirst?"اللي ماجاش يستلم المرة اللي فاتت، بعدين ":""}${PRIORITY[st.by]}${st.by==="score"?" (ولو الدرجة زي بعض: الأسرة الأكبر)":""}.`;
       q("#n_res").innerHTML=`
         <div class="plan">
-          <div class="plan-big"><div><span>هتكفي</span><strong>${num(picked.length)}</strong><small>أسرة</small></div><div><span>يعني</span><strong>${num(mem)}</strong><small>فرد</small></div><div><span>منهم</span><strong>${num(stu)}</strong><small>طالب</small></div><div><span>المطلوب</span><strong>${num(Math.round(used*100)/100)}</strong><small>${u}</small></div>${st.total!==""?`<div class="${+st.total-used<0?"neg":""}"><span>يفضل</span><strong>${num(Math.round((+st.total-used)*100)/100)}</strong><small>${u}</small></div>`:""}</div>
+          <div class="plan-big"><div><span>هتكفي</span><strong>${num(picked.length)}</strong><small>أسرة</small></div><div><span>يعني</span><strong>${num(mem)}</strong><small>فرد</small></div>${su?`<div><span>منهم</span><strong>${num(stu)}</strong><small>طالب</small></div>`:""}<div><span>المطلوب</span><strong>${num(Math.round(used*100)/100)}</strong><small>${u}</small></div>${st.total!==""?`<div class="${+st.total-used<0?"neg":""}"><span>يفضل</span><strong>${num(Math.round((+st.total-used)*100)/100)}</strong><small>${u}</small></div>`:""}</div>
           <p>المؤهلين <b>${num(c.pool.length)}</b> أسرة${st.total!==""||st.count!==""?` — لو كلهم هيحتاجوا ${num(Math.round(need*100)/100)} ${u}`:""}.${r.rest.length?` <b>${num(r.rest.length)}</b> أسرة مش هيلحقوا المرة دي.`:""}${c.excluded.length?` واتستبعد ${num(c.excluded.length)} (تحت).`:""}${r.zero?.length?` <b>${num(r.zero.length)}</b> أسرة مالهاش طلاب فمش هتاخد حاجة بالطريقة دي.`:""}</p>
           <p class="sub">${esc(rule)}${noSize?` · ${num(noSize)} أسرة عدد أفرادها مش متسجل واتحسبت فرد واحد.`:""}</p>
           <table class="sizes"><thead><tr><th>عدد الأفراد</th>${["1","2","3","4","5","6+"].map(x=>`<th>${x}</th>`).join("")}${unknown?"<th>مش متسجل</th>":""}</tr></thead><tbody><tr><td>عدد الأسر</td>${sizes.map(n=>`<td>${num(n)}</td>`).join("")}${unknown?`<td>${num(unknown)}</td>`:""}</tr></tbody></table>
         </div>
         <input type="search" id="n_add" placeholder="ضيف حالة بإيدك بالاسم أو الرقم"><div id="n_sugg" style="margin-top:8px"></div>
-        <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>ليه هنا</th><th>أفراد</th><th>طلاب</th><th>${u}</th><th></th></tr></thead><tbody>
-        ${picked.map((x,i)=>`<tr><td class="n">${i+1}</td><td>${esc(x.b.name)}<div class="sub">${esc(x.b.code)}</div></td><td class="why">${x.manual?"إضافة بإيدك · ":""}${esc(whyLine(x,t))}</td><td class="n">${x.fam||"؟"}</td><td class="n">${x.stuSrc==="none"?"؟":x.students}</td>
+        <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>ليه هنا</th><th>أفراد</th>${su?"<th>طلاب</th>":""}<th>${u}</th><th></th></tr></thead><tbody>
+        ${picked.map((x,i)=>`<tr><td class="n">${i+1}</td><td>${esc(x.b.name)}<div class="sub">${esc(x.b.code)}</div></td><td class="why">${x.manual?"إضافة بإيدك · ":""}${esc(whyLine(x,t,su))}</td><td class="n">${x.fam||"؟"}</td>${su?`<td class="n">${x.stuSrc==="none"?"؟":x.students}</td>`:""}
           <td><input type="number" step="any" data-v="${x.b.id}" value="${x.value}" class="mini" aria-label="الكمية"></td><td><button class="btn sm danger" data-rm="${x.b.id}" aria-label="شيل">×</button></td></tr>`).join("")||`<tr><td colspan="7" class="empty">مفيش حد — غيّر الشروط اللي فوق</td></tr>`}
         </tbody></table></div>
-        ${r.rest.length?`<button class="btn sm" id="n_restT" style="margin-top:10px">${st.showRest?"اخفي":"اعرض"} اللي مش هيلحقوا (${num(r.rest.length)})</button>${st.showRest?`<div class="list" style="margin-top:8px">${r.rest.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(whyLine({...x,fam:famSize(x.b)},t))} · نصيبها ${num(x.value)} ${u}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
+        ${r.rest.length?`<button class="btn sm" id="n_restT" style="margin-top:10px">${st.showRest?"اخفي":"اعرض"} اللي مش هيلحقوا (${num(r.rest.length)})</button>${st.showRest?`<div class="list" style="margin-top:8px">${r.rest.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(whyLine({...x,fam:famSize(x.b)},t,su))} · نصيبها ${num(x.value)} ${u}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
         ${c.excluded.length?`<button class="btn sm" id="n_outT" style="margin-top:10px">${st.showOut?"اخفي":"اعرض"} المستبعدين (${num(c.excluded.length)})</button>${st.showOut?`<div class="list" style="margin-top:8px">${c.excluded.map(x=>`<div class="item"><span class="code">${esc(x.b.code)}</span><span class="grow">${esc(x.b.name)}<br><span class="sub">${esc(x.why)}</span></span><button class="btn sm" data-addr="${x.b.id}">ضيف</button></div>`).join("")}</div>`:""}`:""}
         <div class="bar" style="margin-top:16px"><button class="btn pri" id="n_save" ${picked.length?"":"disabled"}>${ic("save")}حفظ كمسودة (${num(picked.length)} أسرة)</button></div>`;
       const R=q("#n_res");
@@ -1802,9 +1807,9 @@ function newBatch(){
         const week=+st.week||null, distDate=week?weekdaysOf(st.month,st.dow)[week-1]:null;
         const title=`كشف ${t.name}${st.donor?` (${st.donor})`:""} — ${distDate?`${dayLabel(distDate)} ${st.month.slice(0,4)}`:mLabel(st.month)}`;
         const k=await run(sb.from("batches").insert({title,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:st.month,week,dist_date:distDate,dist_days:distDate?[distDate]:[],donor:st.donor,status:"مسودة",cooldown:st.cooldown,
-          basis:{...plan.basis, total:st.total===""?null:+st.total, by:st.by, missedFirst:st.missedFirst}, created_by:me.id}).select("id").single());
+          basis:{...plan.basis, total:st.total===""?null:+st.total, by:st.by, missedFirst:st.missedFirst, stu:su}, created_by:me.id}).select("id").single());
         if(!k){ sv.disabled=false; draw(); return; }
-        const rows=plan.picked.map((x,i)=>toI(itemFor(x.b,+x.value||0,(x.manual?"إضافة بإيدك · ":"")+whyLine(x,t),x.stuSrc==="none"?null:x.students),k.id,i));
+        const rows=plan.picked.map((x,i)=>toI(itemFor(x.b,+x.value||0,(x.manual?"إضافة بإيدك · ":"")+whyLine(x,t,su),!su||x.stuSrc==="none"?null:x.students),k.id,i));
         const saved=await insertItems(rows);
         await logIt("batch",k.id,`إنشاء الكشف (${saved===rows.length?rows.length:`${saved} من ${rows.length}`} أسرة · ${num(rows.reduce((a,r)=>a+r.value,0))} ${t.unit}) — ${rule}`);
         toast(saved===rows.length?"تم حفظ الكشف كمسودة ✓":partialMsg(saved,rows.length)); view="batches"; await refreshBatch(k.id); openBatch(k.id);
@@ -1915,7 +1920,7 @@ function openBatch(id, giveMode){
     const items=k.items; const total=items.reduce((s,i)=>s+(+i.value||0),0); const rec=items.filter(i=>i.received).length; const draft=k.status==="مسودة";
     const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq))
       .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
-    const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
+    const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=stuOn(k)&&items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
@@ -1924,7 +1929,7 @@ function openBatch(id, giveMode){
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -1934,7 +1939,7 @@ function openBatch(id, giveMode){
       <div id="b_addRes"></div></details>`:""}
     ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
-      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
       ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
@@ -1972,7 +1977,7 @@ function openBatch(id, giveMode){
     const addTo=async bid=>{ const k=K.get(id), b=B.get(bid); if(!b||k.items.some(i=>i.bid===bid)) return;
       const stu=studentsOf(b), v=k.basis?shareFor(k.basis,famSize(b),stu.n):(k.items[0]?.value??T.get(k.typeId)?.amount??1);
       const pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
-      const row=await run(sb.from("batch_items").insert(toI(itemFor(b,v,"إضافة بإيدك",stu.src==="none"?null:stu.n),id,pos)).select().single());
+      const row=await run(sb.from("batch_items").insert(toI(itemFor(b,v,"إضافة بإيدك",!stuOn(k)||stu.src==="none"?null:stu.n),id,pos)).select().single());
       if(row){ await logIt("batch",id,`إضافة ${b.name}`); logs=await loadLog("batch",id); addQ=""; await refreshBatch(id);
         undoable(`${b.name} اتضافت للكشف`, async()=>{ const it=K.get(id)?.items.find(x=>x.id===row.id); if(!it||it.received) return false;
           if(!await run(sb.from("batch_items").delete().eq("id",row.id))) return false; await logIt("batch",id,`شيل ${b.name} (تراجع)`); logs=await loadLog("batch",id); await refreshBatch(id); }); } };
@@ -1986,6 +1991,7 @@ function openBatch(id, giveMode){
     if(q("#b_printLeft")) q("#b_printLeft").onclick=()=>{ const k=K.get(id); doPrint(batchHTML({...k, items:k.items.filter(i=>!i.received), left:true}),k.title); };
     q("#b_phones").onclick=()=>{ const k=K.get(id); phoneSheet(k.title,k.items.map(it=>({bid:it.bid,name:it.name,phone:it.phone||B.get(it.bid)?.phone,code:it.code,done:it.received})),counts(k),k.id); };
     q("#b_xlsx").onclick=()=>batchXlsx(K.get(id));
+    if(q("#b_paper")) q("#b_paper").onclick=()=>paperToBatch(id);
     if(q("#b_up")) q("#b_up").onchange=e=>{ const fs=[...e.target.files]; e.target.value=""; if(fs.length) importToBatch(id, fs); };
   };
   if(!K.get(id)) return;
@@ -1999,6 +2005,71 @@ function openBatch(id, giveMode){
 /* ================= Excel → list =================
    Upload one or more of the office's Excel lists into a list that's still being made. Names are matched to the
    cases on file (national ID first, then name); nothing is added until the preview is confirmed. */
+/* ---------- a handwritten paper list ----------
+   Handwriting can't be read reliably by a machine (and the paper has people's names on it), so nothing leaves the computer:
+   the photo or PDF stays on screen next to a box where you type what's on it — just the case numbers («4 18 156») is fastest,
+   or a name per line. Each one is matched as you type, and anything not found shows in red. A PDF that has real text
+   (not a scan) is read by itself. */
+async function paperPages(f){
+  if(/^image\//.test(f.type)) return { pages:[URL.createObjectURL(f)], text:"" };
+  await loadPdf();
+  const doc=await window.pdfjsLib.getDocument({ data:new Uint8Array(await f.arrayBuffer()), cMapUrl:"vendor/pdfjs/cmaps/", cMapPacked:true }).promise, pages=[];
+  for(let p=1;p<=Math.min(doc.numPages,10);p++){ const pg=await doc.getPage(p), vp=pg.getViewport({ scale:1.6 }), c=document.createElement("canvas");
+    c.width=vp.width; c.height=vp.height; await pg.render({ canvasContext:c.getContext("2d"), viewport:vp }).promise; pages.push(c.toDataURL("image/jpeg",0.85)); }
+  let text=""; try{ text=await pdfText(f); }catch(e){}
+  return { pages, text };
+}
+function paperSheet({ title, inList, inListText = () => "موجودة أصلاً", note = "", addLabel = "ضيف", onAdd, back, extra = "" }){
+  let text="", pages=[], zoom=1, busy=false;
+  const HOW={ code:"رقم الحالة", nid:"الرقم القومي", name:"الاسم", name3:"أول 3 أسامي" };
+  const res=()=>{ const { found, unknown } = pickFromText(text, people()), fresh=found.filter(x=>!inList(x.b.id));
+    return { found, unknown, fresh }; };
+  const results=()=>{ const { found, unknown, fresh } = res();
+    if(!text.trim()) return `<div class="sub">اللي هتكتبه هيظهر هنا بالاسم عشان تتأكد إنه صح.</div>`;
+    return `${unknown.length?`<div class="note red">${ic("alert")} <span>مش لاقيين: <b>${unknown.map(esc).join("، ")}</b> — راجع الرقم أو الاسم في الورقة.</span></div>`:""}
+      <div class="list">${found.map(x=>`<div class="item ${inList(x.b.id)?"muted":""}"><span class="code">${esc(x.b.code)}</span><span class="grow"><span class="nm">${esc(x.b.name)}</span><br>
+        <span class="sub">${HOW[x.how]}: ${esc(x.token)}${x.b.status!=="نشط"?` · <b>${esc(x.b.status)}</b>`:""}${inList(x.b.id)?` · ${esc(inListText(x.b.id))}`:""}</span></span></div>`).join("")}</div>
+      <div class="bar" style="margin-top:10px"><button class="btn pri" id="pp_go" ${fresh.length&&!busy?"":"disabled"}>${busy?`<span class="spin"></span>`:`${ic("plus")}${addLabel} ${num(fresh.length)}`}</button></div>`; };
+  const viewer=()=>pages.length?`<div class="row" style="margin-bottom:6px"><button class="btn sm" data-z="-1" aria-label="صغّر">−</button><button class="btn sm" data-z="1" aria-label="كبّر">+</button><span class="sub">كبّر عشان تقرا الخط</span></div>
+      <div class="paperv">${pages.map(p=>`<img src="${p}" alt="الورقة" style="width:${zoom*100}%">`).join("")}</div>`
+    :`<label class="btn" style="cursor:pointer">${ic("plus")}صورة الورقة أو PDF<input type="file" id="pp_f" accept="image/*,application/pdf" hidden></label>
+      <p class="sub">من الموبايل تقدر تصوّر الورقة على طول. الصورة بتفضل على الجهاز ده ومش بتترفع.</p>`;
+  const body=()=>`${note?`<p class="sub" style="margin-top:0">${note}</p>`:""}
+    <div class="paper"><div id="pp_v">${viewer()}</div>
+      <div><label class="f">اكتب اللي في الورقة: أرقام الحالات (مثال: 4 18 156)، أو اسم في كل سطر
+        <textarea id="pp_t" rows="6" dir="auto" placeholder="4 18 156&#10;أمينة السيد محمد">${esc(text)}</textarea></label>
+        <input type="search" id="pp_s" placeholder="مش فاكر الرقم؟ دوّر بالاسم" autocomplete="off"><div id="pp_sr"></div>
+        ${extra}<div id="pp_r" style="margin-top:10px">${results()}</div>
+        ${back?`<div class="bar" style="margin-top:6px"><button class="btn" id="pp_back">رجوع</button></div>`:""}</div></div>`;
+  const mount=s=>{ const q=x=>s.querySelector(x);
+    const drawRes=()=>{ q("#pp_r").innerHTML=results(); const go=q("#pp_go"); if(go) go.onclick=async()=>{ busy=true; drawRes();
+        const ok=await onAdd(res().fresh.map(x=>x.b), s); busy=false; if(ok===false&&q("#pp_r")) drawRes(); }; };
+    const drawV=()=>{ q("#pp_v").innerHTML=viewer(); bindV(); };
+    const bindV=()=>{ const f=q("#pp_f"); if(f) f.onchange=async()=>{ const file=f.files[0]; if(!file) return; q("#pp_v").innerHTML=`<span class="spin"></span>`;
+        try{ const r=await paperPages(file); pages=r.pages;
+          const auto=r.text.trim()&&!text.trim()?pickFromText(r.text, people(), { codes:false }).found:[];
+          if(auto.length){ text=auto.map(x=>x.b.code).join(" "); q("#pp_t").value=text; drawRes(); toast("الملف فيه كلام مكتوب — اتقرا لوحده، راجعه"); } }
+        catch(e){ toast("مقدرناش نفتح الملف ده"); }
+        drawV(); };
+      s.querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{ zoom=Math.max(1,Math.min(3,zoom+(+b.dataset.z)*0.5)); s.querySelectorAll(".paperv img").forEach(i=>i.style.width=zoom*100+"%"); }); };
+    bindV();
+    let tm=null; q("#pp_t").oninput=e=>{ text=e.target.value; clearTimeout(tm); tm=setTimeout(drawRes,250); };
+    q("#pp_s").oninput=e=>{ const qq=norm(e.target.value), out=q("#pp_sr"); if(qq.length<2){ out.innerHTML=""; return; }
+      out.innerHTML=`<div class="list" style="margin:6px 0">${people().filter(b=>findsCase(b,qq)).slice(0,6).map(b=>`<button class="item" data-pk="${esc(b.code)}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
+      out.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>{ text=(text.trim()?text.trim()+"\n":"")+b.dataset.pk; q("#pp_t").value=text; q("#pp_s").value=""; out.innerHTML=""; drawRes(); }); };
+    if(q("#pp_back")) q("#pp_back").onclick=back;
+    drawRes(); };
+  sheet(title, body(), mount);
+}
+function paperToBatch(id){
+  const k0=K.get(id);
+  paperSheet({ title:`${k0.title} — من ورقة بخط الإيد`, inList:bid=>K.get(id).items.some(i=>i.bid===bid), addLabel:"ضيف للكشف", back:()=>openBatch(id),
+    onAdd:async list=>{ const k=K.get(id); let pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
+      const rows=list.map(b=>{ const stu=studentsOf(b), v=k.basis?shareFor(k.basis,famSize(b),stu.n):(k.items[0]?.value??T.get(k.typeId)?.amount??1);
+        return toI(itemFor(b,v,"من ورقة بخط الإيد",!stuOn(k)||stu.src==="none"?null:stu.n),id,pos++); });
+      const saved=await insertItems(rows); if(!saved) return false;
+      await logIt("batch",id,`من ورقة بخط الإيد: اتضاف ${saved} اسم`); toast(saved===rows.length?`اتضاف ${num(saved)} ✓`:partialMsg(saved,rows.length)); await refreshBatch(id); openBatch(id); } });
+}
 async function importToBatch(id, files){
   try{ if(!window.XLSX){ toast("بنجهّز قراية الإكسيل…"); await loadXlsx(); } }catch(e){ toast("مقدرناش نقرا الإكسيل — جرّب تاني"); return; }
   const k=K.get(id), all=people(), inList=new Set(k.items.map(i=>i.bid)), seen=new Map(), missing=[], dupInList=[];
@@ -2034,7 +2105,7 @@ async function importToBatch(id, files){
     s.querySelector("#im_go").onclick=async()=>{
       const go=s.querySelector("#im_go"); go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
       let pos=k.items.reduce((m,i)=>Math.max(m,i.position??0),-1)+1;
-      const rows=found.filter(x=>pick.has(x.b.id)).map(x=>{ const stu=studentsOf(x.b); return toI(itemFor(x.b,+valueOf(x)||0,`من ملف إكسيل: ${x.src}`,stu.src==="none"?null:stu.n),id,pos++); });
+      const rows=found.filter(x=>pick.has(x.b.id)).map(x=>{ const stu=studentsOf(x.b); return toI(itemFor(x.b,+valueOf(x)||0,`من ملف إكسيل: ${x.src}`,!stuOn(k)||stu.src==="none"?null:stu.n),id,pos++); });
       if(await run(sb.from("batch_items").insert(rows),`اتضاف ${num(rows.length)} ✓`)){ await logIt("batch",id,`رفع إكسيل: اتضاف ${rows.length} اسم${missing.length?` · ${missing.length} مش متسجلين`:""}`); await refreshBatch(id); openBatch(id); }
       else { go.disabled=false; re(); }
     };
@@ -2474,7 +2545,7 @@ function openEvent(id){
       <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأطفال:</b> ${bandsText(t.bands,true)}`:""}
       ${t.moms.length?`<br><b>الأمهات:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
-    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
+    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_ages">${ic("printer")}الأطفال حسب السن</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
     <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button></div>
     ${etab==="sup"?supPanel(id,supEdit):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
@@ -2490,7 +2561,7 @@ function openEvent(id){
         ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
         ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
       </div>`; }).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>
-    ${cw?`<details class="addbox" ${addQ?"open":""}><summary>${ic("plus")}ضيف أسرة للرحلة</summary><input type="search" id="e_add" placeholder="اكتب الاسم أو رقم الحالة" value="${esc(addQ)}"><div id="e_addRes"></div></details>`:""}`}`;
+    ${cw?`<details class="addbox" ${addQ?"open":""}><summary>${ic("plus")}ضيف أسرة للرحلة</summary><button class="btn sm" id="e_paper" style="margin-bottom:8px">${ic("edit")}من ورقة بخط الإيد</button><input type="search" id="e_add" placeholder="اكتب الاسم أو رقم الحالة" value="${esc(addQ)}"><div id="e_addRes"></div></details>`:""}`}`;
   };
   const mount=s=>{
     const q=x=>s.querySelector(x);
@@ -2518,6 +2589,8 @@ function openEvent(id){
       undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
     if(q("#e_edit")) q("#e_edit").onclick=()=>editEvent(id);
     q("#e_print").onclick=()=>doPrint(eventHTML(id), EV.get(id).title);
+    q("#e_ages").onclick=()=>agesSheet(id);
+    if(q("#e_paper")) q("#e_paper").onclick=()=>paperToEvent(id);
     q("#e_phones").onclick=()=>{ const rs=rsvps(id).filter(r=>r.answer==="جاية").map(r=>B.get(r.beneficiary_id)).filter(Boolean); phoneSheet(`${EV.get(id).title} — اللي جايين`, rs.map(b=>({ bid:b.id, name:b.name, phone:b.phone, code:b.code })), false, ctx); };
     q("#e_x").onclick=()=>eventXlsx(id);
     const ab=q("#e_add"); if(ab){ const res=()=>{ const qq=norm(addQ), inIt=new Set(rsvps(id).map(r=>r.beneficiary_id));
@@ -2617,6 +2690,53 @@ function eventHTML(id){
     ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}</p>`:""}
     ${signsHTML()}</div>`;
 }
+/* The kids coming, one age at a time: each child by name, with the mother she or he belongs to. */
+function kidsByAge(id, { noName = true } = {}){
+  const kids=tripGroups(id).kids.filter(k=>noName||k.name), m=new Map();
+  for(const k of kids) (m.get(k.a)||m.set(k.a,[]).get(k.a)).push(k);
+  const byCode=(x,y)=>String(x.code).localeCompare(String(y.code),"en",{numeric:true})||(x.name||"").localeCompare(y.name||"","ar");
+  const ages=[...m.keys()].filter(a=>a!=null).sort((x,y)=>x-y);
+  return { kids, groups:[...ages.map(a=>({ a, label:`سن ${a} ${a>=3&&a<=10?"سنين":"سنة"}`, list:m.get(a).sort(byCode) })), ...(m.has(null)?[{ a:null, label:"السن مش مكتوب", list:m.get(null).sort(byCode) }]:[])] };
+}
+/* Who is on a paper list for the trip: added if not invited, and marked «جاية» — with no kids filled in (who comes is typed by hand).
+   An answer someone already gave is left as it is and listed, so nobody's call gets overwritten. */
+function paperToEvent(id){
+  const row=bid=>rsvps(id).find(r=>r.beneficiary_id===bid);
+  paperSheet({ title:`${EV.get(id).title} — من ورقة بخط الإيد`, addLabel:"علّم «جاية»", back:()=>openEvent(id),
+    note:"اللي في الورقة هيتعلّم «جاية» (ولو مش معزومة هتتضاف). الأطفال مش هيتملوا لوحدهم — بيتكتبوا بعد كده. اللي ليها رد قبل كده مش هيتغيّر.",
+    inList:bid=>!!row(bid)?.answer, inListText:bid=>`ردها من قبل: «${row(bid).answer}» — مش هيتغيّر`,
+    onAdd:async list=>{ const note="من ورقة بخط الإيد", add=list.filter(b=>!row(b.id)), upd=list.map(b=>row(b.id)).filter(r=>r&&!r.answer);
+      if(add.length){ const { data, error } = await sb.from("event_people").insert(add.map(b=>({ event_id:id, beneficiary_id:b.id, answer:"جاية", adults:1, kids:0, note }))).select(); if(error){ toast(errMsg(error)); return false; } data.forEach(r=>EP.set(r.id,r)); }
+      for(const r of upd){ const { data, error } = await sb.from("event_people").update({ answer:"جاية", adults:1, kids:0, note:r.note||note }).eq("id",r.id).select().single(); if(error){ toast(errMsg(error)); return false; } EP.set(data.id,data); }
+      await logIt("event",id,`من ورقة بخط الإيد: ${list.length} أسرة «جاية»`); changed(); openEvent(id); toast(`اتعلّم ${num(list.length)} «جاية» ✓ — كمّل الأطفال`); } });
+}
+function agesSheet(id){
+  const o={ noName:true, pages:false };
+  const body=()=>{ const { kids, groups } = kidsByAge(id,o), noNm=tripGroups(id).kids.filter(k=>!k.name).length;
+    return `<p class="sub" style="margin-top:0">الأطفال اللي أمهاتهم «جاية»، كل سن لوحده: اسم الطفل وهو ابن/بنت مين.</p>
+    <label class="chk"><input type="checkbox" id="ag_nn" ${o.noName?"checked":""}> ضمّ الأطفال اللي اسمهم مش مكتوب (${num(noNm)})</label>
+    <label class="chk"><input type="checkbox" id="ag_pg" ${o.pages?"checked":""}> كل سن في ورقة لوحده</label>
+    <div class="tbl"><table><thead><tr><th>السن</th><th>بنات</th><th>ولاد</th><th>مش محدد</th><th>الإجمالي</th></tr></thead><tbody>
+      ${groups.map(g=>`<tr><td>${g.label}</td><td class="n">${num(g.list.filter(k=>k.sex==="بنت").length)}</td><td class="n">${num(g.list.filter(k=>k.sex==="ولد").length)}</td><td class="n">${num(g.list.filter(k=>!k.sex).length)}</td><td class="n"><b>${num(g.list.length)}</b></td></tr>`).join("")||`<tr><td colspan="5" class="empty">مفيش أطفال جايين لسه</td></tr>`}
+    </tbody><tfoot><tr><td>الكل</td><td></td><td></td><td></td><td class="n"><b>${num(kids.length)}</b></td></tr></tfoot></table></div>
+    <div class="bar"><button class="btn pri" id="ag_print" ${kids.length?"":"disabled"}>${ic("printer")}طباعة</button><button class="btn" id="ag_x" ${kids.length?"":"disabled"}>Excel</button><button class="btn" id="ag_back">رجوع للرحلة</button></div>`; };
+  const mount=s=>{ const q=x=>s.querySelector(x), re=()=>{ s.querySelector(".sh-body").innerHTML=body(); mount(s); };
+    q("#ag_nn").onchange=e=>{ o.noName=e.target.checked; re(); }; q("#ag_pg").onchange=e=>{ o.pages=e.target.checked; };
+    q("#ag_back").onclick=()=>openEvent(id);
+    q("#ag_print").onclick=()=>doPrint(agesHTML(id,o), EV.get(id).title+" — حسب السن");
+    q("#ag_x").onclick=()=>{ const rows=[["السن","اسم الطفل","ولد/بنت","السنة الدراسية","الأم","رقم الحالة","تليفون الأم"]];
+      kidsByAge(id,o).groups.forEach(g=>g.list.forEach(k=>rows.push([g.a??"مش مكتوب",k.name||"(الاسم مش مكتوب)",k.sex||"",k.stage||"",k.mom,k.code,k.phone])));
+      xlsx({"حسب السن":rows},`${EV.get(id).title} — الأطفال حسب السن.xlsx`,[8,18,8,16,30,9,14]); }; };
+  sheet(EV.get(id).title+" — الأطفال حسب السن", body(), mount);
+}
+function agesHTML(id, o){
+  const e=EV.get(id), { kids, groups } = kidsByAge(id,o);
+  return `<div class="ps">${hdr()}<h1>${esc(e.title)} — الأطفال حسب السن</h1><div class="mo">${e.date?dLabel(e.date)+" — ":""}${num(kids.length)} طفل (${sexCount(kids)})</div>
+    ${groups.map((g,gi)=>`<div style="${o.pages&&gi?"page-break-before:always":""}"><h3 style="margin:12px 0 4px">${g.label} — ${num(g.list.length)} ${g.list.length>2&&g.list.length<11?"أطفال":"طفل"}${sexCount(g.list)?` (${sexCount(g.list)})`:""}</h3>
+      <table><thead><tr><th>م</th><th>اسم الطفل</th><th>ولد/بنت</th><th>السنة الدراسية</th><th>الأم</th><th>رقم الحالة</th><th>تليفون الأم</th><th>حضر</th></tr></thead><tbody>
+      ${g.list.map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${k.name?esc(k.name):"<i>الاسم مش مكتوب</i>"}</td><td>${k.sex||""}</td><td>${esc(k.stage||"")}</td><td class="nm">${esc(k.mom)}</td><td>${esc(k.code)}</td><td>${esc(k.phone)}</td><td class="sig"></td></tr>`).join("")}</tbody></table></div>`).join("")}
+    ${signsHTML()}</div>`;
+}
 function eventXlsx(id){
   const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","كبار","سن الأم","أطفال","الأطفال (السن والنوع)","ولاد","بنات","الإجمالي","ملاحظة","آخر مكالمة","أطفال متسجلين","عدد الأفراد"]];
   rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
@@ -2673,7 +2793,7 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
+  const stu=stuOn(k)&&k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th><th>التوقيع</th></tr></thead><tbody>
     ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
@@ -2698,11 +2818,11 @@ function doPrint(html){ $("#print").innerHTML=html; setTimeout(()=>window.print(
 
 /* ================= excel / files ================= */
 function batchXlsx(k){
-  const cash=k.template==="cash";
-  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد","عدد الطلاب",cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج","التوقيع"]];
-  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",it.students??"",+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",""]));
-  rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),k.items.reduce((s,i)=>s+(+i.students||0),0),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
-  xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,12,14,7,30,16]);
+  const cash=k.template==="cash", su=stuOn(k)&&k.items.some(i=>i.students!=null), S=a=>su?a:[];
+  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",...S(["عدد الطلاب"]),cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج","التوقيع"]];
+  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",...S([it.students??""]),+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",""]));
+  rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),...S([k.items.reduce((s,i)=>s+(+i.students||0),0)]),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
+  xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,...S([10]),12,14,7,30,16]);
 }
 function peopleRows(list){
   const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","واتساب","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
