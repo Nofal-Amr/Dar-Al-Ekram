@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.47";
+export const VERSION = "1.3.48";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2777,7 +2777,7 @@ function eventHTML(id, mode="normal", rsv=true, nid=false){
   if(mode==="fam"){ const box=x=>`<span class="cb">☐ ${x}</span>`;
     return `${head}
     <table class="famprint"><thead><tr><th>م</th><th>الأم</th><th>الأطفال</th>${rsv?"<th>احتياطي</th>":""}<th>العدد</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${nid&&b.nationalId?` · <span dir="ltr">${esc(b.nationalId)}</span>`:""}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small></td>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small>${nid&&b.nationalId?`<br><small>الرقم القومي: ${esc(b.nationalId)}</small>`:""}</td>
         <td class="kids">${kidsComing(r).map(k=>box(`${esc(k.name||"طفل")} <small>${[k.stage||(k.a!=null?k.a:""),k.sex||""].filter(x=>x!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
         ${rsv?`<td class="kids">${reserveOf(r).filter(x=>x.coming!==false).map(x=>box(`${esc(x.who||"؟")} <small>${[x.stage||(x.age??""),x.coming===true?"جاي":""].filter(v=>v!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>`:""}
         <td>${num(cnt(r))}</td></tr>`).join("")}
