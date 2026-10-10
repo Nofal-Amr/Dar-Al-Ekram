@@ -59,7 +59,7 @@ nav.tabs{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-to
 nav.tabs button{flex:1;max-width:180px;border:0;background:none;padding:9px 2px 11px;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px;border-top:3px solid transparent}
 nav.tabs button svg{width:22px;height:22px}
 nav.tabs button.act{color:var(--green);border-top-color:var(--green);font-weight:600}
-nav.tabs button[hidden]{display:none}
+nav.tabs button[hidden],[hidden]{display:none!important}
 h2{font-size:20px;margin:0 0 12px;font-weight:600}
 h3{font-size:16px;margin:20px 0 8px;font-weight:600}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -214,6 +214,7 @@ body.simple .wrap{padding-bottom:40px;max-width:640px}
 .s-give:disabled{opacity:.6}
 .s-ok{color:var(--green);font-weight:600;font-size:18px;white-space:nowrap}
 .s-ok.muted{color:var(--muted)}
+.s-ungive{min-height:44px;padding:0 14px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--muted);font-size:15px;font-weight:600;margin-inline-start:8px}
 .s-call{min-width:110px;min-height:64px;border-radius:14px;background:#962A25;color:#fff;font-size:20px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;padding:0 14px}
 .s-call.wide{width:100%;margin-top:10px}
 .s-search{font-size:20px!important;min-height:60px!important;border-radius:14px!important;border-width:2px!important;margin-bottom:12px}
@@ -277,6 +278,7 @@ h4{font-size:14px;margin:14px 0 6px;color:var(--muted);font-weight:600}
 .cr{min-height:44px;border-radius:10px;border:2px solid;background:var(--card);font-weight:600;padding:0 10px}
 .ccell.big .cr{min-height:56px;font-size:17px}
 .cr.ok{border-color:var(--green);color:var(--green)}.cr.no{border-color:var(--gold);color:var(--gold-ink)}.cr.bad{border-color:var(--red);color:var(--red)}.cr.away{border-color:var(--plum);color:var(--plum)}
+.cr.undo{border-style:dashed;border-color:var(--line);color:var(--muted);display:inline-flex;align-items:center;gap:4px;font-weight:500}
 .cdial.wa{background:#1F8F4E}.cdial.wa.big{min-height:56px;min-width:96px;font-size:18px;border-radius:14px}
 .cdial.alt{background:var(--card);color:var(--brand);border:2px solid var(--brand);font-size:13px}
 .cchipb{border:0;background:none;padding:0}
@@ -303,6 +305,7 @@ ol.kids{margin:4px 0 8px;padding-inline-start:22px;font-size:13.5px;line-height:
 .agesum{font-size:13px;margin:-6px 0 10px;line-height:1.8}.agesum .muted{color:var(--muted)}
 .evsum{font-size:15px}.evnote{width:100%;font-size:13px;min-height:34px}
 label.chk{display:flex;gap:8px;align-items:center;margin:6px 0}label.chk input{width:20px;height:20px}
+.paper{display:grid;gap:14px}@media(min-width:900px){.paper{grid-template-columns:1.2fr 1fr}}.paperv{max-height:62vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}.paperv img{display:block;max-width:none;margin:0 auto 6px}.paper textarea{width:100%;font-size:16px}.item.muted{opacity:.55}
 .cfix{border:1px dashed var(--line);background:none;color:inherit;border-radius:16px;padding:3px 10px;font-size:12px;display:inline-flex;gap:4px;align-items:center;min-height:32px;white-space:nowrap}.cfix svg{width:14px;height:14px}
 .give.c-no,.item.c-no,.s-row.c-no{box-shadow:inset 4px 0 0 var(--gold);background:var(--gold-soft)}
 .give.c-bad,.item.c-bad,.s-row.c-bad{box-shadow:inset 4px 0 0 var(--red);background:var(--red-soft)}

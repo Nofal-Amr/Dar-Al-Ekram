@@ -107,7 +107,7 @@ export function createDemoClient(){
   function query(table){
     const st = { op: "select", filters: [], order: null, range: null, limit: null, single: false, payload: null, returning: false };
     const rows = () => db[table];
-    const match = r => st.filters.every(([c, v]) => r[c] === v);
+    const match = r => st.filters.every(([c, v]) => v === null ? r[c] == null : r[c] === v);   // .is(col, null) matches null/undefined
     const run = () => {
       const f = netFail(); if(f) return f;
       const now = new Date().toISOString();
@@ -136,7 +136,7 @@ export function createDemoClient(){
       select(){ if(st.op !== "select") st.returning = true; return b; },
       insert(p){ st.op = "insert"; st.payload = p; return b; }, upsert(p){ st.op = "upsert"; st.payload = p; return b; },
       update(p){ st.op = "update"; st.payload = p; return b; }, delete(){ st.op = "delete"; return b; },
-      eq(c, v){ st.filters.push([c, v]); return b; }, order(c, o = {}){ st.order = [c, o.ascending !== false]; return b; },
+      eq(c, v){ st.filters.push([c, v]); return b; }, is(c, v){ st.filters.push([c, v]); return b; }, order(c, o = {}){ st.order = [c, o.ascending !== false]; return b; },
       range(a, z){ st.range = [a, z]; return b; }, limit(n){ st.limit = n; return b; }, single(){ st.single = true; return b; },
       then(res, rej){ let out; try{ out = run(); }catch(e){ out = { data: null, error: e }; } return delay(out).then(res, rej); },
     };
