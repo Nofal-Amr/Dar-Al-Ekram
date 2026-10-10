@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.45";
+export const VERSION = "1.3.46";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2644,7 +2644,7 @@ function openEvent(id){
       undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
     if(q("#e_edit")) q("#e_edit").onclick=()=>editEvent(id);
     if(q("#e_copy")) q("#e_copy").onclick=()=>copyEvent(id);
-    q("#e_print").onclick=async()=>{ const m=await pickTripPrint(); if(m) doPrint(eventHTML(id, m), EV.get(id).title); };
+    q("#e_print").onclick=async()=>{ const m=await pickTripPrint(); if(m) doPrint(eventHTML(id, m.mode, m.rsv), EV.get(id).title); };
     q("#e_ages").onclick=()=>agesSheet(id);
     if(q("#e_paper")) q("#e_paper").onclick=()=>paperToEvent(id);
     q("#e_phones").onclick=()=>{ const rs=rsvps(id).filter(r=>r.answer==="جاية").map(r=>B.get(r.beneficiary_id)).filter(Boolean); phoneSheet(`${EV.get(id).title} — اللي جايين`, rs.map(b=>({ bid:b.id, name:b.name, phone:b.phone, code:b.code })), false, ctx); };
@@ -2741,43 +2741,49 @@ function groupsHTML(id){
     ${signsHTML()}</div>`;
 }
 // Which paper: the usual table, one line per mother with her national ID and room for a stamp, or each mother with her kids under her.
-const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والاحتياطي والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","سطر لكل أم: هي وأطفالها والاحتياطي في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
+const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","سطر لكل أم: هي وأطفالها في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
+// → { mode, rsv } or null. rsv: print the standby people (and count the ones marked «جاي»).
 function pickTripPrint(){
   return new Promise(resolve=>{
-    let last="normal"; try{ last=localStorage.getItem("tripPrint")||"normal"; }catch(e){}
+    let last="normal", rsv=true; try{ last=localStorage.getItem("tripPrint")||"normal"; rsv=localStorage.getItem("tripPrintRsv")!=="0"; }catch(e){}
     const w=document.createElement("div"); w.className="ask-scrim";
     w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="tpT"><h2 id="tpT">طباعة اللي جايين</h2>
       <div class="list">${TRIP_PRINTS.map(([k,l,d])=>`<label class="item"><input type="radio" name="tp" value="${k}" ${k===last?"checked":""} style="width:20px;height:20px"><span class="grow"><b>${l}</b><br><span class="sub">${d}</span></span></label>`).join("")}</div>
+      <div class="seg" role="group" aria-label="الاحتياطي" style="margin-top:10px"><button type="button" class="${rsv?"on":""}" data-rsv="1">بالاحتياطي</button><button type="button" class="${rsv?"":"on"}" data-rsv="0">من غير احتياطي</button></div>
       <div class="bar"><button class="btn pri" data-a="1">التالي</button><button class="btn" data-a="0">رجوع</button></div></div>`;
     const done=v=>{ w.remove(); document.removeEventListener("keydown",key,true); resolve(v); };
     const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); done(null); } };
-    w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(e.target===w||a?.dataset.a==="0") return done(null);
-      if(a){ const v=w.querySelector("input[name=tp]:checked").value; try{ localStorage.setItem("tripPrint",v); }catch(err){} done(v); } };
+    w.onclick=e=>{ const r=e.target.closest("[data-rsv]"); if(r){ rsv=r.dataset.rsv==="1"; w.querySelectorAll("[data-rsv]").forEach(x=>x.classList.toggle("on",x===r)); return; }
+      const a=e.target.closest("[data-a]"); if(e.target===w||a?.dataset.a==="0") return done(null);
+      if(a){ const v=w.querySelector("input[name=tp]:checked").value; try{ localStorage.setItem("tripPrint",v); localStorage.setItem("tripPrintRsv",rsv?"1":"0"); }catch(err){} done({ mode:v, rsv }); } };
     document.addEventListener("keydown",key,true); document.body.appendChild(w);
   });
 }
-function eventHTML(id, mode="normal"){
+function eventHTML(id, mode="normal", rsv=true){
   const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id));
-  const head=`<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>`;
+  const head=`<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}${rsv?"":" — من غير احتياطي"}</div>`;
+  // with standby: the ones marked «جاي» count; without: only the family itself
+  const cnt=r=>(+r.adults||0)+(+r.kids||0)+(rsv?reserveOf(r).filter(x=>x.coming===true).length:0);
+  const total=t.adults+t.kids+(rsv?t.rsvYes:0), wait=t.reserve-t.rsvYes-t.rsvNo;
+  const rsvLine=rsv&&t.reserve?` · احتياطي جاي ${num(t.rsvYes)}${wait?` · مستني ${num(wait)}`:""}`:"";
   if(mode==="nid") return `${head}
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td class="sig"></td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.people)}</td><td></td></tr></tfoot></table>${signsHTML()}</div>`;
-  if(mode==="fam"){ const box=t=>`<span class="cb">☐ ${t}</span>`;
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${rsv?"<th>احتياطي</th>":""}<th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num(cnt(r))}</td>${rsv?`<td>${esc(reserveOf(r).filter(x=>x.coming!==false).map(x=>x.who||"؟").join("، "))}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة${rsvLine}</td><td>${num(total)}</td>${rsv?"<td></td>":""}<td></td></tr></tfoot></table>${signsHTML()}</div>`;
+  if(mode==="fam"){ const box=x=>`<span class="cb">☐ ${x}</span>`;
     return `${head}
-    <table class="famprint"><thead><tr><th>م</th><th>الأم</th><th>الأطفال</th><th>احتياطي</th><th>العدد</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>{ const rs=reserveOf(r).filter(x=>x.coming!==false);
-      return `<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small></td>
+    <table class="famprint"><thead><tr><th>م</th><th>الأم</th><th>الأطفال</th>${rsv?"<th>احتياطي</th>":""}<th>العدد</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small></td>
         <td class="kids">${kidsComing(r).map(k=>box(`${esc(k.name||"طفل")} <small>${[k.stage||(k.a!=null?k.a:""),k.sex||""].filter(x=>x!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
-        <td class="kids">${rs.map(x=>box(`${esc(x.who||"؟")} <small>${[x.stage||(x.age??""),x.coming===true?"جاي":""].filter(v=>v!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
-        <td>${num((+r.adults||0)+(+r.kids||0)+reserveOf(r).filter(x=>x.coming===true).length)}</td></tr>`; }).join("")}
+        ${rsv?`<td class="kids">${reserveOf(r).filter(x=>x.coming!==false).map(x=>box(`${esc(x.who||"؟")} <small>${[x.stage||(x.age??""),x.coming===true?"جاي":""].filter(v=>v!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>`:""}
+        <td>${num(cnt(r))}</td></tr>`).join("")}
     </tbody></table>
-    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال${t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(t.people)}${t.reserve-t.rsvYes-t.rsvNo?` · احتياطي مستني ${num(t.reserve-t.rsvYes-t.rsvNo)}`:""}</p>${signsHTML()}</div>`; }
+    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال${rsv&&t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(total)}${rsv&&wait?` · احتياطي مستني ${num(wait)}`:""}</p>${signsHTML()}</div>`; }
   return `${head}
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>احتياطي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(t.people)}</td><td>${t.reserve?num(t.reserve):""}</td><td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
-    ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}</p>`:""}
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th>${rsv?"<th>احتياطي</th>":""}<th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num(cnt(r))}</td>${rsv?`<td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td>`:""}<td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(total)}</td>${rsv?`<td>${t.reserve?num(t.reserve):""}</td>`:""}<td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
+    ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}${rsvLine}</p>`:""}
     ${signsHTML()}</div>`;
 }
 /* The kids coming, one age at a time: each child by name, with the mother she or he belongs to. */
