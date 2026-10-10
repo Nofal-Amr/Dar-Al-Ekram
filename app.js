@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.44";
+export const VERSION = "1.3.45";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2457,31 +2457,36 @@ const agesComing = r => (r.kid_ages||[]).slice(0,+r.kids||0);
 const kidsComing = r => Array.from({length:+r.kids||0},(_,i)=>({ a:(r.kid_ages||[])[i]??null, sex:(r.kid_sexes||[])[i]||null, name:(r.kid_names||[])[i]||"", stage:(r.kid_stages||[])[i]||"" }));
 // standby people: one entry per «احتياطي» — who, age (or school year), and why they're standby
 const RSV_WHY = ["مش من الأسرة","فوق السن","تحت السن","لو فيه مكان","مرافق للأم"];
-const reserveOf = r => Array.from({length:+r.reserve||0},(_,i)=>{ const x=(r.reserve_list||[])[i]||{}; return { who:x.who??(i===0?r.reserve_who||"":""), age:x.age??null, stage:x.stage||"", why:x.why||"" }; });
-const reserveText = r => reserveOf(r).map(x=>[x.who||"؟",x.stage||(x.age!=null?`${x.age} سنة`:""),x.why?`(${x.why})`:""].filter(Boolean).join(" ")).join("، ");
+const reserveOf = r => Array.from({length:+r.reserve||0},(_,i)=>{ const x=(r.reserve_list||[])[i]||{}; return { who:x.who??(i===0?r.reserve_who||"":""), age:x.age??null, stage:x.stage||"", why:x.why||"", coming:x.coming??null }; });
+const reserveText = r => reserveOf(r).map(x=>[x.who||"؟",x.stage||(x.age!=null?`${x.age} سنة`:""),x.why?`(${x.why})`:"",x.coming===true?"— جاي ✓":x.coming===false?"— مش جاي":""].filter(Boolean).join(" ")).join("، ");
 const ageTxt = k => k.stage?`${k.stage}${k.a!=null?` (${k.a} سنة)`:""}`:k.a!=null?`سن ${k.a}`:"السن ؟";
 const kidsText = r => kidsComing(r).map(k=>`${k.name?k.name+" ":""}${k.stage||(k.a??"؟")}${k.sex?" "+k.sex:""}`).join("، ");
 function eventTotals(id){
   const rs=rsvps(id), yes=rs.filter(r=>r.answer==="جاية"), maybe=rs.filter(r=>r.answer==="مش متأكدة");
   const sum=(a,f)=>a.reduce((s,r)=>s+(+r[f]||0),0);
   return { n:rs.length, yes:yes.length, sure:yes.filter(r=>r.sure).length, no:rs.filter(r=>r.answer==="مش جاية").length, maybe:maybe.length, open:rs.filter(r=>!r.answer).length,
-    adults:sum(yes,"adults"), kids:sum(yes,"kids"), reserve:sum(yes,"reserve"), people:sum(yes,"adults")+sum(yes,"kids"), maybePeople:sum(maybe,"adults")+sum(maybe,"kids"),
+    adults:sum(yes,"adults"), kids:sum(yes,"kids"), reserve:sum(yes,"reserve"), ...(()=>{ const all=yes.flatMap(reserveOf); return { rsvYes:all.filter(x=>x.coming===true).length, rsvNo:all.filter(x=>x.coming===false).length }; })(),
+    people:sum(yes,"adults")+sum(yes,"kids")+yes.flatMap(reserveOf).filter(x=>x.coming===true).length, maybePeople:sum(maybe,"adults")+sum(maybe,"kids"),
     bands:(()=>{ const z=()=>({ n:0, ولد:0, بنت:0 }), m=new Map(AGE_BANDS.map(([lo])=>[kidBand(lo),z()])), none=z(), all=z();
       yes.forEach(r=>kidsComing(r).forEach(k=>{ const c=k.a==null?none:m.get(kidBand(k.a)); for(const x of [c,all]){ x.n++; if(k.sex) x[k.sex]++; } })); return { m, none, all }; })(),
     moms:yes.map(r=>r.mother_age).filter(a=>a!=null) };
 }
 const canRsvp = () => role==="manager"||role==="worker"||role==="helper";
 // Save one family's answer. Taps show at once; the stepper waits half a second so + + + is one save.
-const rsvpTimers=new Map(), rsvpPending=new Map(), rsvpInflight=new Map();
+const rsvpTimers=new Map(), rsvpPending=new Map(), rsvpInflight=new Map(), rsvpChain=new Map();
+// Saves for one family go out one after another (never two at once), so an older save can't land after a newer one.
 function setRsvp(id, patch, wait){
   const cur=EP.get(id); if(!cur) return; EP.set(id,{ ...cur, ...patch }); changed();
   rsvpPending.set(id,{ ...(rsvpPending.get(id)||{}), ...patch }); clearTimeout(rsvpTimers.get(id));
-  return new Promise(res=>rsvpTimers.set(id,setTimeout(async()=>{ const p=rsvpPending.get(id); rsvpPending.delete(id); rsvpInflight.set(id,p);
-    const { data, error } = await sb.from("event_people").update(p).eq("id",id).select().single();
-    rsvpInflight.delete(id);
-    if(error){ toast(errMsg(error)); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,fresh); }
-    else if(data) EP.set(id,{ ...data, ...(rsvpPending.get(id)||{}) });
-    changed(); res(); }, wait?500:0)));
+  return new Promise(res=>rsvpTimers.set(id,setTimeout(()=>{
+    const run=async()=>{ const p=rsvpPending.get(id); if(!p) return; rsvpPending.delete(id); rsvpInflight.set(id,p);
+      const { data, error } = await sb.from("event_people").update(p).eq("id",id).select().single();
+      rsvpInflight.delete(id);
+      if(error){ toast(errMsg(error)); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,{ ...fresh, ...(rsvpPending.get(id)||{}) }); }
+      else if(data) EP.set(id,{ ...data, ...(rsvpPending.get(id)||{}) });
+      changed(); };
+    const next=(rsvpChain.get(id)||Promise.resolve()).then(run,run); rsvpChain.set(id,next); next.then(res,res);
+  }, wait?500:0)));
 }
 // "ولاد 5 · بنات 4 — من 4 لـ 6: 3 (2 ولد، 1 بنت) · …"
 function bandsText(bd, html){
@@ -2579,7 +2584,7 @@ function openEvent(id){
     return `<div class="sub">${e.date?dLabel(e.date):"من غير يوم"}${e.place?" · "+esc(e.place):""}${e.notes?" · "+esc(e.notes):""}</div>
     <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong>${t.yes?`<small>أكيد ${num(t.sure)} من ${num(t.yes)}</small>`:""}</div><div><span>كبار</span><strong>${num(t.adults)}</strong></div><div><span>أطفال</span><strong>${num(t.kids)}</strong></div>
       <div class="${seats!=null&&seats<0?"neg":""}"><span>الإجمالي${e.capacity?` من ${num(e.capacity)} كرسي`:""}</span><strong>${num(t.people)}</strong>${seats!=null?`<small>${seats>=0?`فاضل ${num(seats)}`:`زيادة ${num(-seats)}`}</small>`:""}</div>
-      ${t.reserve?`<div class="rsv"><span>احتياطي</span><strong>${num(t.reserve)}</strong><small>${seats==null?`لو جم: ${num(t.people+t.reserve)}`:seats<=0?"مفيش كراسي ليهم":seats>=t.reserve?"الكراسي تكفيهم كلهم":`الكراسي تكفي ${num(seats)} بس`}</small></div>`:""}
+      ${t.reserve?(()=>{ const wait=t.reserve-t.rsvYes-t.rsvNo; return `<div class="rsv"><span>احتياطي</span><strong>${num(t.reserve)}</strong><small>جاي ${num(t.rsvYes)}${t.rsvNo?` · مش جاي ${num(t.rsvNo)}`:""}${wait?` · مستني ${num(wait)}`:""}</small>${wait?`<small>${seats==null?`لو جم: ${num(t.people+wait)}`:seats<=0?"مفيش كراسي للمستنيين":seats>=wait?"الكراسي تكفي المستنيين":`الكراسي تكفي ${num(seats)} من المستنيين`}</small>`:""}</div>`; })():""}
       <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأطفال:</b> ${bandsText(t.bands,true)}`:""}
       ${t.moms.length?`<br><b>الأمهات:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
@@ -2595,7 +2600,7 @@ function openEvent(id){
         <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
           ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>${r.sure&&r.sure_at&&evSort.get(id)==="sure"?`<span class="sub">${esc(new Date(r.sure_at).toLocaleString("ar-EG",{day:"numeric",month:"numeric",hour:"numeric",minute:"2-digit"}))}</span>`:""}`:""}
-          ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي"></span>`).join("")}</span>`:""}`:""}
+          ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي">${[["1","جاي ✓","boy"],["0","مش جاي","girl"]].map(([v,l,c])=>`<button class="sx ${String(x.coming===true?1:x.coming===false?0:"")===v?c:""}" data-rvc="${r.id}" data-i="${i}" data-v="${v}" aria-pressed="${String(x.coming===true?1:x.coming===false?0:"")===v}" ${edit?"":"disabled"}>${l}</button>`).join("")}</span>`).join("")}</span>`:""}`:""}
           ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
           ${showN&&+r.kids?`<span class="ages"><small>الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="text" class="kage" data-age="${r.id}" data-i="${i}" value="${esc(k.stage||(k.a??""))}" placeholder="السن / السنة" title="اكتب السن (مثلاً 9) أو السنة الدراسية (مثلاً 3 ثانوي)" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
 </div>
@@ -2617,6 +2622,8 @@ function openEvent(id){
       const next=r.answer===ans?{ answer:"", sure:false }:ans==="مش جاية"?{ answer:ans, adults:0, kids:0, reserve:0, sure:false }:ans!=="جاية"?{ answer:ans, sure:false, ...((+r.adults||0)+(+r.kids||0)?{}:guessCounts(b)) }:{ answer:ans, ...((+r.adults||0)+(+r.kids||0)?(r.mother_age==null&&momAge(b)!=null?{ mother_age:momAge(b) }:{}):guessCounts(b)) };
       setRsvp(r.id,next); undoable(`${b.name}: ${next.answer?`«${next.answer}»`:"اتشال الرد"}`, ()=>setRsvp(r.id,prev)); });
     s.querySelectorAll("[data-st]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.st), f=el.dataset.f; setRsvp(r.id,{ [f]:Math.max(0,Math.min(f==="reserve"?20:50,(+r[f]||0)+(+el.dataset.d))) }, true); });
+    s.querySelectorAll("[data-rvc]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.rvc), i=+el.dataset.i, list=reserveOf(r).map(x=>({ ...x })), v=el.dataset.v==="1";
+      list[i].coming=list[i].coming===v?null:v; setRsvp(r.id,{ reserve_list:list }); });
     s.querySelectorAll("[data-rv]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.rv), i=+el.dataset.i, list=reserveOf(r).map(x=>({ ...x }));
       if(el.dataset.k==="age"){ const p=parseKidAge(el.value); list[i].age=p.age; list[i].stage=p.stage||""; } else list[i][el.dataset.k]=el.value.trim();
       setRsvp(r.id,{ reserve_list:list, reserve_who:list.map(x=>x.who).filter(Boolean).join("، ") }); });
@@ -2656,7 +2663,7 @@ function openEvent(id){
     const ae=document.activeElement, keyOf=el=>["note","num","age","mom","kn","rv","k","f","i"].filter(k=>el.dataset[k]!=null).map(k=>`[data-${k}="${el.dataset[k]}"]`).join("");
     const key=ae&&body.contains(ae)&&ae.tagName==="INPUT"&&ae.type!=="search"?keyOf(ae):"", val=key?ae.value:null, pos=key&&ae.type==="text"?ae.selectionStart:null;
     body.innerHTML=draw(); mount($("#scrim"));
-    if(key){ const n=body.querySelector(key); if(n){ n.value=val; n.focus(); if(pos!=null) n.setSelectionRange(pos,pos); } } };
+    if(key){ const n=body.querySelector(key); if(n){ const was=n.value; n.value=val; n.focus(); if(val!==was) n.addEventListener("blur",()=>{ if(n.isConnected) n.dispatchEvent(new Event("change")); },{ once:true }); if(pos!=null) n.setSelectionRange(pos,pos); } } };
   sheet(EV.get(id).title, draw(), mount, redraw); mine=sheetSeq;
 }
 /* ---------- trip supervisors & groups ---------- */
@@ -2734,7 +2741,7 @@ function groupsHTML(id){
     ${signsHTML()}</div>`;
 }
 // Which paper: the usual table, one line per mother with her national ID and room for a stamp, or each mother with her kids under her.
-const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والاحتياطي والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","الأم وتحتها أطفالها بالاسم والسن، والاحتياطي — من غير ملاحظات"]];
+const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والاحتياطي والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","سطر لكل أم: هي وأطفالها والاحتياطي في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
 function pickTripPrint(){
   return new Promise(resolve=>{
     let last="normal"; try{ last=localStorage.getItem("tripPrint")||"normal"; }catch(e){}
@@ -2756,13 +2763,16 @@ function eventHTML(id, mode="normal"){
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.people)}</td><td></td></tr></tfoot></table>${signsHTML()}</div>`;
-  if(mode==="fam") return `${head}
-    <table class="famprint"><thead><tr><th>م</th><th>الاسم</th><th>السن / السنة</th><th>ولد / بنت</th><th>حضر</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>`<tr class="mom"><td>${i+1}</td><td class="nm"><b>${esc(b.name)}</b> <small>(${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}) — ${num(+r.adults||0)} كبار، ${num(+r.kids||0)} أطفال</small></td><td>${r.mother_age??""}</td><td>${+r.adults?"الأم":""}</td><td class="sig"></td></tr>
-      ${kidsComing(r).map(k=>`<tr class="kidr"><td></td><td class="nm">↳ ${esc(k.name||"طفل")}</td><td>${esc(k.stage||(k.a??""))}</td><td>${k.sex||""}</td><td class="sig"></td></tr>`).join("")}
-      ${reserveOf(r).map(x=>`<tr class="kidr"><td></td><td class="nm">↳ احتياطي: ${esc(x.who||"؟")}${x.why?` <small>(${esc(x.why)})</small>`:""}</td><td>${esc(x.stage||(x.age??""))}</td><td></td><td class="sig"></td></tr>`).join("")}`).join("")}
+  if(mode==="fam"){ const box=t=>`<span class="cb">☐ ${t}</span>`;
+    return `${head}
+    <table class="famprint"><thead><tr><th>م</th><th>الأم</th><th>الأطفال</th><th>احتياطي</th><th>العدد</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>{ const rs=reserveOf(r).filter(x=>x.coming!==false);
+      return `<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small></td>
+        <td class="kids">${kidsComing(r).map(k=>box(`${esc(k.name||"طفل")} <small>${[k.stage||(k.a!=null?k.a:""),k.sex||""].filter(x=>x!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
+        <td class="kids">${rs.map(x=>box(`${esc(x.who||"؟")} <small>${[x.stage||(x.age??""),x.coming===true?"جاي":""].filter(v=>v!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
+        <td>${num((+r.adults||0)+(+r.kids||0)+reserveOf(r).filter(x=>x.coming===true).length)}</td></tr>`; }).join("")}
     </tbody></table>
-    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال = ${num(t.people)}${t.reserve?` · احتياطي ${num(t.reserve)}`:""}</p>${signsHTML()}</div>`;
+    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال${t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(t.people)}${t.reserve-t.rsvYes-t.rsvNo?` · احتياطي مستني ${num(t.reserve-t.rsvYes-t.rsvNo)}`:""}</p>${signsHTML()}</div>`; }
   return `${head}
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>احتياطي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
@@ -2848,7 +2858,7 @@ function familySheet(list){
 
 /* ================= printing ================= */
 const PRINT_CSS=`
-.ps .famprint tr.mom td{background:#eee;border-top:2px solid #000}.ps .famprint tr.kidr td{font-size:11.5px}.ps .famprint small{font-weight:normal}
+.ps .famprint td.kids{font-size:11px;line-height:1.9}.ps .famprint .cb{white-space:nowrap;margin-inline-end:10px;display:inline-block}.ps .famprint small{font-weight:normal;font-size:10px;color:#333}
 .ps{font-family:"Baloo Bhaijaan 2",Tahoma,sans-serif;color:#000;direction:rtl;font-size:12.5px}
 .ps .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #962A25;padding-bottom:8px;margin-bottom:10px}
 .ps .orgw{display:flex;align-items:center;gap:10px}.ps .orgw img{width:62px;height:auto}
