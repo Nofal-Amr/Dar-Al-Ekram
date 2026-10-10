@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.43";
+export const VERSION = "1.3.44";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2637,7 +2637,7 @@ function openEvent(id){
       undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
     if(q("#e_edit")) q("#e_edit").onclick=()=>editEvent(id);
     if(q("#e_copy")) q("#e_copy").onclick=()=>copyEvent(id);
-    q("#e_print").onclick=()=>doPrint(eventHTML(id), EV.get(id).title);
+    q("#e_print").onclick=async()=>{ const m=await pickTripPrint(); if(m) doPrint(eventHTML(id, m), EV.get(id).title); };
     q("#e_ages").onclick=()=>agesSheet(id);
     if(q("#e_paper")) q("#e_paper").onclick=()=>paperToEvent(id);
     q("#e_phones").onclick=()=>{ const rs=rsvps(id).filter(r=>r.answer==="جاية").map(r=>B.get(r.beneficiary_id)).filter(Boolean); phoneSheet(`${EV.get(id).title} — اللي جايين`, rs.map(b=>({ bid:b.id, name:b.name, phone:b.phone, code:b.code })), false, ctx); };
@@ -2733,9 +2733,37 @@ function groupsHTML(id){
     ${left.length?`<h3>مش متوزعين (${num(left.length)})</h3><table><tbody>${left.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.kid.name||"")}</td><td>${esc(x.kid.stage?ageTxt(x.kid):x.kid.a??"")}</td><td>${x.kid.sex||""}</td><td class="nm">${esc(x.kid.mom)}</td><td>${esc(x.kid.code)}</td><td>${esc(x.why)}</td></tr>`).join("")}</tbody></table>`:""}
     ${signsHTML()}</div>`;
 }
-function eventHTML(id){
+// Which paper: the usual table, one line per mother with her national ID and room for a stamp, or each mother with her kids under her.
+const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والاحتياطي والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","الأم وتحتها أطفالها بالاسم والسن، والاحتياطي — من غير ملاحظات"]];
+function pickTripPrint(){
+  return new Promise(resolve=>{
+    let last="normal"; try{ last=localStorage.getItem("tripPrint")||"normal"; }catch(e){}
+    const w=document.createElement("div"); w.className="ask-scrim";
+    w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="tpT"><h2 id="tpT">طباعة اللي جايين</h2>
+      <div class="list">${TRIP_PRINTS.map(([k,l,d])=>`<label class="item"><input type="radio" name="tp" value="${k}" ${k===last?"checked":""} style="width:20px;height:20px"><span class="grow"><b>${l}</b><br><span class="sub">${d}</span></span></label>`).join("")}</div>
+      <div class="bar"><button class="btn pri" data-a="1">التالي</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+    const done=v=>{ w.remove(); document.removeEventListener("keydown",key,true); resolve(v); };
+    const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); done(null); } };
+    w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(e.target===w||a?.dataset.a==="0") return done(null);
+      if(a){ const v=w.querySelector("input[name=tp]:checked").value; try{ localStorage.setItem("tripPrint",v); }catch(err){} done(v); } };
+    document.addEventListener("keydown",key,true); document.body.appendChild(w);
+  });
+}
+function eventHTML(id, mode="normal"){
   const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id));
-  return `<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
+  const head=`<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>`;
+  if(mode==="nid") return `${head}
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th><th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.people)}</td><td></td></tr></tfoot></table>${signsHTML()}</div>`;
+  if(mode==="fam") return `${head}
+    <table class="famprint"><thead><tr><th>م</th><th>الاسم</th><th>السن / السنة</th><th>ولد / بنت</th><th>حضر</th></tr></thead><tbody>
+    ${rows.map(({r,b},i)=>`<tr class="mom"><td>${i+1}</td><td class="nm"><b>${esc(b.name)}</b> <small>(${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}) — ${num(+r.adults||0)} كبار، ${num(+r.kids||0)} أطفال</small></td><td>${r.mother_age??""}</td><td>${+r.adults?"الأم":""}</td><td class="sig"></td></tr>
+      ${kidsComing(r).map(k=>`<tr class="kidr"><td></td><td class="nm">↳ ${esc(k.name||"طفل")}</td><td>${esc(k.stage||(k.a??""))}</td><td>${k.sex||""}</td><td class="sig"></td></tr>`).join("")}
+      ${reserveOf(r).map(x=>`<tr class="kidr"><td></td><td class="nm">↳ احتياطي: ${esc(x.who||"؟")}${x.why?` <small>(${esc(x.why)})</small>`:""}</td><td>${esc(x.stage||(x.age??""))}</td><td></td><td class="sig"></td></tr>`).join("")}`).join("")}
+    </tbody></table>
+    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال = ${num(t.people)}${t.reserve?` · احتياطي ${num(t.reserve)}`:""}</p>${signsHTML()}</div>`;
+  return `${head}
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>احتياطي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(t.people)}</td><td>${t.reserve?num(t.reserve):""}</td><td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
@@ -2820,6 +2848,7 @@ function familySheet(list){
 
 /* ================= printing ================= */
 const PRINT_CSS=`
+.ps .famprint tr.mom td{background:#eee;border-top:2px solid #000}.ps .famprint tr.kidr td{font-size:11.5px}.ps .famprint small{font-weight:normal}
 .ps{font-family:"Baloo Bhaijaan 2",Tahoma,sans-serif;color:#000;direction:rtl;font-size:12.5px}
 .ps .hd{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #962A25;padding-bottom:8px;margin-bottom:10px}
 .ps .orgw{display:flex;align-items:center;gap:10px}.ps .orgw img{width:62px;height:auto}
