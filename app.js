@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.42";
+export const VERSION = "1.3.43";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -62,7 +62,15 @@ const who = id => id ? (P.get(id)?.full_name || P.get(id)?.username || "مستخ
 
 function toast(msg, action){ document.querySelectorAll(".toast").forEach(t => t.remove()); const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); t.textContent = msg;
   if(action){ const b = document.createElement("button"); b.className = "undo"; b.textContent = action.label; b.onclick = () => { t.remove(); action.fn(); }; t.appendChild(b); }
-  document.body.appendChild(t); setTimeout(() => t.remove(), action ? 7000 : 3200); }
+  const x = document.createElement("button"); x.className = "tx"; x.setAttribute("aria-label","اقفل"); x.textContent = "×"; x.onclick = () => t.remove(); t.appendChild(x);
+  // swipe it sideways (or down) to get it out of the way
+  let sx = null, sy = 0, dx = 0, dy = 0;
+  t.addEventListener("touchstart", e => { if(e.target.closest("button")) return; sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = dy = 0; t.style.transition = "none"; }, { passive:true });
+  t.addEventListener("touchmove", e => { if(sx == null) return; dx = e.touches[0].clientX - sx; dy = Math.max(0, e.touches[0].clientY - sy); t.style.transform = `translate(calc(-50% + ${dx}px), ${dy}px)`; t.style.opacity = String(Math.max(.2, 1 - (Math.abs(dx) + dy) / 200)); }, { passive:true });
+  t.addEventListener("touchend", () => { if(sx == null) return; sx = null; t.style.transition = "transform .15s, opacity .15s";
+    if(Math.abs(dx) > 60 || dy > 40){ t.style.transform = `translate(calc(-50% + ${dx > 0 ? 400 : dx < 0 ? -400 : 0}px), ${dy > 40 ? 200 : 0}px)`; t.style.opacity = "0"; setTimeout(() => t.remove(), 150); }
+    else { t.style.transform = ""; t.style.opacity = ""; } });
+  document.body.appendChild(t); setTimeout(() => t.remove(), action ? 5000 : 3200); }
 /* ---------- undo ----------
    Changes inside lists (remove, add, received, archive) can be taken back: «تراجع» on the message, or Ctrl+Z outside text boxes.
    Each entry undoes itself against the current data, so it still works after other changes. */
@@ -2535,7 +2543,7 @@ function copyEvent(id){
     q("#ec_go").onclick=async()=>{ const title=q("#ec_t").value.trim(); if(!title){ toast("اكتب اسم الكشف"); return; }
       const rule=s.querySelector("input[name=ec_r]:checked").value, keep=q("#ec_keep").checked, rows=rsvps(id).filter(RULES[rule][1]); const go=q("#ec_go"); go.disabled=true;
       try{ const ne=await ins("events",{ title, date:e.date, place:e.place||"", capacity:e.capacity, notes:e.notes||"", supervisors:q("#ec_sup").checked?(e.supervisors||[]):[] });
-        const pick=r=>({ event_id:ne.id, beneficiary_id:r.beneficiary_id, ...(keep?{ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null, note:r.note||"", sure:!!r.sure, reserve:+r.reserve||0, reserve_who:r.reserve_who||"", reserve_list:r.reserve_list||[] }:{}) });
+        const pick=r=>({ event_id:ne.id, beneficiary_id:r.beneficiary_id, ...(keep?{ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null, note:r.note||"", sure:!!r.sure, sure_at:r.sure?r.sure_at||null:null, reserve:+r.reserve||0, reserve_who:r.reserve_who||"", reserve_list:r.reserve_list||[] }:{}) });
         for(let i=0;i<rows.length;i+=300){ const { data, error } = await sb.from("event_people").insert(rows.slice(i,i+300).map(pick)).select(); if(error) throw error; data.forEach(r=>EP.set(r.id,r)); }
         await logIt("event",ne.id,`نسخة من «${e.title}» (${RULES[rule][0]}: ${rows.length} أسرة)`); changed(); openEvent(ne.id); toast(`اتعمل ✓ ${num(rows.length)} أسرة`); }
       catch(err){ go.disabled=false; toast(errMsg(err)); } };
@@ -2564,7 +2572,7 @@ function openEvent(id){
   const draw=()=>{
     const e=EV.get(id); if(!e) return ""; const t=eventTotals(id), edit=canRsvp(), cw=canWrite();
     const qq=norm(q_);
-    const rows=rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
+    const rows=rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id))
       .filter(({r,b})=>(findsCase(b,qq))
         &&(only==="all"||(only==="open"?!r.answer:only==="noans"?!r.answer&&lastCall(b.id,ctx)?.result==="مردش":only==="sure"?r.answer==="جاية"&&r.sure:only==="unsure"?r.answer==="جاية"&&!r.sure:r.answer===only)));
     const seats=e.capacity?e.capacity-t.people:null;
@@ -2580,12 +2588,13 @@ function openEvent(id){
     ${etab==="sup"?supPanel(id,supEdit):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
     <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
+    <label class="sortl">مترتبة حسب <select id="e_sort"><option value="code">رقم الحالة</option><option value="sure" ${evSort.get(id)==="sure"?"selected":""}>ترتيب التأكيد (أكيد الأول)</option></select></label>
     <datalist id="rsv_why">${RSV_WHY.map(w=>`<option value="${w}">`).join("")}</datalist>
     <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
       return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}${r.answer==="جاية"&&r.sure?" a-sure":""}">
         <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
-          ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>`:""}
+          ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>${r.sure&&r.sure_at&&evSort.get(id)==="sure"?`<span class="sub">${esc(new Date(r.sure_at).toLocaleString("ar-EG",{day:"numeric",month:"numeric",hour:"numeric",minute:"2-digit"}))}</span>`:""}`:""}
           ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي"></span>`).join("")}</span>`:""}`:""}
           ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
           ${showN&&+r.kids?`<span class="ages"><small>الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="text" class="kage" data-age="${r.id}" data-i="${i}" value="${esc(k.stage||(k.a??""))}" placeholder="السن / السنة" title="اكتب السن (مثلاً 9) أو السنة الدراسية (مثلاً 3 ثانوي)" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
@@ -2598,6 +2607,7 @@ function openEvent(id){
   const mount=s=>{
     const q=x=>s.querySelector(x);
     bindCalls(s, ()=>refreshSheet());
+    const es=q("#e_sort"); if(es) es.onchange=()=>{ evSort.set(id, es.value); refreshSheet(); };
     s.querySelectorAll("[data-evf]").forEach(el=>el.onclick=()=>{ only=el.dataset.evf; refreshSheet(); });
     s.querySelectorAll("[data-etab]").forEach(el=>el.onclick=()=>{ etab=el.dataset.etab; supEdit=null; refreshSheet(); });
     bindSup(s, id, v=>{ supEdit=v; refreshSheet(); });
@@ -2620,7 +2630,7 @@ function openEvent(id){
     s.querySelectorAll("[data-age]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.age), n=+r.kids||0, i=+el.dataset.i, p=parseKidAge(el.value);
       const ag=Array.from({length:n},(_,j)=>(r.kid_ages||[])[j]??null), st=Array.from({length:n},(_,j)=>(r.kid_stages||[])[j]||null);
       ag[i]=p.age; st[i]=p.stage; setRsvp(r.id,{ kid_ages:ag, kid_stages:st }); });
-    s.querySelectorAll("[data-sure]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sure), b=B.get(r.beneficiary_id); setRsvp(r.id,{ sure:!r.sure });
+    s.querySelectorAll("[data-sure]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sure), b=B.get(r.beneficiary_id); setRsvp(r.id,{ sure:!r.sure, sure_at:r.sure?null:new Date().toISOString() });
       undoable(`${b.name}: ${r.sure?"اتشال «أكيد»":"جاية أكيد ✓✓"}`, ()=>setRsvp(r.id,{ sure:!!r.sure })); });
     s.querySelectorAll("[data-evrm]").forEach(el=>el.onclick=async()=>{ const r=EP.get(el.dataset.evrm), b=B.get(r.beneficiary_id);
       const { error } = await sb.from("event_people").delete().eq("id",r.id); if(error){ toast(errMsg(error)); return; } EP.delete(r.id); changed();
@@ -2650,7 +2660,10 @@ function openEvent(id){
   sheet(EV.get(id).title, draw(), mount, redraw); mine=sheetSeq;
 }
 /* ---------- trip supervisors & groups ---------- */
-const supOpen = new Set();   // groups / the add form left open survive redraws
+const supOpen = new Set();
+const evSort = new Map();   // trip id → "sure": confirmed families first, in the order they were confirmed
+const byCode2 = (a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true});
+const evOrder = id => evSort.get(id)==="sure" ? (a,b)=>(+!(a.r.sure&&a.r.answer==="جاية")-+!(b.r.sure&&b.r.answer==="جاية"))||String(a.r.sure_at||"").localeCompare(String(b.r.sure_at||""))||byCode2(a,b) : byCode2;   // groups / the add form left open survive redraws
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 const supRule = s => { const has=v=>v!==""&&v!=null, mn=esc(s.min), mx=esc(s.max);   // min/max come from the DB: escape before they reach innerHTML
   return `${s.sex==="ست"?"بتاخد":"بياخد"} ${s.takes==="الكل"?"ولاد وبنات":esc(s.takes)}${has(s.min)&&has(s.max)?` من ${mn} لـ ${mx} سنة`:has(s.min)?` من ${mn} سنة وأكبر`:has(s.max)?` لحد ${mx} سنة`:" كل الأعمار"}`; };
@@ -2721,7 +2734,7 @@ function groupsHTML(id){
     ${signsHTML()}</div>`;
 }
 function eventHTML(id){
-  const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}));
+  const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id));
   return `<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>احتياطي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
