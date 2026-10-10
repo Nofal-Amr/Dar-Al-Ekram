@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.32";
+export const VERSION = "1.3.33";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -11,7 +11,7 @@ const ORG = "جمعية دار الإكرام للخدمات الاجتماعي�
 const ORG2 = "المشهرة برقم 1401 لسنة 2009";
 // Demo mode: fake data, no network. Only ever on this computer (localhost) with ?demo in the address.
 const DEMO = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has("demo");
-const CASE_TYPES = ["أيتام","مساعدات","مرضي","أيتام ومرضي","كفالات","غير محدد"];
+const CASE_TYPES = ["أيتام","مساعدات","مرضي","أيتام ومرضي","كفالات","موسمي","غير محدد"];
 const STATUSES = ["نشط","انتظار","موقوف","ملغي"];
 const MARITAL = ["أرملة","مطلقة","متزوجة","مهجورة","آنسة","أرمل","متزوج","مطلق"];
 const ROLE_AR = {manager:"مدير", worker:"موظف", helper:"عامل", viewer:"مشاهدة فقط", pending:"مستني تفعيل"};
@@ -2391,6 +2391,31 @@ function newEvent(){
       catch(err){ go.disabled=false; toast(errMsg(err)); } };
   });
 }
+/* A new trip list from an old one — e.g. the final list with only the families who said «جاية».
+   Their answers, numbers, kids' names / ages and the supervisors come along; add or remove people after as usual. */
+function copyEvent(id){
+  const e=EV.get(id);
+  const RULES={ yes:["جاية بس",r=>r.answer==="جاية"], yesmaybe:["جاية + مش متأكدة",r=>r.answer==="جاية"||r.answer==="مش متأكدة"], notno:["الكل ما عدا مش جاية",r=>r.answer!=="مش جاية"], all:["الكل",()=>true] };
+  const cnt=k=>rsvps(id).filter(RULES[k][1]).length;
+  sheet("نسخة جديدة من الرحلة",`
+    <label class="f">اسم الكشف الجديد<input type="text" id="ec_t" value="${esc(e.title)} — الكشف النهائي"></label>
+    <h4>مين ينزل في الكشف الجديد</h4>
+    <div class="list">${Object.entries(RULES).map(([k,[l]],i)=>`<label class="item"><input type="radio" name="ec_r" value="${k}" ${i?"":"checked"} style="width:20px;height:20px"><span class="grow">${l}</span><b>${num(cnt(k))} أسرة</b></label>`).join("")}</div>
+    <label class="chk"><input type="checkbox" id="ec_keep" checked> انقل الردود والأعداد وأسماء وأعمار الأطفال</label>
+    <label class="chk"><input type="checkbox" id="ec_sup" ${(e.supervisors||[]).length?"checked":""}> انقل المشرفين (${num((e.supervisors||[]).length)})</label>
+    <div class="note">${ic("info")} <span>الكشف القديم بيفضل زي ما هو. وفي الجديد تقدر تضيف أو تشيل أسر عادي.</span></div>
+    <div class="bar"><button class="btn pri" id="ec_go">${ic("save")}اعمل النسخة</button><button class="btn" id="ec_back">رجوع</button></div>`, s=>{
+    const q=x=>s.querySelector(x);
+    q("#ec_back").onclick=()=>openEvent(id);
+    q("#ec_go").onclick=async()=>{ const title=q("#ec_t").value.trim(); if(!title){ toast("اكتب اسم الكشف"); return; }
+      const rule=s.querySelector("input[name=ec_r]:checked").value, keep=q("#ec_keep").checked, rows=rsvps(id).filter(RULES[rule][1]); const go=q("#ec_go"); go.disabled=true;
+      try{ const ne=await ins("events",{ title, date:e.date, place:e.place||"", capacity:e.capacity, notes:e.notes||"", supervisors:q("#ec_sup").checked?(e.supervisors||[]):[] });
+        const pick=r=>({ event_id:ne.id, beneficiary_id:r.beneficiary_id, ...(keep?{ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null, note:r.note||"" }:{}) });
+        for(let i=0;i<rows.length;i+=300){ const { data, error } = await sb.from("event_people").insert(rows.slice(i,i+300).map(pick)).select(); if(error) throw error; data.forEach(r=>EP.set(r.id,r)); }
+        await logIt("event",ne.id,`نسخة من «${e.title}» (${RULES[rule][0]}: ${rows.length} أسرة)`); changed(); openEvent(ne.id); toast(`اتعمل ✓ ${num(rows.length)} أسرة`); }
+      catch(err){ go.disabled=false; toast(errMsg(err)); } };
+  });
+}
 function editEvent(id){
   const e=EV.get(id);
   sheet("تعديل الرحلة",`<div class="grid2"><label class="f">الاسم<input type="text" id="ee_t" value="${esc(e.title)}"></label><label class="f">اليوم<input type="date" id="ee_d" value="${esc(e.date||"")}"></label>
@@ -2424,7 +2449,7 @@ function openEvent(id){
       <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأطفال:</b> ${bandsText(t.bands,true)}`:""}
       ${t.moms.length?`<br><b>الأمهات:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
-    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
+    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button><button class="btn sm" id="e_copy">${ic("list")}نسخة جديدة</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
     <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button></div>
     ${etab==="sup"?supPanel(id,supEdit):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
@@ -2467,6 +2492,7 @@ function openEvent(id){
       const { error } = await sb.from("event_people").delete().eq("id",r.id); if(error){ toast(errMsg(error)); return; } EP.delete(r.id); changed();
       undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
     if(q("#e_edit")) q("#e_edit").onclick=()=>editEvent(id);
+    if(q("#e_copy")) q("#e_copy").onclick=()=>copyEvent(id);
     q("#e_print").onclick=()=>doPrint(eventHTML(id), EV.get(id).title);
     q("#e_phones").onclick=()=>{ const rs=rsvps(id).filter(r=>r.answer==="جاية").map(r=>B.get(r.beneficiary_id)).filter(Boolean); phoneSheet(`${EV.get(id).title} — اللي جايين`, rs.map(b=>({ bid:b.id, name:b.name, phone:b.phone, code:b.code })), false, ctx); };
     q("#e_x").onclick=()=>eventXlsx(id);
