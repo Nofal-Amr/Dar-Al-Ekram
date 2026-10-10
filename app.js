@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.39";
+export const VERSION = "1.3.40";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2452,7 +2452,7 @@ const kidsText = r => kidsComing(r).map(k=>`${k.name?k.name+" ":""}${k.stage||(k
 function eventTotals(id){
   const rs=rsvps(id), yes=rs.filter(r=>r.answer==="جاية"), maybe=rs.filter(r=>r.answer==="مش متأكدة");
   const sum=(a,f)=>a.reduce((s,r)=>s+(+r[f]||0),0);
-  return { n:rs.length, yes:yes.length, no:rs.filter(r=>r.answer==="مش جاية").length, maybe:maybe.length, open:rs.filter(r=>!r.answer).length,
+  return { n:rs.length, yes:yes.length, sure:yes.filter(r=>r.sure).length, no:rs.filter(r=>r.answer==="مش جاية").length, maybe:maybe.length, open:rs.filter(r=>!r.answer).length,
     adults:sum(yes,"adults"), kids:sum(yes,"kids"), people:sum(yes,"adults")+sum(yes,"kids"), maybePeople:sum(maybe,"adults")+sum(maybe,"kids"),
     bands:(()=>{ const z=()=>({ n:0, ولد:0, بنت:0 }), m=new Map(AGE_BANDS.map(([lo])=>[kidBand(lo),z()])), none=z(), all=z();
       yes.forEach(r=>kidsComing(r).forEach(k=>{ const c=k.a==null?none:m.get(kidBand(k.a)); for(const x of [c,all]){ x.n++; if(k.sex) x[k.sex]++; } })); return { m, none, all }; })(),
@@ -2516,12 +2516,12 @@ function newEvent(){
    Their answers, numbers, kids' names / ages and the supervisors come along; add or remove people after as usual. */
 function copyEvent(id){
   const e=EV.get(id);
-  const RULES={ yes:["جاية بس",r=>r.answer==="جاية"], yesmaybe:["جاية + مش متأكدة",r=>r.answer==="جاية"||r.answer==="مش متأكدة"], notno:["الكل ما عدا مش جاية",r=>r.answer!=="مش جاية"], all:["الكل",()=>true] };
+  const RULES={ sure:["جاية أكيد بس",r=>r.answer==="جاية"&&r.sure], yes:["جاية بس",r=>r.answer==="جاية"], yesmaybe:["جاية + مش متأكدة",r=>r.answer==="جاية"||r.answer==="مش متأكدة"], notno:["الكل ما عدا مش جاية",r=>r.answer!=="مش جاية"], all:["الكل",()=>true] };
   const cnt=k=>rsvps(id).filter(RULES[k][1]).length;
   sheet("نسخة جديدة من الرحلة",`
     <label class="f">اسم الكشف الجديد<input type="text" id="ec_t" value="${esc(e.title)} — الكشف النهائي"></label>
     <h4>مين ينزل في الكشف الجديد</h4>
-    <div class="list">${Object.entries(RULES).map(([k,[l]],i)=>`<label class="item"><input type="radio" name="ec_r" value="${k}" ${i?"":"checked"} style="width:20px;height:20px"><span class="grow">${l}</span><b>${num(cnt(k))} أسرة</b></label>`).join("")}</div>
+    <div class="list">${Object.entries(RULES).map(([k,[l]],i)=>`<label class="item"><input type="radio" name="ec_r" value="${k}" ${k===(cnt("sure")?"sure":"yes")?"checked":""} style="width:20px;height:20px"><span class="grow">${l}</span><b>${num(cnt(k))} أسرة</b></label>`).join("")}</div>
     <label class="chk"><input type="checkbox" id="ec_keep" checked> انقل الردود والأعداد وأسماء وأعمار الأطفال</label>
     <label class="chk"><input type="checkbox" id="ec_sup" ${(e.supervisors||[]).length?"checked":""}> انقل المشرفين (${num((e.supervisors||[]).length)})</label>
     <div class="note">${ic("info")} <span>الكشف القديم بيفضل زي ما هو. وفي الجديد تقدر تضيف أو تشيل أسر عادي.</span></div>
@@ -2531,7 +2531,7 @@ function copyEvent(id){
     q("#ec_go").onclick=async()=>{ const title=q("#ec_t").value.trim(); if(!title){ toast("اكتب اسم الكشف"); return; }
       const rule=s.querySelector("input[name=ec_r]:checked").value, keep=q("#ec_keep").checked, rows=rsvps(id).filter(RULES[rule][1]); const go=q("#ec_go"); go.disabled=true;
       try{ const ne=await ins("events",{ title, date:e.date, place:e.place||"", capacity:e.capacity, notes:e.notes||"", supervisors:q("#ec_sup").checked?(e.supervisors||[]):[] });
-        const pick=r=>({ event_id:ne.id, beneficiary_id:r.beneficiary_id, ...(keep?{ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null, note:r.note||"" }:{}) });
+        const pick=r=>({ event_id:ne.id, beneficiary_id:r.beneficiary_id, ...(keep?{ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null, note:r.note||"", sure:!!r.sure }:{}) });
         for(let i=0;i<rows.length;i+=300){ const { data, error } = await sb.from("event_people").insert(rows.slice(i,i+300).map(pick)).select(); if(error) throw error; data.forEach(r=>EP.set(r.id,r)); }
         await logIt("event",ne.id,`نسخة من «${e.title}» (${RULES[rule][0]}: ${rows.length} أسرة)`); changed(); openEvent(ne.id); toast(`اتعمل ✓ ${num(rows.length)} أسرة`); }
       catch(err){ go.disabled=false; toast(errMsg(err)); } };
@@ -2555,17 +2555,17 @@ function editEvent(id){
 function openEvent(id){
   let q_="", only="all", addQ="", etab="fam", supEdit=null;
   const ctx="ev:"+id;
-  const FIL={ all:"الكل", open:"لسه ماردّتش", noans:"ماردتش على التليفون", "جاية":"جاية", "مش متأكدة":"مش متأكدة", "مش جاية":"مش جاية" };
+  const FIL={ all:"الكل", open:"لسه ماردّتش", noans:"ماردتش على التليفون", "جاية":"جاية", sure:"جاية أكيد ✓✓", unsure:"جاية ولسه مأكدتش", "مش متأكدة":"مش متأكدة", "مش جاية":"مش جاية" };
   const stp=(r,f,lbl,on)=>`<span class="stp"><small>${lbl}</small>${on?`<button data-st="${r.id}" data-f="${f}" data-d="-1" aria-label="${lbl} ناقص">−</button>`:""}<input type="number" min="0" max="50" inputmode="numeric" data-num="${r.id}" data-f="${f}" value="${+r[f]||0}" ${on?"":"disabled"} aria-label="${lbl}">${on?`<button data-st="${r.id}" data-f="${f}" data-d="1" aria-label="${lbl} زيادة">+</button>`:""}</span>`;
   const draw=()=>{
     const e=EV.get(id); if(!e) return ""; const t=eventTotals(id), edit=canRsvp(), cw=canWrite();
     const qq=norm(q_);
     const rows=rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
       .filter(({r,b})=>(findsCase(b,qq))
-        &&(only==="all"||(only==="open"?!r.answer:only==="noans"?!r.answer&&lastCall(b.id,ctx)?.result==="مردش":r.answer===only)));
+        &&(only==="all"||(only==="open"?!r.answer:only==="noans"?!r.answer&&lastCall(b.id,ctx)?.result==="مردش":only==="sure"?r.answer==="جاية"&&r.sure:only==="unsure"?r.answer==="جاية"&&!r.sure:r.answer===only)));
     const seats=e.capacity?e.capacity-t.people:null;
     return `<div class="sub">${e.date?dLabel(e.date):"من غير يوم"}${e.place?" · "+esc(e.place):""}${e.notes?" · "+esc(e.notes):""}</div>
-    <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong></div><div><span>كبار</span><strong>${num(t.adults)}</strong></div><div><span>أطفال</span><strong>${num(t.kids)}</strong></div>
+    <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong>${t.yes?`<small>أكيد ${num(t.sure)} من ${num(t.yes)}</small>`:""}</div><div><span>كبار</span><strong>${num(t.adults)}</strong></div><div><span>أطفال</span><strong>${num(t.kids)}</strong></div>
       <div class="${seats!=null&&seats<0?"neg":""}"><span>الإجمالي${e.capacity?` من ${num(e.capacity)} كرسي`:""}</span><strong>${num(t.people)}</strong>${seats!=null?`<small>${seats>=0?`فاضل ${num(seats)}`:`زيادة ${num(-seats)}`}</small>`:""}</div>
       <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأطفال:</b> ${bandsText(t.bands,true)}`:""}
@@ -2576,13 +2576,14 @@ function openEvent(id){
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
     <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
     <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
-      return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}">
-        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}</div>
+      return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}${r.answer==="جاية"&&r.sure?" a-sure":""}">
+        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
+          ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>`:""}
           ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>`:""}
           ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
           ${showN&&+r.kids?`<span class="ages"><small>الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="text" class="kage" data-age="${r.id}" data-i="${i}" value="${esc(k.stage||(k.a??""))}" placeholder="السن / السنة" title="اكتب السن (مثلاً 9) أو السنة الدراسية (مثلاً 3 ثانوي)" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
-          ${cw?`<button class="btn sm danger" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الرحلة" title="شيل من الرحلة">×</button>`:""}</div>
+</div>
         ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
         ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
       </div>`; }).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>
@@ -2596,7 +2597,8 @@ function openEvent(id){
     bindSup(s, id, v=>{ supEdit=v; refreshSheet(); });
     const eq=q("#e_q"); if(eq) eq.oninput=()=>{ q_=eq.value; const pos=eq.selectionStart; refreshSheet(); const n=$("#e_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
     s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null };
-      const next=r.answer===ans?{ answer:"" }:ans==="مش جاية"?{ answer:ans, adults:0, kids:0 }:{ answer:ans, ...((+r.adults||0)+(+r.kids||0)?(r.mother_age==null&&momAge(b)!=null?{ mother_age:momAge(b) }:{}):guessCounts(b)) };
+      prev.sure=!!r.sure;
+      const next=r.answer===ans?{ answer:"", sure:false }:ans==="مش جاية"?{ answer:ans, adults:0, kids:0, sure:false }:ans!=="جاية"?{ answer:ans, sure:false, ...((+r.adults||0)+(+r.kids||0)?{}:guessCounts(b)) }:{ answer:ans, ...((+r.adults||0)+(+r.kids||0)?(r.mother_age==null&&momAge(b)!=null?{ mother_age:momAge(b) }:{}):guessCounts(b)) };
       setRsvp(r.id,next); undoable(`${b.name}: ${next.answer?`«${next.answer}»`:"اتشال الرد"}`, ()=>setRsvp(r.id,prev)); });
     s.querySelectorAll("[data-st]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.st), f=el.dataset.f; setRsvp(r.id,{ [f]:Math.max(0,Math.min(50,(+r[f]||0)+(+el.dataset.d))) }, true); });
     s.querySelectorAll("[data-num]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.num,{ [el.dataset.f]:Math.max(0,Math.min(50,Math.round(+el.value||0))) }));
@@ -2609,6 +2611,8 @@ function openEvent(id){
     s.querySelectorAll("[data-age]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.age), n=+r.kids||0, i=+el.dataset.i, p=parseKidAge(el.value);
       const ag=Array.from({length:n},(_,j)=>(r.kid_ages||[])[j]??null), st=Array.from({length:n},(_,j)=>(r.kid_stages||[])[j]||null);
       ag[i]=p.age; st[i]=p.stage; setRsvp(r.id,{ kid_ages:ag, kid_stages:st }); });
+    s.querySelectorAll("[data-sure]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sure), b=B.get(r.beneficiary_id); setRsvp(r.id,{ sure:!r.sure });
+      undoable(`${b.name}: ${r.sure?"اتشال «أكيد»":"جاية أكيد ✓✓"}`, ()=>setRsvp(r.id,{ sure:!!r.sure })); });
     s.querySelectorAll("[data-evrm]").forEach(el=>el.onclick=async()=>{ const r=EP.get(el.dataset.evrm), b=B.get(r.beneficiary_id);
       const { error } = await sb.from("event_people").delete().eq("id",r.id); if(error){ toast(errMsg(error)); return; } EP.delete(r.id); changed();
       undoable(`${b?.name||"الأسرة"} اتشالت من الرحلة`, async()=>{ const { id:_, updated_at, updated_by, ...row } = r; const { data, error:e2 } = await sb.from("event_people").insert({ ...row, id:r.id }).select().single(); if(e2){ toast(errMsg(e2)); return false; } EP.set(data.id,data); changed(); }); });
@@ -2711,7 +2715,7 @@ function eventHTML(id){
   const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}));
   return `<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th><th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
-    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
+    ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td><td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num((+r.adults||0)+(+r.kids||0))}</td><td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(t.people)}</td><td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
     ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}</p>`:""}
     ${signsHTML()}</div>`;
@@ -2766,7 +2770,7 @@ function agesHTML(id, o){
 function eventXlsx(id){
   const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","كبار","سن الأم","أطفال","الأطفال (السن والنوع)","ولاد","بنات","الإجمالي","ملاحظة","آخر مكالمة","أطفال متسجلين","عدد الأفراد"]];
   rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
-    .forEach(({r,b})=>{ const c=lastCall(b.id,"ev:"+id); rows.push([b.code,b.name,cleanPhone(b.phone),waNum(b),r.answer||"لسه",+r.adults||0,r.mother_age??"",+r.kids||0,kidsText(r),kidsComing(r).filter(k=>k.sex==="ولد").length,kidsComing(r).filter(k=>k.sex==="بنت").length,(+r.adults||0)+(+r.kids||0),r.note||"",c?CALL_RES[c.result].label:"",kidsOf(b),famSize(b)||""]); });
+    .forEach(({r,b})=>{ const c=lastCall(b.id,"ev:"+id); rows.push([b.code,b.name,cleanPhone(b.phone),waNum(b),r.answer==="جاية"&&r.sure?"جاية أكيد":r.answer||"لسه",+r.adults||0,r.mother_age??"",+r.kids||0,kidsText(r),kidsComing(r).filter(k=>k.sex==="ولد").length,kidsComing(r).filter(k=>k.sex==="بنت").length,(+r.adults||0)+(+r.kids||0),r.note||"",c?CALL_RES[c.result].label:"",kidsOf(b),famSize(b)||""]); });
   xlsx({"الرحلة":rows, "بيانات الأسر":familySheet(rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b))},`${e.title}.xlsx`);
 }
 /* The families' own data for a trip, one row per family: the mother and her age (from her birth date, or from the national ID),
