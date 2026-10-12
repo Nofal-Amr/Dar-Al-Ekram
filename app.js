@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.48";
+export const VERSION = "1.3.49";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2498,7 +2498,7 @@ function vEvents(){
   const list=events();
   return `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">رحلات وأنشطة</h2>${canWrite()?`<button class="btn pri" id="newEv">${ic("plus")}رحلة / نشاط جديد</button>`:""}</div>
   <div class="list">${list.map(e=>{ const t=eventTotals(e.id); return `<button class="item" data-event="${e.id}"><span class="grow"><span class="nm">${esc(e.title)}</span><br>
-    <span class="sub">${e.date?dLabel(e.date)+" · ":""}${e.place?esc(e.place)+" · ":""}جاية ${num(t.yes)} أسرة · ${num(t.people)} فرد (${num(t.adults)} كبار، ${num(t.kids)} أطفال) · اتردّ ${num(t.n-t.open)} من ${num(t.n)}</span></span>
+    <span class="sub">${e.date?dLabel(e.date)+" · ":""}${e.place?esc(e.place)+" · ":""}جاية ${num(t.yes)} أسرة · ${num(t.people)} فرد (${num(t.adults)} مسؤول، ${num(t.kids)} من الأبناء) · اتردّ ${num(t.n-t.open)} من ${num(t.n)}</span></span>
     ${e.capacity?`<span class="chip ${t.people>e.capacity?"red":""}">${num(t.people)}/${num(e.capacity)} كرسي</span>`:""}</button>`; }).join("")||`<div class="empty">مفيش رحلات لسه${canWrite()?" — اضغط «رحلة / نشاط جديد»":""}</div>`}</div>`;
 }
 function newEvent(){
@@ -2514,7 +2514,7 @@ function newEvent(){
     <h4>مين يتعزم</h4>
     <div class="seg" id="ev_types">${CASE_TYPES.map(t=>`<button class="on" data-ty="${esc(t)}">${esc(t)}</button>`).join("")}</div>
     <label class="chk"><input type="checkbox" id="ev_act" checked> الحالات النشطة بس</label>
-    <label class="chk"><input type="checkbox" id="ev_kids"> اللي عندها أطفال بس</label>
+    <label class="chk"><input type="checkbox" id="ev_kids"> اللي عندها أبناء بس</label>
     <div class="note" id="ev_n"></div>
     <label class="f">ملاحظات<input type="text" id="ev_notes" placeholder="مثال: التجمع 7 الصبح قدام الجمعية"></label>
     <div class="bar"><button class="btn pri" id="ev_go">${ic("save")}اعمل الكشف</button></div>`, s=>{
@@ -2539,7 +2539,7 @@ function copyEvent(id){
     <label class="f">اسم الكشف الجديد<input type="text" id="ec_t" value="${esc(e.title)} — الكشف النهائي"></label>
     <h4>مين ينزل في الكشف الجديد</h4>
     <div class="list">${Object.entries(RULES).map(([k,[l]],i)=>`<label class="item"><input type="radio" name="ec_r" value="${k}" ${k===(cnt("sure")?"sure":"yes")?"checked":""} style="width:20px;height:20px"><span class="grow">${l}</span><b>${num(cnt(k))} أسرة</b></label>`).join("")}</div>
-    <label class="chk"><input type="checkbox" id="ec_keep" checked> انقل الردود والأعداد وأسماء وأعمار الأطفال</label>
+    <label class="chk"><input type="checkbox" id="ec_keep" checked> انقل الردود والأعداد وأسماء وأعمار الأبناء</label>
     <label class="chk"><input type="checkbox" id="ec_sup" ${(e.supervisors||[]).length?"checked":""}> انقل المشرفين (${num((e.supervisors||[]).length)})</label>
     <div class="note">${ic("info")} <span>الكشف القديم بيفضل زي ما هو. وفي الجديد تقدر تضيف أو تشيل أسر عادي.</span></div>
     <div class="bar"><button class="btn pri" id="ec_go">${ic("save")}اعمل النسخة</button><button class="btn" id="ec_back">رجوع</button></div>`, s=>{
@@ -2582,13 +2582,13 @@ function openEvent(id){
         &&(only==="all"||(only==="open"?!r.answer:only==="noans"?!r.answer&&lastCall(b.id,ctx)?.result==="مردش":only==="sure"?r.answer==="جاية"&&r.sure:only==="unsure"?r.answer==="جاية"&&!r.sure:r.answer===only)));
     const seats=e.capacity?e.capacity-t.people:null;
     return `<div class="sub">${e.date?dLabel(e.date):"من غير يوم"}${e.place?" · "+esc(e.place):""}${e.notes?" · "+esc(e.notes):""}</div>
-    <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong>${t.yes?`<small>أكيد ${num(t.sure)} من ${num(t.yes)}</small>`:""}</div><div><span>كبار</span><strong>${num(t.adults)}</strong></div><div><span>أطفال</span><strong>${num(t.kids)}</strong></div>
+    <div class="facts evfacts"><div class="ok"><span>جاية</span><strong>${num(t.yes)} أسرة</strong>${t.yes?`<small>أكيد ${num(t.sure)} من ${num(t.yes)}</small>`:""}</div><div><span>المسؤولين</span><strong>${num(t.adults)}</strong></div><div><span>الأبناء</span><strong>${num(t.kids)}</strong></div>
       <div class="${seats!=null&&seats<0?"neg":""}"><span>الإجمالي${e.capacity?` من ${num(e.capacity)} كرسي`:""}</span><strong>${num(t.people)}</strong>${seats!=null?`<small>${seats>=0?`فاضل ${num(seats)}`:`زيادة ${num(-seats)}`}</small>`:""}</div>
       ${t.reserve?(()=>{ const wait=t.reserve-t.rsvYes-t.rsvNo; return `<div class="rsv"><span>احتياطي</span><strong>${num(t.reserve)}</strong><small>جاي ${num(t.rsvYes)}${t.rsvNo?` · مش جاي ${num(t.rsvNo)}`:""}${wait?` · مستني ${num(wait)}`:""}</small>${wait?`<small>${seats==null?`لو جم: ${num(t.people+wait)}`:seats<=0?"مفيش كراسي للمستنيين":seats>=wait?"الكراسي تكفي المستنيين":`الكراسي تكفي ${num(seats)} من المستنيين`}</small>`:""}</div>`; })():""}
       <div><span>مش متأكدة</span><strong>${num(t.maybe)}</strong>${t.maybePeople?`<small>${num(t.maybePeople)} فرد</small>`:""}</div><div><span>مش جاية</span><strong>${num(t.no)}</strong></div><div><span>لسه</span><strong>${num(t.open)} من ${num(t.n)}</strong></div></div>
-    ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأطفال:</b> ${bandsText(t.bands,true)}`:""}
-      ${t.moms.length?`<br><b>الأمهات:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
-    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button><button class="btn sm" id="e_copy">${ic("list")}نسخة جديدة</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_ages">${ic("printer")}الأطفال حسب السن</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
+    ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأبناء:</b> ${bandsText(t.bands,true)}`:""}
+      ${t.moms.length?`<br><b>المسؤولين:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
+    <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button><button class="btn sm" id="e_copy">${ic("list")}نسخة جديدة</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_ages">${ic("printer")}الأبناء حسب السن</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
     <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button></div>
     ${etab==="sup"?supPanel(id,supEdit):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
@@ -2597,15 +2597,15 @@ function openEvent(id){
     <datalist id="rsv_why">${RSV_WHY.map(w=>`<option value="${w}">`).join("")}</datalist>
     <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
       return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}${r.answer==="جاية"&&r.sure?" a-sure":""}">
-        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أطفال متسجلين`:"مفيش أطفال متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
+        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أبناء متسجلين`:"مفيش أبناء متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
           ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>${r.sure&&r.sure_at&&evSort.get(id)==="sure"?`<span class="sub">${esc(new Date(r.sure_at).toLocaleString("ar-EG",{day:"numeric",month:"numeric",hour:"numeric",minute:"2-digit"}))}</span>`:""}`:""}
-          ${showN?`${stp(r,"adults","كبار",edit)}${stp(r,"kids","أطفال",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي">${[["1","جاي ✓","boy"],["0","مش جاي","girl"]].map(([v,l,c])=>`<button class="sx ${String(x.coming===true?1:x.coming===false?0:"")===v?c:""}" data-rvc="${r.id}" data-i="${i}" data-v="${v}" aria-pressed="${String(x.coming===true?1:x.coming===false?0:"")===v}" ${edit?"":"disabled"}>${l}</button>`).join("")}</span>`).join("")}</span>`:""}`:""}
-          ${showN?`<span class="ages"><small>سن الأم</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن الأم"></span>`:""}
-          ${showN&&+r.kids?`<span class="ages"><small>الأطفال</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="text" class="kage" data-age="${r.id}" data-i="${i}" value="${esc(k.stage||(k.a??""))}" placeholder="السن / السنة" title="اكتب السن (مثلاً 9) أو السنة الدراسية (مثلاً 3 ثانوي)" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
+          ${showN?`${stp(r,"adults","المسؤول",edit)}${stp(r,"kids","الأبناء",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي">${[["1","جاي ✓","boy"],["0","مش جاي","girl"]].map(([v,l,c])=>`<button class="sx ${String(x.coming===true?1:x.coming===false?0:"")===v?c:""}" data-rvc="${r.id}" data-i="${i}" data-v="${v}" aria-pressed="${String(x.coming===true?1:x.coming===false?0:"")===v}" ${edit?"":"disabled"}>${l}</button>`).join("")}</span>`).join("")}</span>`:""}`:""}
+          ${showN?`<span class="ages"><small>سن المسؤولة</small><input type="number" min="10" max="110" inputmode="numeric" data-mom="${r.id}" value="${r.mother_age??""}" placeholder="؟" ${edit?"":"disabled"} aria-label="سن المسؤولة"></span>`:""}
+          ${showN&&+r.kids?`<span class="ages"><small>الأبناء</small>${kidsComing(r).slice(0,20).map((k,i)=>`<span class="kid"><input type="text" class="kname" data-kn="${r.id}" data-i="${i}" value="${esc(k.name)}" placeholder="الاسم" ${edit?"":"disabled"} aria-label="اسم الطفل ${i+1}"><input type="text" class="kage" data-age="${r.id}" data-i="${i}" value="${esc(k.stage||(k.a??""))}" placeholder="السن / السنة" title="اكتب السن (مثلاً 9) أو السنة الدراسية (مثلاً 3 ثانوي)" ${edit?"":"disabled"} aria-label="سن الطفل ${i+1}">${["ولد","بنت"].map(x=>`<button class="sx ${k.sex===x?(x==="ولد"?"boy":"girl"):""}" data-sx="${r.id}" data-i="${i}" data-v="${x}" aria-pressed="${k.sex===x}" ${edit?"":"disabled"} aria-label="الطفل ${i+1} ${x}">${x}</button>`).join("")}</span>`).join("")}</span>`:""}
 </div>
         ${showN||r.note?`<input type="text" class="evnote" data-note="${r.id}" value="${esc(r.note||"")}" placeholder="ملاحظة (مثال: معاها بنت أختها، محتاجة كرسي متحرك)" ${edit?"":"disabled"}>`:""}
-        ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} كبار و${num(g.kids)} أطفال وتقدر تعدّل</span>`:""}
+        ${!showN&&!r.answer?`<span class="sub" style="font-size:12px">لو قالت جاية هنحط ${num(g.adults)} مسؤول و${num(g.kids)} من الأبناء وتقدر تعدّل</span>`:""}
       </div>`; }).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>
     ${cw?`<details class="addbox" ${addQ?"open":""}><summary>${ic("plus")}ضيف أسرة للرحلة</summary><button class="btn sm" id="e_paper" style="margin-bottom:8px">${ic("edit")}من ورقة بخط الإيد</button><input type="search" id="e_add" placeholder="اكتب الاسم أو رقم الحالة" value="${esc(addQ)}"><div id="e_addRes"></div></details>`:""}`}`;
   };
@@ -2629,7 +2629,7 @@ function openEvent(id){
       setRsvp(r.id,{ reserve_list:list, reserve_who:list.map(x=>x.who).filter(Boolean).join("، ") }); });
     s.querySelectorAll("[data-num]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.num,{ [el.dataset.f]:Math.max(0,Math.min(el.dataset.f==="reserve"?20:50,Math.round(+el.value||0))) }));
     s.querySelectorAll("[data-note]").forEach(el=>el.onchange=()=>setRsvp(el.dataset.note,{ note:el.value.trim() }));
-    s.querySelectorAll("[data-mom]").forEach(el=>el.onchange=()=>{ const v=el.value===""?null:Math.round(+el.value); if(v!=null&&(v<10||v>110)){ toast("سن الأم لازم يبقى بين 10 و110"); return; } setRsvp(el.dataset.mom,{ mother_age:v }); });
+    s.querySelectorAll("[data-mom]").forEach(el=>el.onchange=()=>{ const v=el.value===""?null:Math.round(+el.value); if(v!=null&&(v<10||v>110)){ toast("السن لازم يبقى بين 10 و110"); return; } setRsvp(el.dataset.mom,{ mother_age:v }); });
     s.querySelectorAll("[data-kn]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.kn), nm=Array.from({length:+r.kids||0},(_,i)=>(r.kid_names||[])[i]||null);
       nm[+el.dataset.i]=el.value.trim()||null; setRsvp(r.id,{ kid_names:nm }); });
     s.querySelectorAll("[data-sx]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.sx), sx=Array.from({length:+r.kids||0},(_,i)=>(r.kid_sexes||[])[i]||null), i=+el.dataset.i;
@@ -2695,14 +2695,14 @@ function supPanel(id, editing){
       <label class="f">لحد (اختياري)<input type="number" id="su_max" min="0" max="25" value="${ed?.max??""}"></label></div>
     <div class="bar"><button class="btn pri" id="su_go" data-sid="${ed?.id||""}">${ic("save")}${ed?"حفظ":"ضيف"}</button>${ed?`<button class="btn" id="su_cancel">إلغاء</button>`:""}</div></details>`:"";
   const placed=kids.length-left.length;
-  return `${!kids.length?`<div class="note">${ic("info")} <span>لسه مفيش أطفال جايين — لما تسجل «جاية» وعدد الأطفال في تاب «الأسر»، هيتقسموا هنا.</span></div>`:
-    `<div class="note ${left.length?"":"green"}">${ic("info")} <span>${num(kids.length)} طفل جايين — اتوزع ${num(placed)} على ${num(sups.length)} مشرف${left.length?` · <b>${num(left.length)} مش متوزعين</b> (تحت)`:""}. التوزيع بيتعمل لوحده ويتحدّث مع أي تغيير.</span></div>`}
+  return `${!kids.length?`<div class="note">${ic("info")} <span>لسه مفيش أبناء جايين — لما تسجل «جاية» وعدد الأبناء في تاب «الأسر»، هيتقسموا هنا.</span></div>`:
+    `<div class="note ${left.length?"":"green"}">${ic("info")} <span>${num(kids.length)} من الأبناء جايين — اتوزع ${num(placed)} على ${num(sups.length)} مشرف${left.length?` · <b>${num(left.length)} مش متوزعين</b> (تحت)`:""}. التوزيع بيتعمل لوحده ويتحدّث مع أي تغيير.</span></div>`}
     ${form}
     <div class="list supgroups">${sups.map(sp=>{ const g=groups.get(sp.id)||[]; return `<details class="item col supg" data-keep="${sp.id}" ${supOpen.has(sp.id)?"open":""}><summary class="row" style="width:100%">
         <span class="chip ${sp.sex==="ست"?"girl":"boy"}">${esc(sp.sex)}</span><span class="grow"><span class="nm">${esc(sp.name)}</span><br><span class="sub">${supRule(sp)}${sp.phone?` · <span dir="ltr">${esc(sp.phone)}</span>`:""}</span></span>
-        <span class="supn"><b>${num(g.length)}</b> طفل${g.length?`<small>${sexCount(g)}${(()=>{ const ag=g.filter(k=>k.a!=null).map(k=>k.a); if(!ag.length) return ""; const lo=Math.min(...ag), hi=Math.max(...ag); return lo===hi?` · سن ${num(lo)}`:` · من ${num(lo)} لـ ${num(hi)} سنة`; })()}</small>`:""}</span></summary>
+        <span class="supn"><b>${num(g.length)}</b> فرد${g.length?`<small>${sexCount(g)}${(()=>{ const ag=g.filter(k=>k.a!=null).map(k=>k.a); if(!ag.length) return ""; const lo=Math.min(...ag), hi=Math.max(...ag); return lo===hi?` · سن ${num(lo)}`:` · من ${num(lo)} لـ ${num(hi)} سنة`; })()}</small>`:""}</span></summary>
         <div class="bar" style="margin:6px 0">${sp.phone?`<a class="btn sm" href="tel:${esc(cleanPhone(sp.phone))}">${ic("phone")}اتصل</a>`:""}${cw?`<button class="btn sm" data-sued="${sp.id}">${ic("edit")}تعديل</button><button class="btn sm danger" data-surm="${sp.id}">شيل</button>`:""}</div>
-        <ol class="kids">${g.map(k=>`<li>${kidLine(k)}</li>`).join("")||`<li class="sub">مفيش أطفال لحد دلوقتي</li>`}</ol></details>`; }).join("")}</div>
+        <ol class="kids">${g.map(k=>`<li>${kidLine(k)}</li>`).join("")||`<li class="sub">مفيش أبناء لحد دلوقتي</li>`}</ol></details>`; }).join("")}</div>
     ${left.length?`<h4>مش متوزعين (${num(left.length)})</h4><div class="note red">${ic("alert")} <span>كمّل السن أو ولد/بنت في تاب «الأسر»، أو ضيف مشرف ليهم، أو وسّع سن مشرف.</span></div>
       <ol class="kids">${left.map(x=>`<li>${kidLine(x.kid)} — <b>${esc(x.why)}</b></li>`).join("")}</ol>`:""}
     ${sups.length&&kids.length?`<div class="bar"><button class="btn" id="su_print">${ic("printer")}طباعة المجموعات</button><button class="btn sm" id="su_x">Excel المجموعات</button></div>`:""}`;
@@ -2724,9 +2724,9 @@ function bindSup(s, id, setEdit){
   if(q("#su_cancel")) q("#su_cancel").onclick=()=>setEdit(null);
   s.querySelectorAll("[data-sued]").forEach(el=>el.onclick=e=>{ e.preventDefault(); setEdit(el.dataset.sued); });
   s.querySelectorAll("[data-surm]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const cur=EV.get(id).supervisors||[], sp=cur.find(x=>x.id===el.dataset.surm);
-    saveSups(id, cur.filter(x=>x.id!==sp.id), `${sp.name} اتشال — الأطفال بتوعه اتوزعوا على الباقيين`, cur); });
+    saveSups(id, cur.filter(x=>x.id!==sp.id), `${sp.name} اتشال — الأبناء اللي معاه اتوزعوا على الباقيين`, cur); });
   if(q("#su_print")) q("#su_print").onclick=()=>doPrint(groupsHTML(id), EV.get(id).title+" — المجموعات");
-  if(q("#su_x")) q("#su_x").onclick=()=>{ const { sups, groups, left } = tripGroups(id), rows=[["المشرف","راجل/ست","اسم الطفل","السن","السنة الدراسية","ولد/بنت","الأم","رقم الحالة","تليفون الأم"]];
+  if(q("#su_x")) q("#su_x").onclick=()=>{ const { sups, groups, left } = tripGroups(id), rows=[["المشرف","راجل/ست","الاسم","السن","السنة الدراسية","ولد/بنت","الأم / المسؤولة","رقم الحالة","تليفون المسؤولة"]];
     sups.forEach(sp=>(groups.get(sp.id)||[]).forEach(k=>rows.push([sp.name,sp.sex,k.name||"",k.a??"",k.stage||"",k.sex||"",k.mom,k.code,k.phone])));
     left.forEach(x=>rows.push(["مش متوزع: "+x.why,"",x.kid.name||"",x.kid.a??"",x.kid.stage||"",x.kid.sex||"",x.kid.mom,x.kid.code,x.kid.phone]));
     xlsx({"المجموعات":rows},`${EV.get(id).title} — المجموعات.xlsx`); };
@@ -2734,14 +2734,14 @@ function bindSup(s, id, setEdit){
 function groupsHTML(id){
   const e=EV.get(id), { sups, groups, left } = tripGroups(id);
   return `<div class="ps">${hdr()}<h1>${esc(e.title)} — مجموعات المشرفين</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
-    ${sups.map(sp=>{ const g=groups.get(sp.id)||[]; return `<h3 style="margin:12px 0 4px">${esc(sp.name)} (${esc(sp.sex)})${sp.phone?` — ${esc(sp.phone)}`:""} — ${num(g.length)} طفل${g.length?` (${sexCount(g)})`:""}</h3>
-      <table><thead><tr><th>م</th><th>الاسم</th><th>السن</th><th>ولد/بنت</th><th>الأم</th><th>رقم الحالة</th><th>تليفون الأم</th><th>حضر</th><th>رجع</th></tr></thead><tbody>
+    ${sups.map(sp=>{ const g=groups.get(sp.id)||[]; return `<h3 style="margin:12px 0 4px">${esc(sp.name)} (${esc(sp.sex)})${sp.phone?` — ${esc(sp.phone)}`:""} — ${num(g.length)} فرد${g.length?` (${sexCount(g)})`:""}</h3>
+      <table><thead><tr><th>م</th><th>الاسم</th><th>السن</th><th>ولد/بنت</th><th>الأم / المسؤولة</th><th>رقم الحالة</th><th>تليفون المسؤولة</th><th>حضر</th><th>رجع</th></tr></thead><tbody>
       ${g.map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(k.name||"")}</td><td>${esc(k.stage?ageTxt(k):k.a??"")}</td><td>${k.sex||""}</td><td class="nm">${esc(k.mom)}</td><td>${esc(k.code)}</td><td>${esc(k.phone)}</td><td class="sig"></td><td class="sig"></td></tr>`).join("")}</tbody></table>`; }).join("")}
     ${left.length?`<h3>مش متوزعين (${num(left.length)})</h3><table><tbody>${left.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.kid.name||"")}</td><td>${esc(x.kid.stage?ageTxt(x.kid):x.kid.a??"")}</td><td>${x.kid.sex||""}</td><td class="nm">${esc(x.kid.mom)}</td><td>${esc(x.kid.code)}</td><td>${esc(x.why)}</td></tr>`).join("")}</tbody></table>`:""}
     ${signsHTML()}</div>`;
 }
 // Which paper: the usual table, one line per mother with her national ID and room for a stamp, or each mother with her kids under her.
-const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأطفال والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أم بأطفالها","سطر لكل أم: هي وأطفالها في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
+const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأبناء والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أسرة بأبنائها","سطر لكل أسرة: المسؤولة والأبناء في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
 // → { mode, rsv } or null. rsv: print the standby people (and count the ones marked «جاي»).
 function pickTripPrint(){
   return new Promise(resolve=>{
@@ -2776,18 +2776,18 @@ function eventHTML(id, mode="normal", rsv=true, nid=false){
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة${rsvLine}</td><td>${num(total)}</td>${rsv?"<td></td>":""}<td></td></tr></tfoot></table>${signsHTML()}</div>`;
   if(mode==="fam"){ const box=x=>`<span class="cb">☐ ${x}</span>`;
     return `${head}
-    <table class="famprint"><thead><tr><th>م</th><th>الأم</th><th>الأطفال</th>${rsv?"<th>احتياطي</th>":""}<th>العدد</th></tr></thead><tbody>
+    <table class="famprint"><thead><tr><th>م</th><th>الأم / المسؤولة</th><th>الأبناء</th>${rsv?"<th>احتياطي</th>":""}<th>العدد</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td class="nm">${+r.adults?box(`<b>${esc(b.name)}</b>`):`<b>${esc(b.name)}</b> <small>(مش جاية)</small>`}<br><small>${esc(b.code)}${b.phone?` · ${esc(cleanPhone(b.phone))}`:""}${r.mother_age!=null?` · ${num(r.mother_age)} سنة`:""}</small>${nid&&b.nationalId?`<br><small>الرقم القومي: ${esc(b.nationalId)}</small>`:""}</td>
         <td class="kids">${kidsComing(r).map(k=>box(`${esc(k.name||"طفل")} <small>${[k.stage||(k.a!=null?k.a:""),k.sex||""].filter(x=>x!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>
         ${rsv?`<td class="kids">${reserveOf(r).filter(x=>x.coming!==false).map(x=>box(`${esc(x.who||"؟")} <small>${[x.stage||(x.age??""),x.coming===true?"جاي":""].filter(v=>v!=="").map(esc).join("، ")}</small>`)).join(" ")}</td>`:""}
         <td>${num(cnt(r))}</td></tr>`).join("")}
     </tbody></table>
-    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} كبار · ${num(t.kids)} أطفال${rsv&&t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(total)}${rsv&&wait?` · احتياطي مستني ${num(wait)}`:""}</p>${signsHTML()}</div>`; }
+    <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} مسؤول · ${num(t.kids)} من الأبناء${rsv&&t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(total)}${rsv&&wait?` · احتياطي مستني ${num(wait)}`:""}</p>${signsHTML()}</div>`; }
   return `${head}
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th>${nid?"<th>الرقم القومي</th>":""}<th>التليفون</th><th>كبار</th><th>سن الأم</th><th>أطفال</th><th>الأطفال (الاسم والسن)</th><th>الإجمالي</th>${rsv?"<th>احتياطي</th>":""}<th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th>${nid?"<th>الرقم القومي</th>":""}<th>التليفون</th><th>المسؤول</th><th>سن المسؤولة</th><th>الأبناء</th><th>الأبناء (الاسم والسن)</th><th>الإجمالي</th>${rsv?"<th>احتياطي</th>":""}<th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td>${nid?`<td>${esc(b.nationalId||"")}</td>`:""}<td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num(cnt(r))}</td>${rsv?`<td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td>`:""}<td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="${nid?5:4}">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(total)}</td>${rsv?`<td>${t.reserve?num(t.reserve):""}</td>`:""}<td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
-    ${t.kids?`<p><b>الأطفال:</b> ${bandsText(t.bands)}${rsvLine}</p>`:""}
+    ${t.kids?`<p><b>الأبناء:</b> ${bandsText(t.bands)}${rsvLine}</p>`:""}
     ${signsHTML()}</div>`;
 }
 /* The kids coming, one age at a time: each child by name, with the mother she or he belongs to. */
@@ -2803,42 +2803,42 @@ function kidsByAge(id, { noName = true } = {}){
 function paperToEvent(id){
   const row=bid=>rsvps(id).find(r=>r.beneficiary_id===bid);
   paperSheet({ title:`${EV.get(id).title} — من ورقة بخط الإيد`, addLabel:"علّم «جاية»", back:()=>openEvent(id),
-    note:"اللي في الورقة هيتعلّم «جاية» (ولو مش معزومة هتتضاف). الأطفال مش هيتملوا لوحدهم — بيتكتبوا بعد كده. اللي ليها رد قبل كده مش هيتغيّر.",
+    note:"اللي في الورقة هيتعلّم «جاية» (ولو مش معزومة هتتضاف). الأبناء مش هيتملوا لوحدهم — بيتكتبوا بعد كده. اللي ليها رد قبل كده مش هيتغيّر.",
     inList:bid=>!!row(bid)?.answer, inListText:bid=>`ردها من قبل: «${row(bid).answer}» — مش هيتغيّر`,
     onAdd:async list=>{ const note="من ورقة بخط الإيد", add=list.filter(b=>!row(b.id)), upd=list.map(b=>row(b.id)).filter(r=>r&&!r.answer);
       if(add.length){ const { data, error } = await sb.from("event_people").insert(add.map(b=>({ event_id:id, beneficiary_id:b.id, answer:"جاية", adults:1, kids:0, note }))).select(); if(error){ toast(errMsg(error)); return false; } data.forEach(r=>EP.set(r.id,r)); }
       for(const r of upd){ const { data, error } = await sb.from("event_people").update({ answer:"جاية", adults:1, kids:0, note:r.note||note }).eq("id",r.id).select().single(); if(error){ toast(errMsg(error)); return false; } EP.set(data.id,data); }
-      await logIt("event",id,`من ورقة بخط الإيد: ${list.length} أسرة «جاية»`); changed(); openEvent(id); toast(`اتعلّم ${num(list.length)} «جاية» ✓ — كمّل الأطفال`); } });
+      await logIt("event",id,`من ورقة بخط الإيد: ${list.length} أسرة «جاية»`); changed(); openEvent(id); toast(`اتعلّم ${num(list.length)} «جاية» ✓ — كمّل الأبناء`); } });
 }
 function agesSheet(id){
   const o={ noName:true, pages:false };
   const body=()=>{ const { kids, groups } = kidsByAge(id,o), noNm=tripGroups(id).kids.filter(k=>!k.name).length;
-    return `<p class="sub" style="margin-top:0">الأطفال اللي أمهاتهم «جاية»، كل سن لوحده: اسم الطفل وهو ابن/بنت مين.</p>
-    <label class="chk"><input type="checkbox" id="ag_nn" ${o.noName?"checked":""}> ضمّ الأطفال اللي اسمهم مش مكتوب (${num(noNm)})</label>
+    return `<p class="sub" style="margin-top:0">الأبناء اللي أسرهم «جاية»، كل سن لوحده: الاسم وهو ابن/بنت مين.</p>
+    <label class="chk"><input type="checkbox" id="ag_nn" ${o.noName?"checked":""}> ضمّ اللي اسمهم مش مكتوب (${num(noNm)})</label>
     <label class="chk"><input type="checkbox" id="ag_pg" ${o.pages?"checked":""}> كل سن في ورقة لوحده</label>
     <div class="tbl"><table><thead><tr><th>السن</th><th>بنات</th><th>ولاد</th><th>مش محدد</th><th>الإجمالي</th></tr></thead><tbody>
-      ${groups.map(g=>`<tr><td>${g.label}</td><td class="n">${num(g.list.filter(k=>k.sex==="بنت").length)}</td><td class="n">${num(g.list.filter(k=>k.sex==="ولد").length)}</td><td class="n">${num(g.list.filter(k=>!k.sex).length)}</td><td class="n"><b>${num(g.list.length)}</b></td></tr>`).join("")||`<tr><td colspan="5" class="empty">مفيش أطفال جايين لسه</td></tr>`}
+      ${groups.map(g=>`<tr><td>${g.label}</td><td class="n">${num(g.list.filter(k=>k.sex==="بنت").length)}</td><td class="n">${num(g.list.filter(k=>k.sex==="ولد").length)}</td><td class="n">${num(g.list.filter(k=>!k.sex).length)}</td><td class="n"><b>${num(g.list.length)}</b></td></tr>`).join("")||`<tr><td colspan="5" class="empty">مفيش أبناء جايين لسه</td></tr>`}
     </tbody><tfoot><tr><td>الكل</td><td></td><td></td><td></td><td class="n"><b>${num(kids.length)}</b></td></tr></tfoot></table></div>
     <div class="bar"><button class="btn pri" id="ag_print" ${kids.length?"":"disabled"}>${ic("printer")}طباعة</button><button class="btn" id="ag_x" ${kids.length?"":"disabled"}>Excel</button><button class="btn" id="ag_back">رجوع للرحلة</button></div>`; };
   const mount=s=>{ const q=x=>s.querySelector(x), re=()=>{ s.querySelector(".sh-body").innerHTML=body(); mount(s); };
     q("#ag_nn").onchange=e=>{ o.noName=e.target.checked; re(); }; q("#ag_pg").onchange=e=>{ o.pages=e.target.checked; };
     q("#ag_back").onclick=()=>openEvent(id);
     q("#ag_print").onclick=()=>doPrint(agesHTML(id,o), EV.get(id).title+" — حسب السن");
-    q("#ag_x").onclick=()=>{ const rows=[["السن","اسم الطفل","ولد/بنت","السنة الدراسية","الأم","رقم الحالة","تليفون الأم"]];
+    q("#ag_x").onclick=()=>{ const rows=[["السن","الاسم","ولد/بنت","السنة الدراسية","الأم / المسؤولة","رقم الحالة","تليفون المسؤولة"]];
       kidsByAge(id,o).groups.forEach(g=>g.list.forEach(k=>rows.push([g.a??"مش مكتوب",k.name||"(الاسم مش مكتوب)",k.sex||"",k.stage||"",k.mom,k.code,k.phone])));
-      xlsx({"حسب السن":rows},`${EV.get(id).title} — الأطفال حسب السن.xlsx`,[8,18,8,16,30,9,14]); }; };
-  sheet(EV.get(id).title+" — الأطفال حسب السن", body(), mount);
+      xlsx({"حسب السن":rows},`${EV.get(id).title} — الأبناء حسب السن.xlsx`,[8,18,8,16,30,9,14]); }; };
+  sheet(EV.get(id).title+" — الأبناء حسب السن", body(), mount);
 }
 function agesHTML(id, o){
   const e=EV.get(id), { kids, groups } = kidsByAge(id,o);
-  return `<div class="ps">${hdr()}<h1>${esc(e.title)} — الأطفال حسب السن</h1><div class="mo">${e.date?dLabel(e.date)+" — ":""}${num(kids.length)} طفل (${sexCount(kids)})</div>
-    ${groups.map((g,gi)=>`<div style="${o.pages&&gi?"page-break-before:always":""}"><h3 style="margin:12px 0 4px">${g.label} — ${num(g.list.length)} ${g.list.length>2&&g.list.length<11?"أطفال":"طفل"}${sexCount(g.list)?` (${sexCount(g.list)})`:""}</h3>
-      <table><thead><tr><th>م</th><th>اسم الطفل</th><th>ولد/بنت</th><th>السنة الدراسية</th><th>الأم</th><th>رقم الحالة</th><th>تليفون الأم</th><th>حضر</th></tr></thead><tbody>
+  return `<div class="ps">${hdr()}<h1>${esc(e.title)} — الأبناء حسب السن</h1><div class="mo">${e.date?dLabel(e.date)+" — ":""}${num(kids.length)} من الأبناء (${sexCount(kids)})</div>
+    ${groups.map((g,gi)=>`<div style="${o.pages&&gi?"page-break-before:always":""}"><h3 style="margin:12px 0 4px">${g.label} — ${num(g.list.length)} فرد${sexCount(g.list)?` (${sexCount(g.list)})`:""}</h3>
+      <table><thead><tr><th>م</th><th>الاسم</th><th>ولد/بنت</th><th>السنة الدراسية</th><th>الأم / المسؤولة</th><th>رقم الحالة</th><th>تليفون المسؤولة</th><th>حضر</th></tr></thead><tbody>
       ${g.list.map((k,i)=>`<tr><td>${i+1}</td><td class="nm">${k.name?esc(k.name):"<i>الاسم مش مكتوب</i>"}</td><td>${k.sex||""}</td><td>${esc(k.stage||"")}</td><td class="nm">${esc(k.mom)}</td><td>${esc(k.code)}</td><td>${esc(k.phone)}</td><td class="sig"></td></tr>`).join("")}</tbody></table></div>`).join("")}
     ${signsHTML()}</div>`;
 }
 function eventXlsx(id){
-  const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","كبار","سن الأم","أطفال","الأطفال (السن والنوع)","ولاد","بنات","الإجمالي","احتياطي","الاحتياطي (مين، السن، ليه)","ملاحظة","آخر مكالمة","أطفال متسجلين","عدد الأفراد"]];
+  const e=EV.get(id), rows=[["رقم الحالة","الاسم","التليفون","واتساب","الرد","المسؤول","سن المسؤولة","الأبناء","الأبناء (السن والنوع)","ولاد","بنات","الإجمالي","احتياطي","الاحتياطي (مين، السن، ليه)","ملاحظة","آخر مكالمة","أبناء متسجلين","عدد الأفراد"]];
   rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort((a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true}))
     .forEach(({r,b})=>{ const c=lastCall(b.id,"ev:"+id); rows.push([b.code,b.name,cleanPhone(b.phone),waNum(b),r.answer==="جاية"&&r.sure?"جاية أكيد":r.answer||"لسه",+r.adults||0,r.mother_age??"",+r.kids||0,kidsText(r),kidsComing(r).filter(k=>k.sex==="ولد").length,kidsComing(r).filter(k=>k.sex==="بنت").length,(+r.adults||0)+(+r.kids||0),+r.reserve||0,reserveText(r),r.note||"",c?CALL_RES[c.result].label:"",kidsOf(b),famSize(b)||""]); });
   xlsx({"الرحلة":rows, "بيانات الأسر":familySheet(rsvps(id).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b))},`${e.title}.xlsx`);
@@ -2861,7 +2861,7 @@ function familySheet(list){
   });
   const G=Math.max(0,...fams.map(f=>f.girls.length)), Bn=Math.max(0,...fams.map(f=>f.boys.length)), O=Math.max(0,...fams.map(f=>f.other.length));
   const cols=(n,label)=>Array.from({length:n},(_,i)=>[`${label} ${i+1}`,`سن ${label} ${i+1}`]).flat();
-  const head=["رقم الحالة","اسم الأم","سن الأم","السن من","الرد","التليفون","عدد البنات","عدد الولاد",...cols(G,"بنت"),...cols(Bn,"ولد"),...cols(O,"ابن/بنت (النوع مش متسجل)")];
+  const head=["رقم الحالة","الأم / المسؤولة","سن المسؤولة","السن من","الرد","التليفون","عدد البنات","عدد الولاد",...cols(G,"بنت"),...cols(Bn,"ولد"),...cols(O,"ابن/بنت (النوع مش متسجل)")];
   const cells=(arr,n)=>Array.from({length:n},(_,i)=>arr[i]?[arr[i].name,arr[i].txt]:["",""]).flat();
   return [head, ...fams.map(f=>[f.b.code,f.b.name,f.mom.a,f.mom.src,f.r.answer||"لسه",cleanPhone(f.b.phone),f.girls.length,f.boys.length,...cells(f.girls,G),...cells(f.boys,Bn),...cells(f.other,O)])];
 }
