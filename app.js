@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.56";
+export const VERSION = "1.3.57";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2819,7 +2819,9 @@ function giftPanel(id){
   const comp=new Map(); for(const p of all) if(p.g==="k"){ const c=comp.get(p.r.id)||comp.set(p.r.id,{ b:0, g:0 }).get(p.r.id); if(p.kind==="ابن") c.b++; if(p.kind==="بنت") c.g++; }
   const famOk=p=>{ const c=comp.get(p.r.id)||{ b:0, g:0 }; return st.fam==="any"||(st.fam==="hasBoys"?c.b>0:st.fam==="onlyBoys"?c.b>0&&!c.g:st.fam==="hasGirls"?c.g>0:c.g>0&&!c.b); };
   const famGot=(rid,gid)=>all.some(p=>p.r.id===rid&&p.got.includes(gid)), famAny=rid=>all.some(p=>p.r.id===rid&&p.got.length);
-  const perFam=st.per==="family";
+  // an item with a quantity rule (meals: one per person who came, or N per family) is always handed out per family
+  const it=gifts.find(g=>g.id===st.item), qItem=it&&it.qty!=null, perFam=qItem||st.per==="family";
+  const heads=rid=>all.filter(p=>p.r.id===rid).length, qtyOf=rid=>!qItem?1:it.qty==="people"?heads(rid):(+it.qty||1);
   const list=all.filter(p=>famOk(p)&&(st.who==="all"||(st.who==="kids"?p.g==="k":st.who==="boys"?p.kind==="ابن":st.who==="girls"?p.kind==="بنت":st.who==="adults"?p.g==="a":p.g==="r"))
       &&(!has(st.min)||(p.age!=null&&p.age>=+st.min))&&(!has(st.max)||(p.age!=null&&p.age<=+st.max))
       &&(st.crit==="all"||(perFam?(st.crit==="none"?!famAny(p.r.id):st.crit==="other"?!famGot(p.r.id,st.other||gifts[0]?.id):!famGot(p.r.id,st.item))
@@ -2827,17 +2829,18 @@ function giftPanel(id){
       &&(!qq||norm(p.label).includes(qq)||norm(p.b.name).includes(qq)||String(p.b.code)===qq.padStart(3,"0")))
     .sort(giftSort(st));
   const gname=gid=>gifts.find(g=>g.id===gid)?.name||"؟", took=gid=>all.filter(p=>p.got.includes(gid)).length;
+  const famsTook=gid=>new Set(all.filter(p=>p.got.includes(gid)).map(p=>p.r.id)).size;
   // once per family: one row per family, its matching people listed in the chosen order (the first one is who gets it)
   const fams=[]; if(perFam){ const m=new Map(); for(const p of list){ if(!m.has(p.r.id)){ const f={ r:p.r, b:p.b, people:[] }; m.set(p.r.id,f); fams.push(f); } m.get(p.r.id).people.push(p); } }
-  const famsTook=gid=>new Set(all.filter(p=>p.got.includes(gid)).map(p=>p.r.id)).size;
+
   const sel=(idn,opts,v)=>`<select id="${idn}">${opts.map(([k,l])=>`<option value="${k}" ${String(v)===String(k)?"selected":""}>${l}</option>`).join("")}</select>`;
   return `<div class="note">${ic("info")} <span>ضيف الأصناف، اختار الصنف ومين ياخد وبالترتيب اللي يناسبك، وعلّم «أخد» وانت بتوزع. اللي متعلّم «ماجاش» مش بيظهر.</span></div>
-    <div class="seg">${gifts.map(g=>`<button class="${st.item===g.id?"on":""}" data-gitem="${g.id}">${esc(g.name)} <small>(${num(took(g.id))})</small></button>`).join("")||`<span class="sub">مفيش أصناف لسه</span>`}</div>
-    ${cw?`<div class="row" style="gap:6px;margin:6px 0"><input type="text" id="g_new" placeholder="صنف جديد (مثال: كورة، رشاش، مسدس مياه)" style="flex:1 1 200px"><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
+    <div class="seg">${gifts.map(g=>`<button class="${st.item===g.id?"on":""}" data-gitem="${g.id}">${esc(g.name)}${g.qty==="people"?" ×أفراد":g.qty!=null?` ×${num(+g.qty)}/أسرة`:""} <small>(${num(g.qty!=null?famsTook(g.id):took(g.id))})</small></button>`).join("")||`<span class="sub">مفيش أصناف لسه</span>`}</div>
+    ${cw?`<div class="row" style="gap:6px;margin:6px 0"><input type="text" id="g_new" placeholder="صنف جديد (مثال: كورة، شاورما، زجاجة مياه)" style="flex:1 1 200px"><select id="g_qty" style="flex:0 0 auto;width:auto"><option value="one">لكل فرد</option><option value="people">لكل أسرة على عدد أفرادها</option><option value="fixed">لكل أسرة عدد ثابت…</option></select><input type="number" id="g_qn" min="1" value="1" style="width:64px;flex:0 0 auto" hidden aria-label="العدد لكل أسرة"><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
     ${gifts.length?`<div class="grid2 gfil">
       <label class="f">مين${sel("g_who",[["kids","الأبناء كلهم"],["boys","الولاد"],["girls","البنات"],["adults","المسؤولين"],["reserve","الاحتياطي"],["all","الكل"]],st.who)}</label>
       <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["fam","اسم الأسرة (أ ← ي)"],["name","اسم الطفل (أ ← ي)"],["code","رقم الحالة"]],st.order)}</label>
-      <label class="f">لكل مين${sel("g_per",[["person","لكل فرد"],["family","مرة واحدة لكل أسرة"]],st.per)}</label>
+      ${qItem?`<label class="f">لكل مين<input type="text" value="لكل أسرة — ${it.qty==="people"?"على عدد اللي حضروا":`${num(+it.qty)} لكل أسرة`}" disabled></label>`:`<label class="f">لكل مين${sel("g_per",[["person","لكل فرد"],["family","مرة واحدة لكل أسرة"]],st.per)}</label>`}
       <label class="f">الأسر${sel("g_fam",[["any","كل الأسر"],["hasBoys","فيها ولاد"],["onlyBoys","ولاد بس (مفيهاش بنات)"],["hasGirls","فيها بنات"],["onlyGirls","بنات بس (مفيهاش ولاد)"]],st.fam)}</label>
       <label class="f">السن من<input type="number" id="g_min" min="0" max="99" value="${esc(st.min)}"></label>
       <label class="f">لحد<input type="number" id="g_max" min="0" max="99" value="${esc(st.max)}"></label>
@@ -2845,12 +2848,13 @@ function giftPanel(id){
       ${st.crit==="other"?`<label class="f">الصنف ده${sel("g_other",gifts.map(g=>[g.id,esc(g.name)]),st.other||gifts[0].id)}</label>`:""}
     </div>
     <div class="row" style="margin:6px 0"><input type="search" id="g_q" placeholder="دوّر بالاسم أو الأم أو رقم الحالة" value="${esc(st.q||"")}" style="flex:1 1 200px"></div>
-    <div class="note green">${ic("box")} <span><b>${esc(gname(st.item))}</b>: ${perFam?`أخدت ${num(famsTook(st.item))} أسرة · في القايمة دي ${num(fams.length)} أسرة`:`أخد ${num(took(st.item))} · في القايمة دي ${num(list.length)}`}</span></div>
+    <div class="note green">${ic("box")} <span><b>${esc(gname(st.item))}</b>: ${qItem?(()=>{ const famIds=[...new Set(all.map(p=>p.r.id))], gave=famIds.filter(rid=>famGot(rid,st.item)), need=famIds.reduce((a,rid)=>a+qtyOf(rid),0), given=gave.reduce((a,rid)=>a+qtyOf(rid),0);
+      return `محتاج ${num(need)} لـ ${num(famIds.length)} أسرة · اتوزع ${num(given)} (${num(gave.length)} أسرة) · فاضل ${num(need-given)}`; })()+" — ":""}${perFam?`أخدت ${num(famsTook(st.item))} أسرة · في القايمة دي ${num(fams.length)} أسرة`:`أخد ${num(took(st.item))} · في القايمة دي ${num(list.length)}`}</span></div>
     ${perFam?`<div class="list">${fams.map((f,n)=>{ const on=famGot(f.r.id,st.item), who=all.find(p=>p.r.id===f.r.id&&p.got.includes(st.item));
       return `<label class="item gp ${on?"on":""}"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${f.r.id}" data-k="${f.people[0].key}" ${on?"checked":""} ${edit?"":"disabled"} style="width:24px;height:24px">
         <span class="grow"><span class="nm">${esc(f.b.name)}</span> <span class="sub">${esc(f.b.code)}${f.r.bus?` · باص ${f.r.bus}`:""}</span><br>
         <span class="sub">${on&&who?`أخدها: ${esc(who.label)}`:f.people.map((p,i)=>`${i?"":"⭐ "}${esc(p.label)}${p.age!=null?` (${num(p.age)})`:""}`).join("، ")}</span></span>
-        <span class="chip ${on?"":"grey"}">${on?"أخدت ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش أسر بالشروط دي</div>`}</div>`
+        ${qItem?`<span class="chip gold qty">×${num(qtyOf(f.r.id))}</span>`:""}<span class="chip ${on?"":"grey"}">${on?"أخدت ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش أسر بالشروط دي</div>`}</div>`
     :`<div class="list">${list.map((p,n)=>{ const on=p.got.includes(st.item);
       return `<label class="item gp ${on?"on":""}"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" ${on?"checked":""} ${edit?"":"disabled"} style="width:24px;height:24px">
         <span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""}</span><br>
@@ -2859,7 +2863,7 @@ function giftPanel(id){
     ${(()=>{ if(!st.item) return "";
       const tp=all.filter(p=>p.got.includes(st.item)).sort(giftSort(st));
       if(perFam){ const seen=new Set(), tf=tp.filter(p=>!seen.has(p.r.id)&&seen.add(p.r.id)).sort((x,y)=>st.order==="code"?String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true}):byName(x.b.name,y.b.name));
-        return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخدت ${esc(gname(st.item))} (${num(tf.length)} أسرة) — اتأكد</summary><div class="list">${tf.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.b.name)}</span> <span class="sub">${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""} · أخدها: ${esc(p.label)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; }
+        return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخدت ${esc(gname(st.item))} (${num(tf.length)} أسرة) — اتأكد</summary><div class="list">${tf.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.b.name)}</span> <span class="sub">${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""} · أخدها: ${esc(p.label)}${qItem?` · ×${num(qtyOf(p.r.id))}`:""}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; }
       return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخد ${esc(gname(st.item))} (${num(tp.length)}) — اتأكد</summary><div class="list">${tp.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""} · ${p.g==="a"?"":"ابن/بنت "}${esc(p.b.name)} · ${esc(p.b.code)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; })()}
     <details class="addbox glog" ${giftLogOpen.has(id)?"open":""}><summary>${ic("list")}سجل التوزيع — مين اتعلّم إمتى</summary>
       ${!giftLogs.has(id)?`<div class="empty"><span class="spin"></span></div>`:`<div class="bar" style="margin:4px 0"><button class="btn sm" id="g_logr">${ic("refresh")}تحديث</button></div>
@@ -2868,14 +2872,17 @@ function giftPanel(id){
 }
 function bindGift(s, id){
   const q=x=>s.querySelector(x), st=gst(id);
-  s.querySelectorAll("[data-gitem]").forEach(el=>el.onclick=()=>{ st.item=el.dataset.gitem; refreshSheet(); });
+  s.querySelectorAll("[data-gitem]").forEach(el=>el.onclick=()=>{ st.item=el.dataset.gitem; const g=(EV.get(id).gifts||[]).find(x=>x.id===st.item); if(g?.qty!=null&&st.who!=="all"){ st.who="all"; } refreshSheet(); });
   const tk=q("details.taken"); if(tk) tk.ontoggle=()=>{ tk.open?giftOpen.add(id):giftOpen.delete(id); };
   const gl=q("details.glog"); if(gl) gl.ontoggle=()=>{ if(gl.open){ giftLogOpen.add(id); if(!giftLogs.has(id)) loadGiftLog(id); } else giftLogOpen.delete(id); };
   if(gl&&gl.open&&!giftLogs.has(id)) loadGiftLog(id);
   if(q("#g_logr")) q("#g_logr").onclick=()=>loadGiftLog(id);
   const gn=gid=>(EV.get(id).gifts||[]).find(g=>g.id===gid)?.name||"";
   const save=async gifts=>{ const { data, error } = await sb.from("events").update({ gifts }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed(); return true; };
-  if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } const g={ id:newId(), name }; if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; toast(`${name} اتضاف ✓`); } };
+  const gq2=q("#g_qty"); if(gq2) gq2.onchange=()=>{ q("#g_qn").hidden=gq2.value!=="fixed"; };
+  if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; }
+    const k=q("#g_qty").value, g={ id:newId(), name, ...(k==="people"?{ qty:"people" }:k==="fixed"?{ qty:Math.max(1,Math.round(+q("#g_qn").value||1)) }:{}) };
+    if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; if(g.qty!=null){ st.who="all"; st.min=""; st.max=""; st.fam="any"; } toast(`${name} اتضاف ✓`); } };
   if(q("#g_new")) q("#g_new").onkeydown=e=>{ if(e.key==="Enter") q("#g_add").click(); };
   if(q("#g_del")) q("#g_del").onclick=async()=>{ const cur=EV.get(id).gifts||[], g=cur.find(x=>x.id===st.item); if(!g) return;
     if(!await ask(`«${g.name}» هيتشال من الأصناف (واللي اتعلّم إنه أخده بيفضل محفوظ لو رجّعته بـ«تراجع»).`,{title:"شيل الصنف؟",ok:"شيل",danger:true})) return;
@@ -2902,7 +2909,10 @@ function bindGift(s, id){
   if(q("#g_x")) q("#g_x").onclick=()=>{ const e=EV.get(id), gifts=e.gifts||[], all=giftPeople(id), rows=[["الاسم","صفته","السن","الأسرة","رقم الحالة","الباص",...gifts.map(g=>g.name)]];
     all.sort((x,y)=>byName(x.b.name,y.b.name)||x.g.localeCompare(y.g)||x.i-y.i).forEach(p=>rows.push([p.label,p.kind,p.age??"",p.b.name,p.b.code,p.r.bus?`باص ${p.r.bus}`:"",...gifts.map(g=>p.got.includes(g.id)?"✓":"")]));
     rows.push(["الإجمالي","","","","","",...gifts.map(g=>all.filter(p=>p.got.includes(g.id)).length)]);
-    xlsx({"التوزيع":rows},`${e.title} — التوزيع.xlsx`); };
+    const qg=gifts.filter(g=>g.qty!=null), fam=[["الأسرة","رقم الحالة","الباص","اللي حضروا",...qg.flatMap(g=>[g.name,`${g.name} — أخدت؟`])]], fr=new Map();
+    for(const p of all){ if(!fr.has(p.r.id)) fr.set(p.r.id,{ r:p.r, b:p.b, n:0, got:new Set() }); const f=fr.get(p.r.id); f.n++; p.got.forEach(x=>f.got.add(x)); }
+    [...fr.values()].sort((x,y)=>byName(x.b.name,y.b.name)).forEach(f=>fam.push([f.b.name,f.b.code,f.r.bus?`باص ${f.r.bus}`:"",f.n,...qg.flatMap(g=>{ const n=g.qty==="people"?f.n:+g.qty; return [n, f.got.has(g.id)?"✓":""]; })]));
+    xlsx(qg.length?{"التوزيع":rows,"الوجبات لكل أسرة":fam}:{"التوزيع":rows},`${e.title} — التوزيع.xlsx`); };
 }
 function attendanceHTML(id){
   const e=EV.get(id), { N, per, all, rows } = dayTotals(id);
