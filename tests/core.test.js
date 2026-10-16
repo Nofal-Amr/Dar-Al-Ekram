@@ -332,3 +332,8 @@ test("a handwritten list typed in: case numbers, IDs and names", () => {
 test("byName sorts Arabic names alphabetically", () => {
   assert.deepEqual(["يوسف","آدم","احمد","بلال","","سليم احمد","سليم","أنس"].sort(byName), ["احمد","آدم","أنس","بلال","سليم","سليم احمد","يوسف",""]);
 });
+
+test("byName treats Persian ی as ي", () => {
+  assert.deepEqual(["ناریمان","ناصر","ناهد"].sort(byName), ["ناريمان".replace("ي","ی"),"ناصر","ناهد"].sort(byName));
+  assert.deepEqual(["شرین","شريف","سما"].sort(byName), ["سما","شريف","شرین"]);
+});
