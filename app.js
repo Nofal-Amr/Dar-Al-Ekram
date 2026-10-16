@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.54";
+export const VERSION = "1.3.55";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2796,13 +2796,17 @@ function bindDay(s, id, setF, setQ){
 }
 /* ---------- giveaways on the trip day ----------
    events.gifts = [{ id, name }]; event_people.got = { "k:0": [giftId, …], "a:0": […], "r:1": […] } — who took what. */
-const giftState = new Map();   // per trip: what the list is showing (item, who, ages, order, criterion)
+const giftState = new Map(), giftOpen = new Set();   // giftOpen: trips whose «اللي أخد» box is open   // per trip: what the list is showing (item, who, ages, order, criterion)
 const gst = id => giftState.get(id) || giftState.set(id, { item:"", who:"kids", min:"", max:"", order:"young", crit:"notthis", other:"", q:"", per:"person", fam:"any" }).get(id);
 function giftPeople(id){
   const rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b), out=[];
   for(const { r, b } of rows) for(const p of dayPeople(r,b)) if(p.came!==false) out.push({ ...p, r, b, key:`${p.g}:${p.i}`, got:(r.got||{})[`${p.g}:${p.i}`]||[] });
   return out;
 }
+// young / old: by age · name: the child's name · fam: the family (mother's) name · code: case number — ties by age then name
+const giftSort = st => { const byAge=(x,y)=>(st.order==="old"?-1:1)*((x.age??(st.order==="old"?-1:99))-(y.age??(st.order==="old"?-1:99)));
+  const byCodeP=(x,y)=>String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true});
+  return (x,y)=>st.order==="name"?byName(x.label,y.label):st.order==="fam"?byName(x.b.name,y.b.name)||byAge(x,y):st.order==="code"?byCodeP(x,y)||byAge(x,y):byAge(x,y)||byName(x.label,y.label); };
 function giftPanel(id){
   const e=EV.get(id), gifts=e.gifts||[], st=gst(id), cw=canWrite(), edit=canRsvp();
   if(st.item&&!gifts.some(g=>g.id===st.item)) st.item=""; if(!st.item&&gifts[0]) st.item=gifts[0].id;
@@ -2817,7 +2821,7 @@ function giftPanel(id){
       &&(st.crit==="all"||(perFam?(st.crit==="none"?!famAny(p.r.id):st.crit==="other"?!famGot(p.r.id,st.other||gifts[0]?.id):!famGot(p.r.id,st.item))
         :(st.crit==="none"?!p.got.length:st.crit==="other"?!p.got.includes(st.other||gifts[0]?.id):!p.got.includes(st.item))))
       &&(!qq||norm(p.label).includes(qq)||norm(p.b.name).includes(qq)||String(p.b.code)===qq.padStart(3,"0")))
-    .sort((x,y)=>st.order==="name"?byName(x.label,y.label):((st.order==="old"?-1:1)*((x.age??(st.order==="old"?-1:99))-(y.age??(st.order==="old"?-1:99))))||byName(x.label,y.label));
+    .sort(giftSort(st));
   const gname=gid=>gifts.find(g=>g.id===gid)?.name||"؟", took=gid=>all.filter(p=>p.got.includes(gid)).length;
   // once per family: one row per family, its matching people listed in the chosen order (the first one is who gets it)
   const fams=[]; if(perFam){ const m=new Map(); for(const p of list){ if(!m.has(p.r.id)){ const f={ r:p.r, b:p.b, people:[] }; m.set(p.r.id,f); fams.push(f); } m.get(p.r.id).people.push(p); } }
@@ -2828,7 +2832,7 @@ function giftPanel(id){
     ${cw?`<div class="row" style="gap:6px;margin:6px 0"><input type="text" id="g_new" placeholder="صنف جديد (مثال: كورة، رشاش، مسدس مياه)" style="flex:1 1 200px"><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
     ${gifts.length?`<div class="grid2 gfil">
       <label class="f">مين${sel("g_who",[["kids","الأبناء كلهم"],["boys","الولاد"],["girls","البنات"],["adults","المسؤولين"],["reserve","الاحتياطي"],["all","الكل"]],st.who)}</label>
-      <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["name","بالاسم"]],st.order)}</label>
+      <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["fam","اسم الأسرة (أ ← ي)"],["name","اسم الطفل (أ ← ي)"],["code","رقم الحالة"]],st.order)}</label>
       <label class="f">لكل مين${sel("g_per",[["person","لكل فرد"],["family","مرة واحدة لكل أسرة"]],st.per)}</label>
       <label class="f">الأسر${sel("g_fam",[["any","كل الأسر"],["hasBoys","فيها ولاد"],["onlyBoys","ولاد بس (مفيهاش بنات)"],["hasGirls","فيها بنات"],["onlyGirls","بنات بس (مفيهاش ولاد)"]],st.fam)}</label>
       <label class="f">السن من<input type="number" id="g_min" min="0" max="99" value="${esc(st.min)}"></label>
@@ -2848,11 +2852,17 @@ function giftPanel(id){
         <span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""}</span><br>
         <span class="sub">${p.g==="a"?"":`${p.kind==="احتياطي"?"مع":"ابن/بنت"} ${esc(p.b.name)} · `}${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""}${p.got.filter(g=>g!==st.item).length?` · أخد: ${p.got.filter(g=>g!==st.item).map(g=>esc(gname(g))).join("، ")}`:""}</span></span>
         <span class="chip ${on?"":"grey"}">${on?"أخد ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش حد بالشروط دي</div>`}</div>`}
+    ${(()=>{ if(!st.item) return "";
+      const tp=all.filter(p=>p.got.includes(st.item)).sort(giftSort(st));
+      if(perFam){ const seen=new Set(), tf=tp.filter(p=>!seen.has(p.r.id)&&seen.add(p.r.id)).sort((x,y)=>st.order==="code"?String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true}):byName(x.b.name,y.b.name));
+        return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخدت ${esc(gname(st.item))} (${num(tf.length)} أسرة) — اتأكد</summary><div class="list">${tf.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.b.name)}</span> <span class="sub">${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""} · أخدها: ${esc(p.label)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; }
+      return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخد ${esc(gname(st.item))} (${num(tp.length)}) — اتأكد</summary><div class="list">${tp.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""} · ${p.g==="a"?"":"ابن/بنت "}${esc(p.b.name)} · ${esc(p.b.code)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; })()}
     <div class="bar"><button class="btn sm" id="g_print">${ic("printer")}طباعة القايمة دي</button><button class="btn sm" id="g_x">Excel التوزيع</button></div>`:""}`;
 }
 function bindGift(s, id){
   const q=x=>s.querySelector(x), st=gst(id);
   s.querySelectorAll("[data-gitem]").forEach(el=>el.onclick=()=>{ st.item=el.dataset.gitem; refreshSheet(); });
+  const tk=q("details.taken"); if(tk) tk.ontoggle=()=>{ tk.open?giftOpen.add(id):giftOpen.delete(id); };
   const save=async gifts=>{ const { data, error } = await sb.from("events").update({ gifts }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed(); return true; };
   if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } const g={ id:newId(), name }; if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; toast(`${name} اتضاف ✓`); } };
   if(q("#g_new")) q("#g_new").onkeydown=e=>{ if(e.key==="Enter") q("#g_add").click(); };
@@ -2872,7 +2882,7 @@ function bindGift(s, id){
     setRsvp(r.id,{ got }); if(el.checked) undoable("الأسرة اتعلّمت «أخدت»", ()=>setRsvp(r.id,{ got:prev })); });
   if(q("#g_print")) q("#g_print").onclick=()=>{ const html=giftPanel(id), tmp=document.createElement("div"); tmp.innerHTML=html;
     const e=EV.get(id), name=(e.gifts||[]).find(g=>g.id===st.item)?.name||"";
-    const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
+    tmp.querySelectorAll("details.taken").forEach(d=>d.remove()); const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
     doPrint(`<div class="ps">${hdr()}<h1>${esc(e.title)} — توزيع ${esc(name)}</h1><table><thead><tr><th>م</th>${st.per==="family"?"<th>الأسرة</th><th>رقم الحالة / الباص</th><th>الأبناء</th><th>أخدت</th>":"<th>الاسم</th><th></th><th>الأسرة</th><th>أخد</th>"}</tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td class="sig">☐</td></tr>`).join("")}</tbody></table></div>`, `توزيع ${name}`); };
   if(q("#g_x")) q("#g_x").onclick=()=>{ const e=EV.get(id), gifts=e.gifts||[], all=giftPeople(id), rows=[["الاسم","صفته","السن","الأسرة","رقم الحالة","الباص",...gifts.map(g=>g.name)]];
     all.sort((x,y)=>byName(x.b.name,y.b.name)||x.g.localeCompare(y.g)||x.i-y.i).forEach(p=>rows.push([p.label,p.kind,p.age??"",p.b.name,p.b.code,p.r.bus?`باص ${p.r.bus}`:"",...gifts.map(g=>p.got.includes(g.id)?"✓":"")]));
