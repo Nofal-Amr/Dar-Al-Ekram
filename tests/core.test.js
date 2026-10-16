@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, age, mIdx, mLabel, toNumber, pickFromText } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, byName, age, mIdx, mLabel, toNumber, pickFromText } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -327,4 +327,8 @@ test("a handwritten list typed in: case numbers, IDs and names", () => {
   const r = pickFromText("4 ١٥٦\n18\nفاطمه علي حسن\n999\nاسم مش موجود خالص\n28001010101010", P);
   assert.deepEqual(r.found.map(x => x.b.id), ["a", "b", "c"]);
   assert.deepEqual(r.unknown, ["999", "اسم مش موجود خالص"]);
+});
+
+test("byName sorts Arabic names alphabetically", () => {
+  assert.deepEqual(["يوسف","آدم","احمد","بلال","","سليم احمد","سليم","أنس"].sort(byName), ["احمد","آدم","أنس","بلال","سليم","سليم احمد","يوسف",""]);
 });

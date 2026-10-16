@@ -1,9 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
+import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.49";
+export const VERSION = "1.3.50";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2593,7 +2593,7 @@ function openEvent(id){
     ${etab==="sup"?supPanel(id,supEdit):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
     <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
-    <label class="sortl">مترتبة حسب <select id="e_sort"><option value="code">رقم الحالة</option><option value="sure" ${evSort.get(id)==="sure"?"selected":""}>ترتيب التأكيد (أكيد الأول)</option></select></label>
+    <label class="sortl">مترتبة حسب <select id="e_sort"><option value="name">الاسم (أ ← ي)</option><option value="code" ${evSort.get(id)==="code"?"selected":""}>رقم الحالة</option><option value="sure" ${evSort.get(id)==="sure"?"selected":""}>ترتيب التأكيد (أكيد الأول)</option></select></label>
     <datalist id="rsv_why">${RSV_WHY.map(w=>`<option value="${w}">`).join("")}</datalist>
     <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
       return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}${r.answer==="جاية"&&r.sure?" a-sure":""}">
@@ -2670,7 +2670,7 @@ function openEvent(id){
 const supOpen = new Set();
 const evSort = new Map();   // trip id → "sure": confirmed families first, in the order they were confirmed
 const byCode2 = (a,b)=>String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true});
-const evOrder = id => evSort.get(id)==="sure" ? (a,b)=>(+!(a.r.sure&&a.r.answer==="جاية")-+!(b.r.sure&&b.r.answer==="جاية"))||String(a.r.sure_at||"").localeCompare(String(b.r.sure_at||""))||byCode2(a,b) : byCode2;   // groups / the add form left open survive redraws
+const evOrder = id => (evSort.get(id)||"name")==="name" ? (a,b)=>byName(a.b.name,b.b.name)||byCode2(a,b) : evSort.get(id)==="sure" ? (a,b)=>(+!(a.r.sure&&a.r.answer==="جاية")-+!(b.r.sure&&b.r.answer==="جاية"))||String(a.r.sure_at||"").localeCompare(String(b.r.sure_at||""))||byCode2(a,b) : byCode2;   // groups / the add form left open survive redraws
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 const supRule = s => { const has=v=>v!==""&&v!=null, mn=esc(s.min), mx=esc(s.max);   // min/max come from the DB: escape before they reach innerHTML
   return `${s.sex==="ست"?"بتاخد":"بياخد"} ${s.takes==="الكل"?"ولاد وبنات":esc(s.takes)}${has(s.min)&&has(s.max)?` من ${mn} لـ ${mx} سنة`:has(s.min)?` من ${mn} سنة وأكبر`:has(s.max)?` لحد ${mx} سنة`:" كل الأعمار"}`; };
@@ -2794,7 +2794,7 @@ function eventHTML(id, mode="normal", rsv=true, nid=false){
 function kidsByAge(id, { noName = true } = {}){
   const kids=tripGroups(id).kids.filter(k=>noName||k.name), m=new Map();
   for(const k of kids) (m.get(k.a)||m.set(k.a,[]).get(k.a)).push(k);
-  const byCode=(x,y)=>String(x.code).localeCompare(String(y.code),"en",{numeric:true})||(x.name||"").localeCompare(y.name||"","ar");
+  const byCode=(x,y)=>byName(x.name,y.name)||byName(x.mom,y.mom);   // alphabetical by the child's name
   const ages=[...m.keys()].filter(a=>a!=null).sort((x,y)=>x-y);
   return { kids, groups:[...ages.map(a=>({ a, label:`سن ${a} ${a>=3&&a<=10?"سنين":"سنة"}`, list:m.get(a).sort(byCode) })), ...(m.has(null)?[{ a:null, label:"السن مش مكتوب", list:m.get(null).sort(byCode) }]:[])] };
 }

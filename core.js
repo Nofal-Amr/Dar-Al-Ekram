@@ -5,6 +5,8 @@ export const MONTHS = ["يناير","فبراير","مارس","أبريل","ما
 /* ---------- text & digits ---------- */
 // Staff type on Arabic keyboards, so ٠-٩ and ۰-۹ must behave exactly like 0-9.
 export const latinDigits = s => String(s ?? "").replace(/[٠-٩]/g, d => d.charCodeAt(0) - 0x0660).replace(/[۰-۹]/g, d => d.charCodeAt(0) - 0x06F0);
+// Arabic alphabetical order (أحمد = احمد, ة = ه), names first; empty names last.
+export const byName = (a, b) => { const x = norm(a || "").replace(/ /g, ""), y = norm(b || "").replace(/ /g, ""); return !x !== !y ? (x ? -1 : 1) : x < y ? -1 : x > y ? 1 : 0; };
 export const norm = s => latinDigits(s).replace(/[أإآ]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[ً-ْـ]/g,"").replace(/\s+/g," ").trim();
 
 /* ---------- phones ---------- */
@@ -349,7 +351,7 @@ export function assignKids(kids, sups){
     const sib = el.find(s => groups.get(s.id).some(x => x.fam === k.fam) && n(s) <= min + 1);
     groups.get((sib || el.reduce((b, s) => n(s) < n(b) ? s : b)).id).push(k);
   }
-  for(const g of groups.values()) g.sort((x, y) => (x.a ?? 99) - (y.a ?? 99));
+  for(const g of groups.values()) g.sort((x, y) => byName(x.name, y.name) || (x.a ?? 99) - (y.a ?? 99));
   return { groups, left };
 }
 
