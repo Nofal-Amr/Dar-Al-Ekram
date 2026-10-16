@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.58";
+export const VERSION = "1.3.59";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2821,7 +2821,8 @@ function giftPanel(id){
   const famGot=(rid,gid)=>all.some(p=>p.r.id===rid&&p.got.includes(gid)), famAny=rid=>all.some(p=>p.r.id===rid&&p.got.length);
   // an item with a quantity rule (meals: one per person who came, or N per family) is always handed out per family
   const it=gifts.find(g=>g.id===st.item), qItem=it&&it.qty!=null, perFam=qItem||st.per==="family";
-  const heads=rid=>all.filter(p=>p.r.id===rid).length, qtyOf=rid=>!qItem?1:it.qty==="people"?heads(rid):(+it.qty||1);
+  // headcount for «على عدد الأفراد»: the guardian and the kids who came — the standby only if the item says so
+  const heads=rid=>all.filter(p=>p.r.id===rid&&(p.g!=="r"||it?.withReserve)).length, qtyOf=rid=>!qItem?1:it.qty==="people"?heads(rid):(+it.qty||1);
   // a family item can carry more parts in the same tick (شاورما على العدد + زجاجة 1)
   const parts=qItem?[{ name:it.part||it.name, qty:it.qty }, ...(it.extra||[])]:[], partQty=(pt,rid)=>pt.qty==="people"?heads(rid):(+pt.qty||1);
   const partsTxt=rid=>parts.map(pt=>`${esc(pt.name)} ×${num(partQty(pt,rid))}`).join(" + ");
@@ -2840,7 +2841,7 @@ function giftPanel(id){
   return `<div class="note">${ic("info")} <span>ضيف الأصناف، اختار الصنف ومين ياخد وبالترتيب اللي يناسبك، وعلّم «أخد» وانت بتوزع. اللي متعلّم «ماجاش» مش بيظهر.</span></div>
     <div class="seg">${gifts.map(g=>`<button class="${st.item===g.id?"on":""}" data-gitem="${g.id}">${esc(g.name)}${g.qty==null?"":` (${[{ name:g.part||"", qty:g.qty },...(g.extra||[])].map(pt=>`${pt.name?esc(pt.name)+" ":""}${pt.qty==="people"?"×أفراد":`×${num(+pt.qty)}`}`).join(" + ")})`} <small>(${num(g.qty!=null?famsTook(g.id):took(g.id))})</small></button>`).join("")||`<span class="sub">مفيش أصناف لسه</span>`}</div>
     ${cw?`<div class="row" style="gap:6px;margin:6px 0"><input type="text" id="g_new" placeholder="صنف جديد (مثال: كورة، شاورما، زجاجة مياه)" style="flex:1 1 200px"><select id="g_qty" style="flex:0 0 auto;width:auto"><option value="one">لكل فرد</option><option value="people">لكل أسرة على عدد أفرادها</option><option value="fixed">لكل أسرة عدد ثابت…</option></select><input type="number" id="g_qn" min="1" value="1" style="width:64px;flex:0 0 auto" hidden aria-label="العدد لكل أسرة">
-      <span id="g_extra" class="gextra" hidden><input type="text" id="g_xn" placeholder="ومعاه في نفس العلامة (مثال: زجاجة)" style="flex:1 1 160px"><input type="number" id="g_xq" min="1" value="1" style="width:64px;flex:0 0 auto" aria-label="عدده لكل أسرة"></span><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
+      <span id="g_extra" class="gextra" hidden><label class="chk" style="margin:0"><input type="checkbox" id="g_wr"> يحسب الاحتياطي</label><input type="text" id="g_xn" placeholder="ومعاه في نفس العلامة (مثال: زجاجة)" style="flex:1 1 160px"><input type="number" id="g_xq" min="1" value="1" style="width:64px;flex:0 0 auto" aria-label="عدده لكل أسرة"></span><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
     ${gifts.length?`<div class="grid2 gfil">
       <label class="f">مين${sel("g_who",[["kids","الأبناء كلهم"],["boys","الولاد"],["girls","البنات"],["adults","المسؤولين"],["reserve","الاحتياطي"],["all","الكل"]],st.who)}</label>
       <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["fam","اسم الأسرة (أ ← ي)"],["name","اسم الطفل (أ ← ي)"],["code","رقم الحالة"]],st.order)}</label>
@@ -2887,7 +2888,7 @@ function bindGift(s, id){
   const gq2=q("#g_qty"); if(gq2) gq2.onchange=()=>{ q("#g_qn").hidden=gq2.value!=="fixed"; q("#g_extra").hidden=gq2.value==="one"; };
   if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; }
     const k=q("#g_qty").value, xn=k!=="one"?q("#g_xn").value.trim():"";
-    const g={ id:newId(), name:xn?`${name} + ${xn}`:name, ...(k==="people"?{ qty:"people" }:k==="fixed"?{ qty:Math.max(1,Math.round(+q("#g_qn").value||1)) }:{}), ...(xn?{ part:name, extra:[{ name:xn, qty:Math.max(1,Math.round(+q("#g_xq").value||1)) }] }:{}) };
+    const g={ id:newId(), name:xn?`${name} + ${xn}`:name, ...(k==="people"?{ qty:"people", ...(q("#g_wr").checked?{ withReserve:true }:{}) }:k==="fixed"?{ qty:Math.max(1,Math.round(+q("#g_qn").value||1)) }:{}), ...(xn?{ part:name, extra:[{ name:xn, qty:Math.max(1,Math.round(+q("#g_xq").value||1)) }] }:{}) };
     if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; if(g.qty!=null){ st.who="all"; st.min=""; st.max=""; st.fam="any"; } toast(`${name} اتضاف ✓`); } };
   if(q("#g_new")) q("#g_new").onkeydown=e=>{ if(e.key==="Enter") q("#g_add").click(); };
   if(q("#g_del")) q("#g_del").onclick=async()=>{ const cur=EV.get(id).gifts||[], g=cur.find(x=>x.id===st.item); if(!g) return;
@@ -2915,9 +2916,9 @@ function bindGift(s, id){
   if(q("#g_x")) q("#g_x").onclick=()=>{ const e=EV.get(id), gifts=e.gifts||[], all=giftPeople(id), rows=[["الاسم","صفته","السن","الأسرة","رقم الحالة","الباص",...gifts.map(g=>g.name)]];
     all.sort((x,y)=>byName(x.b.name,y.b.name)||x.g.localeCompare(y.g)||x.i-y.i).forEach(p=>rows.push([p.label,p.kind,p.age??"",p.b.name,p.b.code,p.r.bus?`باص ${p.r.bus}`:"",...gifts.map(g=>p.got.includes(g.id)?"✓":"")]));
     rows.push(["الإجمالي","","","","","",...gifts.map(g=>all.filter(p=>p.got.includes(g.id)).length)]);
-    const qg=gifts.filter(g=>g.qty!=null), gp=g=>[{ name:g.part||g.name, qty:g.qty },...(g.extra||[])], fam=[["الأسرة","رقم الحالة","الباص","اللي حضروا",...qg.flatMap(g=>[...gp(g).map(pt=>pt.name),`${g.name} — أخدت؟`])]], fr=new Map();
-    for(const p of all){ if(!fr.has(p.r.id)) fr.set(p.r.id,{ r:p.r, b:p.b, n:0, got:new Set() }); const f=fr.get(p.r.id); f.n++; p.got.forEach(x=>f.got.add(x)); }
-    [...fr.values()].sort((x,y)=>byName(x.b.name,y.b.name)).forEach(f=>fam.push([f.b.name,f.b.code,f.r.bus?`باص ${f.r.bus}`:"",f.n,...qg.flatMap(g=>[...gp(g).map(pt=>pt.qty==="people"?f.n:+pt.qty), f.got.has(g.id)?"✓":""])]));
+    const qg=gifts.filter(g=>g.qty!=null), gp=g=>[{ name:g.part||g.name, qty:g.qty },...(g.extra||[])], fam=[["الأسرة","رقم الحالة","الباص","اللي حضروا (من غير الاحتياطي)",...qg.flatMap(g=>[...gp(g).map(pt=>pt.name),`${g.name} — أخدت؟`])]], fr=new Map();
+    for(const p of all){ if(!fr.has(p.r.id)) fr.set(p.r.id,{ r:p.r, b:p.b, n:0, nr:0, got:new Set() }); const f=fr.get(p.r.id); if(p.g==="r") f.nr++; else f.n++; p.got.forEach(x=>f.got.add(x)); }
+    [...fr.values()].sort((x,y)=>byName(x.b.name,y.b.name)).forEach(f=>fam.push([f.b.name,f.b.code,f.r.bus?`باص ${f.r.bus}`:"",f.n,...qg.flatMap(g=>[...gp(g).map(pt=>pt.qty==="people"?f.n+(g.withReserve?f.nr:0):+pt.qty), f.got.has(g.id)?"✓":""])]));
     xlsx(qg.length?{"التوزيع":rows,"الوجبات لكل أسرة":fam}:{"التوزيع":rows},`${e.title} — التوزيع.xlsx`); };
 }
 function attendanceHTML(id){
