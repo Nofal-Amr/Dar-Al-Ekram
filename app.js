@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.55";
+export const VERSION = "1.3.56";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2796,7 +2796,11 @@ function bindDay(s, id, setF, setQ){
 }
 /* ---------- giveaways on the trip day ----------
    events.gifts = [{ id, name }]; event_people.got = { "k:0": [giftId, …], "a:0": […], "r:1": […] } — who took what. */
-const giftState = new Map(), giftOpen = new Set();   // giftOpen: trips whose «اللي أخد» box is open   // per trip: what the list is showing (item, who, ages, order, criterion)
+const giftState = new Map(), giftOpen = new Set();
+// the giveaway log: every «أخد» tick / untick, newest first (activity_log, entity "gift", one trip per entity_id)
+const giftLogs = new Map(), giftLogOpen = new Set();
+async function loadGiftLog(id){ const { data } = await sb.from("activity_log").select("*").eq("entity","gift").eq("entity_id",id).order("at",{ ascending:false }).limit(300); giftLogs.set(id, data||[]); refreshSheet(); }
+async function logGift(id, text){ if(!canWrite()) return; const { data } = await sb.from("activity_log").insert({ entity:"gift", entity_id:id, text }).select().single(); if(data&&giftLogs.has(id)){ giftLogs.get(id).unshift(data); refreshSheet(); } }   // giftOpen: trips whose «اللي أخد» box is open   // per trip: what the list is showing (item, who, ages, order, criterion)
 const gst = id => giftState.get(id) || giftState.set(id, { item:"", who:"kids", min:"", max:"", order:"young", crit:"notthis", other:"", q:"", per:"person", fam:"any" }).get(id);
 function giftPeople(id){
   const rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b), out=[];
@@ -2857,12 +2861,19 @@ function giftPanel(id){
       if(perFam){ const seen=new Set(), tf=tp.filter(p=>!seen.has(p.r.id)&&seen.add(p.r.id)).sort((x,y)=>st.order==="code"?String(x.b.code).localeCompare(String(y.b.code),"en",{numeric:true}):byName(x.b.name,y.b.name));
         return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخدت ${esc(gname(st.item))} (${num(tf.length)} أسرة) — اتأكد</summary><div class="list">${tf.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.b.name)}</span> <span class="sub">${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""} · أخدها: ${esc(p.label)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; }
       return `<details class="addbox taken" ${giftOpen.has(id)?"open":""}><summary>${ic("check")}اللي أخد ${esc(gname(st.item))} (${num(tp.length)}) — اتأكد</summary><div class="list">${tp.map((p,n)=>`<label class="item gp on"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" checked ${edit?"":"disabled"} style="width:22px;height:22px"><span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""} · ${p.g==="a"?"":"ابن/بنت "}${esc(p.b.name)} · ${esc(p.b.code)}</span></span></label>`).join("")||`<div class="empty">لسه محدش</div>`}</div></details>`; })()}
+    <details class="addbox glog" ${giftLogOpen.has(id)?"open":""}><summary>${ic("list")}سجل التوزيع — مين اتعلّم إمتى</summary>
+      ${!giftLogs.has(id)?`<div class="empty"><span class="spin"></span></div>`:`<div class="bar" style="margin:4px 0"><button class="btn sm" id="g_logr">${ic("refresh")}تحديث</button></div>
+      <div class="list">${giftLogs.get(id).map(l=>`<div class="item"><span class="code">${esc(new Date(l.at).toLocaleTimeString("ar-EG",{ hour:"numeric", minute:"2-digit" }))}</span><span class="grow">${esc(l.text)}<br><span class="sub">${esc(who(l.by))}</span></span></div>`).join("")||`<div class="empty">لسه مفيش</div>`}</div>`}</details>
     <div class="bar"><button class="btn sm" id="g_print">${ic("printer")}طباعة القايمة دي</button><button class="btn sm" id="g_x">Excel التوزيع</button></div>`:""}`;
 }
 function bindGift(s, id){
   const q=x=>s.querySelector(x), st=gst(id);
   s.querySelectorAll("[data-gitem]").forEach(el=>el.onclick=()=>{ st.item=el.dataset.gitem; refreshSheet(); });
   const tk=q("details.taken"); if(tk) tk.ontoggle=()=>{ tk.open?giftOpen.add(id):giftOpen.delete(id); };
+  const gl=q("details.glog"); if(gl) gl.ontoggle=()=>{ if(gl.open){ giftLogOpen.add(id); if(!giftLogs.has(id)) loadGiftLog(id); } else giftLogOpen.delete(id); };
+  if(gl&&gl.open&&!giftLogs.has(id)) loadGiftLog(id);
+  if(q("#g_logr")) q("#g_logr").onclick=()=>loadGiftLog(id);
+  const gn=gid=>(EV.get(id).gifts||[]).find(g=>g.id===gid)?.name||"";
   const save=async gifts=>{ const { data, error } = await sb.from("events").update({ gifts }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed(); return true; };
   if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } const g={ id:newId(), name }; if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; toast(`${name} اتضاف ✓`); } };
   if(q("#g_new")) q("#g_new").onkeydown=e=>{ if(e.key==="Enter") q("#g_add").click(); };
@@ -2874,12 +2885,16 @@ function bindGift(s, id){
   const gq=q("#g_q"); if(gq) gq.oninput=()=>{ st.q=gq.value; const pos=gq.selectionStart; refreshSheet(); const n=$("#g_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
   s.querySelectorAll("[data-gift]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gift), k=el.dataset.k, item=st.item, got=JSON.parse(JSON.stringify(r.got||{}));
     const cur=got[k]||[]; got[k]=el.checked?[...new Set([...cur,item])]:cur.filter(x=>x!==item); if(!got[k].length) delete got[k];
-    const prev=r.got||{}; setRsvp(r.id,{ got }); if(el.checked) undoable("اتعلّم «أخد»", ()=>setRsvp(r.id,{ got:prev })); });
+    const prev=r.got||{}, b=B.get(r.beneficiary_id), pp=dayPeople(r,b).find(x=>`${x.g}:${x.i}`===k);
+    setRsvp(r.id,{ got }); logGift(id, `${el.checked?"✓":"✗ اتشالت علامة"} ${pp?.label||""} (${pp?.kind||""}، ${b.name} ${b.code}) — ${gn(item)}`);
+    if(el.checked) undoable("اتعلّم «أخد»", ()=>{ setRsvp(r.id,{ got:prev }); logGift(id, `↶ تراجع: ${pp?.label||""} (${b.code}) — ${gn(item)}`); }); });
   // once per family: tick = the first one listed (⭐) gets it; untick = nobody in the family has it
   s.querySelectorAll("[data-gfam]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gfam), item=st.item, got=JSON.parse(JSON.stringify(r.got||{})), prev=r.got||{};
     if(el.checked){ const k=el.dataset.k; got[k]=[...new Set([...(got[k]||[]),item])]; }
     else for(const k of Object.keys(got)){ got[k]=got[k].filter(x=>x!==item); if(!got[k].length) delete got[k]; }
-    setRsvp(r.id,{ got }); if(el.checked) undoable("الأسرة اتعلّمت «أخدت»", ()=>setRsvp(r.id,{ got:prev })); });
+    const b=B.get(r.beneficiary_id), pp=el.checked?dayPeople(r,b).find(x=>`${x.g}:${x.i}`===el.dataset.k):null;
+    setRsvp(r.id,{ got }); logGift(id, el.checked?`✓ أسرة ${b.name} (${b.code}) — ${gn(item)}${pp?` — أخدها ${pp.label}`:""}`:`✗ اتشالت علامة أسرة ${b.name} (${b.code}) — ${gn(item)}`);
+    if(el.checked) undoable("الأسرة اتعلّمت «أخدت»", ()=>{ setRsvp(r.id,{ got:prev }); logGift(id, `↶ تراجع: أسرة ${b.name} (${b.code}) — ${gn(item)}`); }); });
   if(q("#g_print")) q("#g_print").onclick=()=>{ const html=giftPanel(id), tmp=document.createElement("div"); tmp.innerHTML=html;
     const e=EV.get(id), name=(e.gifts||[]).find(g=>g.id===st.item)?.name||"";
     tmp.querySelectorAll("details.taken").forEach(d=>d.remove()); const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
