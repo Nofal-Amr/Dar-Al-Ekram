@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.51";
+export const VERSION = "1.3.52";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2589,8 +2589,8 @@ function openEvent(id){
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأبناء:</b> ${bandsText(t.bands,true)}`:""}
       ${t.moms.length?`<br><b>المسؤولين:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
     <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button><button class="btn sm" id="e_copy">${ic("list")}نسخة جديدة</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_ages">${ic("printer")}الأبناء حسب السن</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
-    <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button><button class="${etab==="day"?"on":""}" data-etab="day">${ic("check")} يوم الرحلة (الباصات والحضور)</button></div>
-    ${etab==="sup"?supPanel(id,supEdit):etab==="day"?dayPanel(id,dayF,q_):`
+    <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button><button class="${etab==="day"?"on":""}" data-etab="day">${ic("check")} يوم الرحلة (الباصات والحضور)</button><button class="${etab==="gift"?"on":""}" data-etab="gift">${ic("box")} توزيع</button></div>
+    ${etab==="sup"?supPanel(id,supEdit):etab==="day"?dayPanel(id,dayF,q_):etab==="gift"?giftPanel(id):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
     <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
     <label class="sortl">مترتبة حسب <select id="e_sort"><option value="name">الاسم (أ ← ي)</option><option value="code" ${evSort.get(id)==="code"?"selected":""}>رقم الحالة</option><option value="sure" ${evSort.get(id)==="sure"?"selected":""}>ترتيب التأكيد (أكيد الأول)</option></select></label>
@@ -2617,6 +2617,7 @@ function openEvent(id){
     s.querySelectorAll("[data-etab]").forEach(el=>el.onclick=()=>{ etab=el.dataset.etab; supEdit=null; refreshSheet(); });
     bindSup(s, id, v=>{ supEdit=v; refreshSheet(); });
     bindDay(s, id, v=>{ dayF=v; refreshSheet(); }, v=>{ q_=v; });
+    bindGift(s, id);
     const eq=q("#e_q"); if(eq) eq.oninput=()=>{ q_=eq.value; const pos=eq.selectionStart; refreshSheet(); const n=$("#e_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
     s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null };
       prev.sure=!!r.sure;
@@ -2746,7 +2747,7 @@ function groupsHTML(id){
    came = { a:[…], k:[…], r:[…] } — one true/false per guardian, child and standby person; {} = not marked yet. */
 const dayPeople = (r, b) => {
   const out=[];
-  for(let i=0;i<(+r.adults||0);i++) out.push({ g:"a", i, label:i?`مسؤول ${i+1}`:b.name, kind:"المسؤول" });
+  for(let i=0;i<(+r.adults||0);i++) out.push({ g:"a", i, label:i?`مسؤول ${i+1}`:b.name, kind:"المسؤول", age:i?null:r.mother_age??null });
   kidsComing(r).forEach((k,i)=>out.push({ g:"k", i, label:k.name||`ابن/بنت ${i+1}`, kind:k.sex==="بنت"?"بنت":k.sex==="ولد"?"ابن":"ابن/بنت", age:k.a }));
   reserveOf(r).forEach((x,i)=>{ if(x.coming!==false) out.push({ g:"r", i, label:x.who||`احتياطي ${i+1}`, kind:"احتياطي", age:x.age }); });
   return out.map(p=>({ ...p, came:Object.keys(r.came||{}).length?((r.came||{})[p.g]||[])[p.i]??null:null }));
@@ -2791,6 +2792,70 @@ function bindDay(s, id, setF, setQ){
   s.querySelectorAll("[data-dprint]").forEach(el=>el.onclick=()=>doPrint(eventHTML(id,"fam",true,false,+el.dataset.dprint), `${EV.get(id).title} — باص ${el.dataset.dprint}`));
   const rp=s.querySelector("#d_rep"); if(rp) rp.onclick=()=>doPrint(attendanceHTML(id), `${EV.get(id).title} — الحضور`);
   const dx=s.querySelector("#d_x"); if(dx) dx.onclick=()=>attendanceXlsx(id);
+}
+/* ---------- giveaways on the trip day ----------
+   events.gifts = [{ id, name }]; event_people.got = { "k:0": [giftId, …], "a:0": […], "r:1": […] } — who took what. */
+const giftState = new Map();   // per trip: what the list is showing (item, who, ages, order, criterion)
+const gst = id => giftState.get(id) || giftState.set(id, { item:"", who:"kids", min:"", max:"", order:"young", crit:"notthis", other:"", q:"" }).get(id);
+function giftPeople(id){
+  const rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b), out=[];
+  for(const { r, b } of rows) for(const p of dayPeople(r,b)) if(p.came!==false) out.push({ ...p, r, b, key:`${p.g}:${p.i}`, got:(r.got||{})[`${p.g}:${p.i}`]||[] });
+  return out;
+}
+function giftPanel(id){
+  const e=EV.get(id), gifts=e.gifts||[], st=gst(id), cw=canWrite(), edit=canRsvp();
+  if(st.item&&!gifts.some(g=>g.id===st.item)) st.item=""; if(!st.item&&gifts[0]) st.item=gifts[0].id;
+  const all=giftPeople(id), qq=norm(st.q||""), has=v=>v!==""&&v!=null;
+  const list=all.filter(p=>(st.who==="all"||(st.who==="kids"?p.g==="k":st.who==="boys"?p.kind==="ابن":st.who==="girls"?p.kind==="بنت":st.who==="adults"?p.g==="a":p.g==="r"))
+      &&(!has(st.min)||(p.age!=null&&p.age>=+st.min))&&(!has(st.max)||(p.age!=null&&p.age<=+st.max))
+      &&(st.crit==="all"||(st.crit==="none"?!p.got.length:st.crit==="other"?!p.got.includes(st.other||gifts[0]?.id):!p.got.includes(st.item)))
+      &&(!qq||norm(p.label).includes(qq)||norm(p.b.name).includes(qq)||String(p.b.code)===qq.padStart(3,"0")))
+    .sort((x,y)=>st.order==="name"?byName(x.label,y.label):((st.order==="old"?-1:1)*((x.age??(st.order==="old"?-1:99))-(y.age??(st.order==="old"?-1:99))))||byName(x.label,y.label));
+  const gname=gid=>gifts.find(g=>g.id===gid)?.name||"؟", took=gid=>all.filter(p=>p.got.includes(gid)).length;
+  const sel=(idn,opts,v)=>`<select id="${idn}">${opts.map(([k,l])=>`<option value="${k}" ${String(v)===String(k)?"selected":""}>${l}</option>`).join("")}</select>`;
+  return `<div class="note">${ic("info")} <span>ضيف الأصناف، اختار الصنف ومين ياخد وبالترتيب اللي يناسبك، وعلّم «أخد» وانت بتوزع. اللي متعلّم «ماجاش» مش بيظهر.</span></div>
+    <div class="seg">${gifts.map(g=>`<button class="${st.item===g.id?"on":""}" data-gitem="${g.id}">${esc(g.name)} <small>(${num(took(g.id))})</small></button>`).join("")||`<span class="sub">مفيش أصناف لسه</span>`}</div>
+    ${cw?`<div class="row" style="gap:6px;margin:6px 0"><input type="text" id="g_new" placeholder="صنف جديد (مثال: كورة، رشاش، مسدس مياه)" style="flex:1 1 200px"><button class="btn sm pri" id="g_add">${ic("plus")}ضيف</button>${st.item?`<button class="btn sm danger" id="g_del">شيل الصنف ده</button>`:""}</div>`:""}
+    ${gifts.length?`<div class="grid2 gfil">
+      <label class="f">مين${sel("g_who",[["kids","الأبناء كلهم"],["boys","الولاد"],["girls","البنات"],["adults","المسؤولين"],["reserve","الاحتياطي"],["all","الكل"]],st.who)}</label>
+      <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["name","بالاسم"]],st.order)}</label>
+      <label class="f">السن من<input type="number" id="g_min" min="0" max="99" value="${esc(st.min)}"></label>
+      <label class="f">لحد<input type="number" id="g_max" min="0" max="99" value="${esc(st.max)}"></label>
+      <label class="f">اللي يظهر${sel("g_crit",[["notthis",`مخدش ${esc(gname(st.item))}`],["none","مخدش أي حاجة خالص"],["other","مخدش صنف تاني…"],["all","الكل"]],st.crit)}</label>
+      ${st.crit==="other"?`<label class="f">الصنف ده${sel("g_other",gifts.map(g=>[g.id,esc(g.name)]),st.other||gifts[0].id)}</label>`:""}
+    </div>
+    <div class="row" style="margin:6px 0"><input type="search" id="g_q" placeholder="دوّر بالاسم أو الأم أو رقم الحالة" value="${esc(st.q||"")}" style="flex:1 1 200px"></div>
+    <div class="note green">${ic("box")} <span><b>${esc(gname(st.item))}</b>: أخد ${num(took(st.item))} · في القايمة دي ${num(list.length)}</span></div>
+    <div class="list">${list.map((p,n)=>{ const on=p.got.includes(st.item);
+      return `<label class="item gp ${on?"on":""}"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" ${on?"checked":""} ${edit?"":"disabled"} style="width:24px;height:24px">
+        <span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""}</span><br>
+        <span class="sub">${p.g==="a"?"":`${p.kind==="احتياطي"?"مع":"ابن/بنت"} ${esc(p.b.name)} · `}${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""}${p.got.filter(g=>g!==st.item).length?` · أخد: ${p.got.filter(g=>g!==st.item).map(g=>esc(gname(g))).join("، ")}`:""}</span></span>
+        <span class="chip ${on?"":"grey"}">${on?"أخد ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش حد بالشروط دي</div>`}</div>
+    <div class="bar"><button class="btn sm" id="g_print">${ic("printer")}طباعة القايمة دي</button><button class="btn sm" id="g_x">Excel التوزيع</button></div>`:""}`;
+}
+function bindGift(s, id){
+  const q=x=>s.querySelector(x), st=gst(id);
+  s.querySelectorAll("[data-gitem]").forEach(el=>el.onclick=()=>{ st.item=el.dataset.gitem; refreshSheet(); });
+  const save=async gifts=>{ const { data, error } = await sb.from("events").update({ gifts }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed(); return true; };
+  if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } const g={ id:newId(), name }; if(await save([...(EV.get(id).gifts||[]),g])){ st.item=g.id; toast(`${name} اتضاف ✓`); } };
+  if(q("#g_new")) q("#g_new").onkeydown=e=>{ if(e.key==="Enter") q("#g_add").click(); };
+  if(q("#g_del")) q("#g_del").onclick=async()=>{ const cur=EV.get(id).gifts||[], g=cur.find(x=>x.id===st.item); if(!g) return;
+    if(!await ask(`«${g.name}» هيتشال من الأصناف (واللي اتعلّم إنه أخده بيفضل محفوظ لو رجّعته بـ«تراجع»).`,{title:"شيل الصنف؟",ok:"شيل",danger:true})) return;
+    if(await save(cur.filter(x=>x.id!==g.id))){ st.item=""; undoable(`${g.name} اتشال`, ()=>save(cur)); } };
+  const bindSel=(sel,k)=>{ const el=q(sel); if(el) el.onchange=()=>{ st[k]=el.value; refreshSheet(); }; };
+  bindSel("#g_who","who"); bindSel("#g_ord","order"); bindSel("#g_crit","crit"); bindSel("#g_other","other"); bindSel("#g_min","min"); bindSel("#g_max","max");
+  const gq=q("#g_q"); if(gq) gq.oninput=()=>{ st.q=gq.value; const pos=gq.selectionStart; refreshSheet(); const n=$("#g_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
+  s.querySelectorAll("[data-gift]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gift), k=el.dataset.k, item=st.item, got=JSON.parse(JSON.stringify(r.got||{}));
+    const cur=got[k]||[]; got[k]=el.checked?[...new Set([...cur,item])]:cur.filter(x=>x!==item); if(!got[k].length) delete got[k];
+    const prev=r.got||{}; setRsvp(r.id,{ got }); if(el.checked) undoable("اتعلّم «أخد»", ()=>setRsvp(r.id,{ got:prev })); });
+  if(q("#g_print")) q("#g_print").onclick=()=>{ const html=giftPanel(id), tmp=document.createElement("div"); tmp.innerHTML=html;
+    const e=EV.get(id), name=(e.gifts||[]).find(g=>g.id===st.item)?.name||"";
+    const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
+    doPrint(`<div class="ps">${hdr()}<h1>${esc(e.title)} — توزيع ${esc(name)}</h1><table><thead><tr><th>م</th><th>الاسم</th><th></th><th>الأسرة</th><th>أخد</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td class="sig">☐</td></tr>`).join("")}</tbody></table></div>`, `توزيع ${name}`); };
+  if(q("#g_x")) q("#g_x").onclick=()=>{ const e=EV.get(id), gifts=e.gifts||[], all=giftPeople(id), rows=[["الاسم","صفته","السن","الأسرة","رقم الحالة","الباص",...gifts.map(g=>g.name)]];
+    all.sort((x,y)=>byName(x.b.name,y.b.name)||x.g.localeCompare(y.g)||x.i-y.i).forEach(p=>rows.push([p.label,p.kind,p.age??"",p.b.name,p.b.code,p.r.bus?`باص ${p.r.bus}`:"",...gifts.map(g=>p.got.includes(g.id)?"✓":"")]));
+    rows.push(["الإجمالي","","","","","",...gifts.map(g=>all.filter(p=>p.got.includes(g.id)).length)]);
+    xlsx({"التوزيع":rows},`${e.title} — التوزيع.xlsx`); };
 }
 function attendanceHTML(id){
   const e=EV.get(id), { N, per, all, rows } = dayTotals(id);
