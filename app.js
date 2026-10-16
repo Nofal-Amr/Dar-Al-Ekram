@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.52";
+export const VERSION = "1.3.53";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2784,7 +2784,8 @@ function bindDay(s, id, setF, setQ){
   s.querySelectorAll("[data-df]").forEach(el=>el.onclick=()=>setF(el.dataset.df));
   const dq=s.querySelector("#d_q"); if(dq) dq.oninput=()=>{ setQ(dq.value); const pos=dq.selectionStart; refreshSheet(); const n=$("#d_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
   s.querySelectorAll("[data-dbus]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.dbus), v=+el.dataset.v; setRsvp(r.id,{ bus:r.bus===v?null:v }); });
-  s.querySelectorAll("[data-dmark]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.dmark), b=B.get(r.beneficiary_id), v=el.dataset.v, prev=r.came||{};
+  s.querySelectorAll("[data-dmark]").forEach(el=>el.onclick=async()=>{ const r=EP.get(el.dataset.dmark), b=B.get(r.beneficiary_id), v=el.dataset.v, prev=r.came||{};
+    if(v==="reset"&&!await ask(`علامات الحضور بتاعة ${b.name} هتتشال (مين حضر ومين ماجاش) وترجع «مش متعلّمة».`,{title:"تشيل علامات الحضور؟",ok:"شيل العلامات",danger:true})) return;
     const came=v==="reset"?{}:{ a:Array.from({length:+r.adults||0},()=>v==="1"), k:Array.from({length:+r.kids||0},()=>v==="1"), r:reserveOf(r).map(x=>x.coming===false?false:v==="1") };
     setRsvp(r.id,{ came }); undoable(`${b.name}: ${v==="1"?"حضروا":v==="0"?"ماجوش":"اترجعت"}`, ()=>setRsvp(r.id,{ came:prev })); });
   s.querySelectorAll("[data-dp]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.dp), g=el.dataset.g, i=+el.dataset.i, c=JSON.parse(JSON.stringify(r.came||{}));
