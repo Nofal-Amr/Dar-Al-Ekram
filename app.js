@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.50";
+export const VERSION = "1.3.51";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2557,12 +2557,12 @@ function copyEvent(id){
 function editEvent(id){
   const e=EV.get(id);
   sheet("تعديل الرحلة",`<div class="grid2"><label class="f">الاسم<input type="text" id="ee_t" value="${esc(e.title)}"></label><label class="f">اليوم<input type="date" id="ee_d" value="${esc(e.date||"")}"></label>
-    <label class="f">المكان<input type="text" id="ee_p" value="${esc(e.place||"")}"></label><label class="f">عدد الكراسي<input type="number" id="ee_c" min="1" value="${e.capacity||""}"></label></div>
+    <label class="f">المكان<input type="text" id="ee_p" value="${esc(e.place||"")}"></label><label class="f">عدد الكراسي<input type="number" id="ee_c" min="1" value="${e.capacity||""}"></label><label class="f">عدد الباصات<input type="number" id="ee_b" min="1" max="20" value="${e.buses||2}"></label></div>
     <label class="f">ملاحظات<input type="text" id="ee_n" value="${esc(e.notes||"")}"></label>
     <div class="bar"><button class="btn pri" id="ee_go">${ic("save")}حفظ</button><button class="btn" id="ee_back">رجوع</button><span class="grow"></span><button class="btn danger" id="ee_arch">${ic("archive")}أرشفة الرحلة</button></div>`, s=>{
     const q=x=>s.querySelector(x);
     q("#ee_back").onclick=()=>openEvent(id);
-    q("#ee_go").onclick=async()=>{ const patch={ title:q("#ee_t").value.trim()||e.title, date:q("#ee_d").value||null, place:q("#ee_p").value.trim(), capacity:+q("#ee_c").value||null, notes:q("#ee_n").value.trim() };
+    q("#ee_go").onclick=async()=>{ const patch={ title:q("#ee_t").value.trim()||e.title, date:q("#ee_d").value||null, place:q("#ee_p").value.trim(), capacity:+q("#ee_c").value||null, buses:Math.max(1,Math.min(20,+q("#ee_b").value||2)), notes:q("#ee_n").value.trim() };
       const { data, error } = await sb.from("events").update(patch).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; } EV.set(id,data); changed(); openEvent(id); toast("اتحفظ ✓"); };
     q("#ee_arch").onclick=async()=>{ if(!await ask("الرحلة هتختفي من القايمة. تقدر ترجّعها بـ«تراجع».",{title:"أرشفة الرحلة؟",ok:"أرشفة"})) return;
       const { data, error } = await sb.from("events").update({ archived_at:new Date().toISOString(), archived_by:me.id }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; }
@@ -2570,7 +2570,7 @@ function editEvent(id){
   });
 }
 function openEvent(id){
-  let q_="", only="all", addQ="", etab="fam", supEdit=null;
+  let q_="", only="all", addQ="", etab="fam", supEdit=null, dayF="all";
   const ctx="ev:"+id;
   const FIL={ all:"الكل", open:"لسه ماردّتش", noans:"ماردتش على التليفون", "جاية":"جاية", sure:"جاية أكيد ✓✓", unsure:"جاية ولسه مأكدتش", "مش متأكدة":"مش متأكدة", "مش جاية":"مش جاية" };
   const stp=(r,f,lbl,on)=>`<span class="stp"><small>${lbl}</small>${on?`<button data-st="${r.id}" data-f="${f}" data-d="-1" aria-label="${lbl} ناقص">−</button>`:""}<input type="number" min="0" max="50" inputmode="numeric" data-num="${r.id}" data-f="${f}" value="${+r[f]||0}" ${on?"":"disabled"} aria-label="${lbl}">${on?`<button data-st="${r.id}" data-f="${f}" data-d="1" aria-label="${lbl} زيادة">+</button>`:""}</span>`;
@@ -2589,8 +2589,8 @@ function openEvent(id){
     ${t.kids||t.moms.length?`<div class="agesum">${t.kids?`<b>الأبناء:</b> ${bandsText(t.bands,true)}`:""}
       ${t.moms.length?`<br><b>المسؤولين:</b> من ${num(Math.min(...t.moms))} لـ ${num(Math.max(...t.moms))} سنة${t.moms.length<t.yes?` <span class="muted">(${num(t.yes-t.moms.length)} من غير سن)</span>`:""}`:""}</div>`:""}
     <div class="bar">${cw?`<button class="btn sm" id="e_edit">${ic("edit")}تعديل</button><button class="btn sm" id="e_copy">${ic("list")}نسخة جديدة</button>`:""}<button class="btn sm" id="e_print">${ic("printer")}طباعة اللي جايين</button><button class="btn sm" id="e_ages">${ic("printer")}الأبناء حسب السن</button><button class="btn sm" id="e_phones">${ic("phone")}أرقام اللي جايين (جروب)</button><button class="btn sm" id="e_x">Excel</button></div>
-    <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button></div>
-    ${etab==="sup"?supPanel(id,supEdit):`
+    <div class="seg etabs" role="tablist"><button class="${etab==="fam"?"on":""}" data-etab="fam">${ic("users")} الأسر</button><button class="${etab==="sup"?"on":""}" data-etab="sup">${ic("list")} المشرفين والمجموعات${(e.supervisors||[]).length?` (${num(e.supervisors.length)})`:""}</button><button class="${etab==="day"?"on":""}" data-etab="day">${ic("check")} يوم الرحلة (الباصات والحضور)</button></div>
+    ${etab==="sup"?supPanel(id,supEdit):etab==="day"?dayPanel(id,dayF,q_):`
     <div class="row" style="margin:8px 0"><input type="search" id="e_q" placeholder="دوّر بالاسم أو الرقم أو التليفون" value="${esc(q_)}" style="flex:1 1 200px"></div>
     <div class="seg">${Object.entries(FIL).map(([k,l])=>`<button class="${only===k?"on":""}" data-evf="${k}">${l}</button>`).join("")}</div>
     <label class="sortl">مترتبة حسب <select id="e_sort"><option value="name">الاسم (أ ← ي)</option><option value="code" ${evSort.get(id)==="code"?"selected":""}>رقم الحالة</option><option value="sure" ${evSort.get(id)==="sure"?"selected":""}>ترتيب التأكيد (أكيد الأول)</option></select></label>
@@ -2616,6 +2616,7 @@ function openEvent(id){
     s.querySelectorAll("[data-evf]").forEach(el=>el.onclick=()=>{ only=el.dataset.evf; refreshSheet(); });
     s.querySelectorAll("[data-etab]").forEach(el=>el.onclick=()=>{ etab=el.dataset.etab; supEdit=null; refreshSheet(); });
     bindSup(s, id, v=>{ supEdit=v; refreshSheet(); });
+    bindDay(s, id, v=>{ dayF=v; refreshSheet(); }, v=>{ q_=v; });
     const eq=q("#e_q"); if(eq) eq.oninput=()=>{ q_=eq.value; const pos=eq.selectionStart; refreshSheet(); const n=$("#e_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
     s.querySelectorAll("[data-ans]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.ep), b=B.get(r.beneficiary_id), ans=el.dataset.ans, prev={ answer:r.answer, adults:r.adults, kids:r.kids, kid_ages:r.kid_ages||[], kid_sexes:r.kid_sexes||[], kid_names:r.kid_names||[], kid_stages:r.kid_stages||[], mother_age:r.mother_age??null };
       prev.sure=!!r.sure;
@@ -2741,6 +2742,72 @@ function groupsHTML(id){
     ${signsHTML()}</div>`;
 }
 // Which paper: the usual table, one line per mother with her national ID and room for a stamp, or each mother with her kids under her.
+/* ---------- trip day: buses and who actually came ----------
+   came = { a:[…], k:[…], r:[…] } — one true/false per guardian, child and standby person; {} = not marked yet. */
+const dayPeople = (r, b) => {
+  const out=[];
+  for(let i=0;i<(+r.adults||0);i++) out.push({ g:"a", i, label:i?`مسؤول ${i+1}`:b.name, kind:"المسؤول" });
+  kidsComing(r).forEach((k,i)=>out.push({ g:"k", i, label:k.name||`ابن/بنت ${i+1}`, kind:k.sex==="بنت"?"بنت":k.sex==="ولد"?"ابن":"ابن/بنت", age:k.a }));
+  reserveOf(r).forEach((x,i)=>{ if(x.coming!==false) out.push({ g:"r", i, label:x.who||`احتياطي ${i+1}`, kind:"احتياطي", age:x.age }); });
+  return out.map(p=>({ ...p, came:Object.keys(r.came||{}).length?((r.came||{})[p.g]||[])[p.i]??null:null }));
+};
+const marked = r => Object.keys(r.came||{}).length>0;
+function dayTotals(id){
+  const e=EV.get(id), N=e.buses||2, rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b);
+  const z=()=>({ fams:0, planned:0, came:0, no:0, open:0, famsCame:0 }), per=new Map([...Array.from({length:N},(_,i)=>[i+1,z()]),["none",z()]]), all=z();
+  for(const { r, b } of rows){ const ps=dayPeople(r,b), c=per.get(r.bus&&r.bus<=N?r.bus:"none");
+    for(const x of [c,all]){ x.fams++; x.planned+=ps.length; x.came+=ps.filter(p=>p.came===true).length; x.no+=ps.filter(p=>p.came===false).length; x.open+=ps.filter(p=>p.came==null).length; if(ps.some(p=>p.came===true)) x.famsCame++; } }
+  return { N, per, all, rows };
+}
+function dayPanel(id, f, q_){
+  const e=EV.get(id), { N, per, all, rows } = dayTotals(id), edit=canRsvp(), qq=norm(q_||"");
+  const list=rows.filter(({r,b})=>(!qq||norm(b.name).includes(qq)||String(b.code)===qq.padStart(3,"0"))
+    &&(f==="all"||(f==="none"?!(r.bus&&r.bus<=N):f==="absent"?dayPeople(r,b).some(p=>p.came===false):f==="open"?!marked(r):r.bus===+f))).sort(evOrder(id));
+  const card=(l,x,cls="")=>`<div class="${cls}"><span>${l}</span><strong>${num(x.came)} حضر</strong><small>${num(x.fams)} أسرة · من ${num(x.planned)}${x.no?` · ماجاش ${num(x.no)}`:""}${x.open?` · لسه ${num(x.open)}`:""}</small></div>`;
+  const F=[["all","الكل"],...Array.from({length:N},(_,i)=>[String(i+1),`باص ${i+1}`]),["none","من غير باص"],["open","لسه ماتعلّمش"],["absent","فيها حد ماجاش"]];
+  return `<div class="facts evfacts">${card("الكل",all,"ok")}${Array.from({length:N},(_,i)=>card(`باص ${i+1}`,per.get(i+1))).join("")}${per.get("none").fams?card("من غير باص",per.get("none"),"neg"):""}</div>
+    <div class="note">${ic("info")} <span>حط كل أسرة في الباص بتاعها، ودوس «✓ حضروا» وشيل العلامة من اللي ماجاش، أو «✗ ماجوش» لو الأسرة كلها ماجتش.</span></div>
+    <div class="bar">${Array.from({length:N},(_,i)=>`<button class="btn sm" data-dprint="${i+1}">${ic("printer")}كشف باص ${i+1}</button>`).join("")}<button class="btn sm" id="d_rep">${ic("printer")}تقرير الحضور</button><button class="btn sm" id="d_x">Excel الحضور</button></div>
+    <div class="row" style="margin:8px 0"><input type="search" id="d_q" placeholder="دوّر بالاسم أو الرقم" value="${esc(q_||"")}" style="flex:1 1 200px"></div>
+    <div class="seg">${F.map(([k,l])=>`<button class="${f===k?"on":""}" data-df="${k}">${l}</button>`).join("")}</div>
+    <div class="list evlist">${list.map(({r,b})=>{ const ps=dayPeople(r,b), m=marked(r), came=ps.filter(p=>p.came===true).length;
+      return `<div class="item col evrow ${m?(came?"a-ok":"a-no"):""}">
+        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${num(ps.length)} فرد${m?` · حضر ${num(came)}${came<ps.length?` · ماجاش ${num(ps.length-came)}`:""}`:""}</span></span>
+          <span class="seg ans">${Array.from({length:N},(_,i)=>`<button class="${r.bus===i+1?"on ok":""}" data-dbus="${r.id}" data-v="${i+1}" ${edit?"":"disabled"}>باص ${i+1}</button>`).join("")}</span></div>
+        ${m?`<div class="dpeople">${ps.map(p=>`<label class="dp ${p.came?"on":"off"}"><input type="checkbox" data-dp="${r.id}" data-g="${p.g}" data-i="${p.i}" ${p.came?"checked":""} ${edit?"":"disabled"}> ${esc(p.label)} <small>${p.kind}${p.age!=null?` · ${num(p.age)}`:""}</small></label>`).join("")}</div>
+          <div class="bar" style="margin:4px 0 0"><button class="btn sm" data-dmark="${r.id}" data-v="reset" ${edit?"":"disabled"}>رجّعها مش متعلّمة</button></div>`
+        :`<div class="bar" style="margin:4px 0 0"><button class="btn sm pri" data-dmark="${r.id}" data-v="1" ${edit?"":"disabled"}>✓ حضروا</button><button class="btn sm danger" data-dmark="${r.id}" data-v="0" ${edit?"":"disabled"}>✗ ماجوش</button></div>`}
+      </div>`; }).join("")||`<div class="empty">مفيش</div>`}</div>`;
+}
+function bindDay(s, id, setF, setQ){
+  s.querySelectorAll("[data-df]").forEach(el=>el.onclick=()=>setF(el.dataset.df));
+  const dq=s.querySelector("#d_q"); if(dq) dq.oninput=()=>{ setQ(dq.value); const pos=dq.selectionStart; refreshSheet(); const n=$("#d_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
+  s.querySelectorAll("[data-dbus]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.dbus), v=+el.dataset.v; setRsvp(r.id,{ bus:r.bus===v?null:v }); });
+  s.querySelectorAll("[data-dmark]").forEach(el=>el.onclick=()=>{ const r=EP.get(el.dataset.dmark), b=B.get(r.beneficiary_id), v=el.dataset.v, prev=r.came||{};
+    const came=v==="reset"?{}:{ a:Array.from({length:+r.adults||0},()=>v==="1"), k:Array.from({length:+r.kids||0},()=>v==="1"), r:reserveOf(r).map(x=>x.coming===false?false:v==="1") };
+    setRsvp(r.id,{ came }); undoable(`${b.name}: ${v==="1"?"حضروا":v==="0"?"ماجوش":"اترجعت"}`, ()=>setRsvp(r.id,{ came:prev })); });
+  s.querySelectorAll("[data-dp]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.dp), g=el.dataset.g, i=+el.dataset.i, c=JSON.parse(JSON.stringify(r.came||{}));
+    const len=g==="a"?+r.adults||0:g==="k"?+r.kids||0:+r.reserve||0; c[g]=Array.from({length:len},(_,j)=>(c[g]||[])[j]??false); c[g][i]=el.checked; setRsvp(r.id,{ came:c }); });
+  s.querySelectorAll("[data-dprint]").forEach(el=>el.onclick=()=>doPrint(eventHTML(id,"fam",true,false,+el.dataset.dprint), `${EV.get(id).title} — باص ${el.dataset.dprint}`));
+  const rp=s.querySelector("#d_rep"); if(rp) rp.onclick=()=>doPrint(attendanceHTML(id), `${EV.get(id).title} — الحضور`);
+  const dx=s.querySelector("#d_x"); if(dx) dx.onclick=()=>attendanceXlsx(id);
+}
+function attendanceHTML(id){
+  const e=EV.get(id), { N, per, all, rows } = dayTotals(id);
+  const sec=(label,list)=>!list.length?"":`<h3 style="margin:12px 0 4px">${label} — ${num(list.length)} أسرة</h3>
+    <table class="famprint"><thead><tr><th>م</th><th>رقم الحالة</th><th>الأسرة</th><th>حضر</th><th>ماجاش</th><th>العدد</th></tr></thead><tbody>
+    ${list.map(({r,b},i)=>{ const ps=dayPeople(r,b), y=ps.filter(p=>p.came===true), n=ps.filter(p=>p.came===false);
+      return `<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td class="kids">${marked(r)?y.map(p=>esc(p.label)).join("، "):"<i>مش متعلّم</i>"}</td><td class="kids">${n.map(p=>esc(p.label)).join("، ")}</td><td>${marked(r)?`${num(y.length)} من ${num(ps.length)}`:num(ps.length)}</td></tr>`; }).join("")}</tbody></table>`;
+  const byBus=k=>rows.filter(({r})=>k==="none"?!(r.bus&&r.bus<=N):r.bus===k).sort(evOrder(id));
+  return `<div class="ps">${hdr()}<h1>${esc(e.title)} — الحضور</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}</div>
+    <p><b>الإجمالي:</b> حضر ${num(all.came)} من ${num(all.planned)}${all.no?` · ماجاش ${num(all.no)}`:""}${all.open?` · مش متعلّم ${num(all.open)}`:""} — ${Array.from({length:N},(_,i)=>`باص ${i+1}: ${num(per.get(i+1).came)} حضر (${num(per.get(i+1).fams)} أسرة)`).join(" · ")}</p>
+    ${Array.from({length:N},(_,i)=>sec(`باص ${i+1}`,byBus(i+1))).join("")}${sec("من غير باص",byBus("none"))}${signsHTML()}</div>`;
+}
+function attendanceXlsx(id){
+  const e=EV.get(id), { N, rows } = dayTotals(id), out=[["الباص","رقم الحالة","الأسرة","الاسم","صفته","السن","حضر؟"]];
+  rows.sort((x,y)=>((x.r.bus&&x.r.bus<=N?x.r.bus:99)-(y.r.bus&&y.r.bus<=N?y.r.bus:99))||evOrder(id)(x,y)).forEach(({r,b})=>dayPeople(r,b).forEach(p=>out.push([r.bus&&r.bus<=N?`باص ${r.bus}`:"من غير باص", b.code, b.name, p.label, p.kind, p.age??"", p.came===true?"حضر":p.came===false?"ماجاش":"مش متعلّم"])));
+  xlsx({"الحضور":out},`${e.title} — الحضور.xlsx`);
+}
 const TRIP_PRINTS = [["normal","عادي","كل الأعمدة: الأعداد والأبناء والملاحظات"],["nid","بالرقم القومي ومكان الختم","كل أم في سطر: الاسم والرقم القومي وعدد الأفراد ومكان للختم / التوقيع (اختار «مكان ختم» في ارتفاع الصف)"],["fam","كل أسرة بأبنائها","سطر لكل أسرة: المسؤولة والأبناء في نفس السطر بخط صغير وجنب كل واحد ☐ — من غير ملاحظات"]];
 // → { mode, rsv } or null. rsv: print the standby people (and count the ones marked «جاي»).
 function pickTripPrint(){
@@ -2763,9 +2830,12 @@ function pickTripPrint(){
     document.addEventListener("keydown",key,true); document.body.appendChild(w);
   });
 }
-function eventHTML(id, mode="normal", rsv=true, nid=false){
-  const e=EV.get(id), t=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id));
-  const head=`<div class="ps">${hdr()}<h1>${esc(e.title)}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}${rsv?"":" — من غير احتياطي"}</div>`;
+function eventHTML(id, mode="normal", rsv=true, nid=false, bus=null){
+  const e=EV.get(id), t0=eventTotals(id), rows=rsvps(id).filter(r=>r.answer==="جاية"&&(bus==null||r.bus===bus)).map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b).sort(evOrder(id));
+  // one bus: the totals are that bus's families only
+  const t=bus==null?t0:(()=>{ const rr=rows.map(x=>x.r), sum=f=>rr.reduce((a,r)=>a+(+r[f]||0),0), all=rr.flatMap(reserveOf), rsvYes=all.filter(x=>x.coming===true).length;
+    return { ...t0, yes:rr.length, adults:sum("adults"), kids:sum("kids"), reserve:sum("reserve"), rsvYes, rsvNo:all.filter(x=>x.coming===false).length, people:sum("adults")+sum("kids")+rsvYes }; })();
+  const head=`<div class="ps">${hdr()}<h1>${esc(e.title)}${bus!=null?` — باص ${bus}`:""}</h1><div class="mo">${e.date?dLabel(e.date):""}${e.place?" — "+esc(e.place):""}${rsv?"":" — من غير احتياطي"}</div>`;
   // with standby: the ones marked «جاي» count; without: only the family itself
   const cnt=r=>(+r.adults||0)+(+r.kids||0)+(rsv?reserveOf(r).filter(x=>x.coming===true).length:0);
   const total=t.adults+t.kids+(rsv?t.rsvYes:0), wait=t.reserve-t.rsvYes-t.rsvNo;
