@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.53";
+export const VERSION = "1.3.54";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2797,7 +2797,7 @@ function bindDay(s, id, setF, setQ){
 /* ---------- giveaways on the trip day ----------
    events.gifts = [{ id, name }]; event_people.got = { "k:0": [giftId, …], "a:0": […], "r:1": […] } — who took what. */
 const giftState = new Map();   // per trip: what the list is showing (item, who, ages, order, criterion)
-const gst = id => giftState.get(id) || giftState.set(id, { item:"", who:"kids", min:"", max:"", order:"young", crit:"notthis", other:"", q:"" }).get(id);
+const gst = id => giftState.get(id) || giftState.set(id, { item:"", who:"kids", min:"", max:"", order:"young", crit:"notthis", other:"", q:"", per:"person", fam:"any" }).get(id);
 function giftPeople(id){
   const rows=rsvps(id).filter(r=>r.answer==="جاية").map(r=>({ r, b:B.get(r.beneficiary_id) })).filter(x=>x.b), out=[];
   for(const { r, b } of rows) for(const p of dayPeople(r,b)) if(p.came!==false) out.push({ ...p, r, b, key:`${p.g}:${p.i}`, got:(r.got||{})[`${p.g}:${p.i}`]||[] });
@@ -2807,12 +2807,21 @@ function giftPanel(id){
   const e=EV.get(id), gifts=e.gifts||[], st=gst(id), cw=canWrite(), edit=canRsvp();
   if(st.item&&!gifts.some(g=>g.id===st.item)) st.item=""; if(!st.item&&gifts[0]) st.item=gifts[0].id;
   const all=giftPeople(id), qq=norm(st.q||""), has=v=>v!==""&&v!=null;
-  const list=all.filter(p=>(st.who==="all"||(st.who==="kids"?p.g==="k":st.who==="boys"?p.kind==="ابن":st.who==="girls"?p.kind==="بنت":st.who==="adults"?p.g==="a":p.g==="r"))
+  // what the family's coming kids are: boys only, girls only, …
+  const comp=new Map(); for(const p of all) if(p.g==="k"){ const c=comp.get(p.r.id)||comp.set(p.r.id,{ b:0, g:0 }).get(p.r.id); if(p.kind==="ابن") c.b++; if(p.kind==="بنت") c.g++; }
+  const famOk=p=>{ const c=comp.get(p.r.id)||{ b:0, g:0 }; return st.fam==="any"||(st.fam==="hasBoys"?c.b>0:st.fam==="onlyBoys"?c.b>0&&!c.g:st.fam==="hasGirls"?c.g>0:c.g>0&&!c.b); };
+  const famGot=(rid,gid)=>all.some(p=>p.r.id===rid&&p.got.includes(gid)), famAny=rid=>all.some(p=>p.r.id===rid&&p.got.length);
+  const perFam=st.per==="family";
+  const list=all.filter(p=>famOk(p)&&(st.who==="all"||(st.who==="kids"?p.g==="k":st.who==="boys"?p.kind==="ابن":st.who==="girls"?p.kind==="بنت":st.who==="adults"?p.g==="a":p.g==="r"))
       &&(!has(st.min)||(p.age!=null&&p.age>=+st.min))&&(!has(st.max)||(p.age!=null&&p.age<=+st.max))
-      &&(st.crit==="all"||(st.crit==="none"?!p.got.length:st.crit==="other"?!p.got.includes(st.other||gifts[0]?.id):!p.got.includes(st.item)))
+      &&(st.crit==="all"||(perFam?(st.crit==="none"?!famAny(p.r.id):st.crit==="other"?!famGot(p.r.id,st.other||gifts[0]?.id):!famGot(p.r.id,st.item))
+        :(st.crit==="none"?!p.got.length:st.crit==="other"?!p.got.includes(st.other||gifts[0]?.id):!p.got.includes(st.item))))
       &&(!qq||norm(p.label).includes(qq)||norm(p.b.name).includes(qq)||String(p.b.code)===qq.padStart(3,"0")))
     .sort((x,y)=>st.order==="name"?byName(x.label,y.label):((st.order==="old"?-1:1)*((x.age??(st.order==="old"?-1:99))-(y.age??(st.order==="old"?-1:99))))||byName(x.label,y.label));
   const gname=gid=>gifts.find(g=>g.id===gid)?.name||"؟", took=gid=>all.filter(p=>p.got.includes(gid)).length;
+  // once per family: one row per family, its matching people listed in the chosen order (the first one is who gets it)
+  const fams=[]; if(perFam){ const m=new Map(); for(const p of list){ if(!m.has(p.r.id)){ const f={ r:p.r, b:p.b, people:[] }; m.set(p.r.id,f); fams.push(f); } m.get(p.r.id).people.push(p); } }
+  const famsTook=gid=>new Set(all.filter(p=>p.got.includes(gid)).map(p=>p.r.id)).size;
   const sel=(idn,opts,v)=>`<select id="${idn}">${opts.map(([k,l])=>`<option value="${k}" ${String(v)===String(k)?"selected":""}>${l}</option>`).join("")}</select>`;
   return `<div class="note">${ic("info")} <span>ضيف الأصناف، اختار الصنف ومين ياخد وبالترتيب اللي يناسبك، وعلّم «أخد» وانت بتوزع. اللي متعلّم «ماجاش» مش بيظهر.</span></div>
     <div class="seg">${gifts.map(g=>`<button class="${st.item===g.id?"on":""}" data-gitem="${g.id}">${esc(g.name)} <small>(${num(took(g.id))})</small></button>`).join("")||`<span class="sub">مفيش أصناف لسه</span>`}</div>
@@ -2820,18 +2829,25 @@ function giftPanel(id){
     ${gifts.length?`<div class="grid2 gfil">
       <label class="f">مين${sel("g_who",[["kids","الأبناء كلهم"],["boys","الولاد"],["girls","البنات"],["adults","المسؤولين"],["reserve","الاحتياطي"],["all","الكل"]],st.who)}</label>
       <label class="f">الترتيب${sel("g_ord",[["young","الصغيرين الأول"],["old","الكبار الأول"],["name","بالاسم"]],st.order)}</label>
+      <label class="f">لكل مين${sel("g_per",[["person","لكل فرد"],["family","مرة واحدة لكل أسرة"]],st.per)}</label>
+      <label class="f">الأسر${sel("g_fam",[["any","كل الأسر"],["hasBoys","فيها ولاد"],["onlyBoys","ولاد بس (مفيهاش بنات)"],["hasGirls","فيها بنات"],["onlyGirls","بنات بس (مفيهاش ولاد)"]],st.fam)}</label>
       <label class="f">السن من<input type="number" id="g_min" min="0" max="99" value="${esc(st.min)}"></label>
       <label class="f">لحد<input type="number" id="g_max" min="0" max="99" value="${esc(st.max)}"></label>
       <label class="f">اللي يظهر${sel("g_crit",[["notthis",`مخدش ${esc(gname(st.item))}`],["none","مخدش أي حاجة خالص"],["other","مخدش صنف تاني…"],["all","الكل"]],st.crit)}</label>
       ${st.crit==="other"?`<label class="f">الصنف ده${sel("g_other",gifts.map(g=>[g.id,esc(g.name)]),st.other||gifts[0].id)}</label>`:""}
     </div>
     <div class="row" style="margin:6px 0"><input type="search" id="g_q" placeholder="دوّر بالاسم أو الأم أو رقم الحالة" value="${esc(st.q||"")}" style="flex:1 1 200px"></div>
-    <div class="note green">${ic("box")} <span><b>${esc(gname(st.item))}</b>: أخد ${num(took(st.item))} · في القايمة دي ${num(list.length)}</span></div>
-    <div class="list">${list.map((p,n)=>{ const on=p.got.includes(st.item);
+    <div class="note green">${ic("box")} <span><b>${esc(gname(st.item))}</b>: ${perFam?`أخدت ${num(famsTook(st.item))} أسرة · في القايمة دي ${num(fams.length)} أسرة`:`أخد ${num(took(st.item))} · في القايمة دي ${num(list.length)}`}</span></div>
+    ${perFam?`<div class="list">${fams.map((f,n)=>{ const on=famGot(f.r.id,st.item), who=all.find(p=>p.r.id===f.r.id&&p.got.includes(st.item));
+      return `<label class="item gp ${on?"on":""}"><span class="code">${n+1}</span><input type="checkbox" data-gfam="${f.r.id}" data-k="${f.people[0].key}" ${on?"checked":""} ${edit?"":"disabled"} style="width:24px;height:24px">
+        <span class="grow"><span class="nm">${esc(f.b.name)}</span> <span class="sub">${esc(f.b.code)}${f.r.bus?` · باص ${f.r.bus}`:""}</span><br>
+        <span class="sub">${on&&who?`أخدها: ${esc(who.label)}`:f.people.map((p,i)=>`${i?"":"⭐ "}${esc(p.label)}${p.age!=null?` (${num(p.age)})`:""}`).join("، ")}</span></span>
+        <span class="chip ${on?"":"grey"}">${on?"أخدت ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش أسر بالشروط دي</div>`}</div>`
+    :`<div class="list">${list.map((p,n)=>{ const on=p.got.includes(st.item);
       return `<label class="item gp ${on?"on":""}"><span class="code">${n+1}</span><input type="checkbox" data-gift="${p.r.id}" data-k="${p.key}" ${on?"checked":""} ${edit?"":"disabled"} style="width:24px;height:24px">
         <span class="grow"><span class="nm">${esc(p.label)}</span> <span class="sub">${p.kind}${p.age!=null?` · ${num(p.age)} سنة`:""}</span><br>
         <span class="sub">${p.g==="a"?"":`${p.kind==="احتياطي"?"مع":"ابن/بنت"} ${esc(p.b.name)} · `}${esc(p.b.code)}${p.r.bus?` · باص ${p.r.bus}`:""}${p.got.filter(g=>g!==st.item).length?` · أخد: ${p.got.filter(g=>g!==st.item).map(g=>esc(gname(g))).join("، ")}`:""}</span></span>
-        <span class="chip ${on?"":"grey"}">${on?"أخد ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش حد بالشروط دي</div>`}</div>
+        <span class="chip ${on?"":"grey"}">${on?"أخد ✓":"لسه"}</span></label>`; }).join("")||`<div class="empty">مفيش حد بالشروط دي</div>`}</div>`}
     <div class="bar"><button class="btn sm" id="g_print">${ic("printer")}طباعة القايمة دي</button><button class="btn sm" id="g_x">Excel التوزيع</button></div>`:""}`;
 }
 function bindGift(s, id){
@@ -2844,15 +2860,20 @@ function bindGift(s, id){
     if(!await ask(`«${g.name}» هيتشال من الأصناف (واللي اتعلّم إنه أخده بيفضل محفوظ لو رجّعته بـ«تراجع»).`,{title:"شيل الصنف؟",ok:"شيل",danger:true})) return;
     if(await save(cur.filter(x=>x.id!==g.id))){ st.item=""; undoable(`${g.name} اتشال`, ()=>save(cur)); } };
   const bindSel=(sel,k)=>{ const el=q(sel); if(el) el.onchange=()=>{ st[k]=el.value; refreshSheet(); }; };
-  bindSel("#g_who","who"); bindSel("#g_ord","order"); bindSel("#g_crit","crit"); bindSel("#g_other","other"); bindSel("#g_min","min"); bindSel("#g_max","max");
+  bindSel("#g_who","who"); bindSel("#g_ord","order"); bindSel("#g_per","per"); bindSel("#g_fam","fam"); bindSel("#g_crit","crit"); bindSel("#g_other","other"); bindSel("#g_min","min"); bindSel("#g_max","max");
   const gq=q("#g_q"); if(gq) gq.oninput=()=>{ st.q=gq.value; const pos=gq.selectionStart; refreshSheet(); const n=$("#g_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
   s.querySelectorAll("[data-gift]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gift), k=el.dataset.k, item=st.item, got=JSON.parse(JSON.stringify(r.got||{}));
     const cur=got[k]||[]; got[k]=el.checked?[...new Set([...cur,item])]:cur.filter(x=>x!==item); if(!got[k].length) delete got[k];
     const prev=r.got||{}; setRsvp(r.id,{ got }); if(el.checked) undoable("اتعلّم «أخد»", ()=>setRsvp(r.id,{ got:prev })); });
+  // once per family: tick = the first one listed (⭐) gets it; untick = nobody in the family has it
+  s.querySelectorAll("[data-gfam]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gfam), item=st.item, got=JSON.parse(JSON.stringify(r.got||{})), prev=r.got||{};
+    if(el.checked){ const k=el.dataset.k; got[k]=[...new Set([...(got[k]||[]),item])]; }
+    else for(const k of Object.keys(got)){ got[k]=got[k].filter(x=>x!==item); if(!got[k].length) delete got[k]; }
+    setRsvp(r.id,{ got }); if(el.checked) undoable("الأسرة اتعلّمت «أخدت»", ()=>setRsvp(r.id,{ got:prev })); });
   if(q("#g_print")) q("#g_print").onclick=()=>{ const html=giftPanel(id), tmp=document.createElement("div"); tmp.innerHTML=html;
     const e=EV.get(id), name=(e.gifts||[]).find(g=>g.id===st.item)?.name||"";
     const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
-    doPrint(`<div class="ps">${hdr()}<h1>${esc(e.title)} — توزيع ${esc(name)}</h1><table><thead><tr><th>م</th><th>الاسم</th><th></th><th>الأسرة</th><th>أخد</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td class="sig">☐</td></tr>`).join("")}</tbody></table></div>`, `توزيع ${name}`); };
+    doPrint(`<div class="ps">${hdr()}<h1>${esc(e.title)} — توزيع ${esc(name)}</h1><table><thead><tr><th>م</th>${st.per==="family"?"<th>الأسرة</th><th>رقم الحالة / الباص</th><th>الأبناء</th><th>أخدت</th>":"<th>الاسم</th><th></th><th>الأسرة</th><th>أخد</th>"}</tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td class="nm">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td class="sig">☐</td></tr>`).join("")}</tbody></table></div>`, `توزيع ${name}`); };
   if(q("#g_x")) q("#g_x").onclick=()=>{ const e=EV.get(id), gifts=e.gifts||[], all=giftPeople(id), rows=[["الاسم","صفته","السن","الأسرة","رقم الحالة","الباص",...gifts.map(g=>g.name)]];
     all.sort((x,y)=>byName(x.b.name,y.b.name)||x.g.localeCompare(y.g)||x.i-y.i).forEach(p=>rows.push([p.label,p.kind,p.age??"",p.b.name,p.b.code,p.r.bus?`باص ${p.r.bus}`:"",...gifts.map(g=>p.got.includes(g.id)?"✓":"")]));
     rows.push(["الإجمالي","","","","","",...gifts.map(g=>all.filter(p=>p.got.includes(g.id)).length)]);
