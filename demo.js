@@ -177,6 +177,7 @@ export function createDemoClient(){
           return { data: { named, rows }, error: null };
         }catch(e){ const back = JSON.parse(keep); ["donors","items","donations","ledger","stock_moves"].forEach((t, i) => db[t] = back[i]); return { data: null, error: e }; }
       }
+      if(fn === "set_feedback"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id); if(it){ it.feedback = r.text || ""; n++; } } return { data: n, error: null }; }
       if(fn === "ep_got" || fn === "ep_came"){ const r = db.event_people.find(x => x.id === args.ep); if(!r) return { data: null, error: { message: "item_not_found" } };
         if(fn === "ep_got"){ const g = r.got = { ...(r.got || {}) };
           if(args.is_on) g[args.slot] = [...new Set([...(g[args.slot] || []), args.item])];
