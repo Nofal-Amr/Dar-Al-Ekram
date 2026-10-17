@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.81";
+export const VERSION = "1.3.82";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -423,7 +423,7 @@ function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBat
 }
 // Students only matter for a list that is about them (school meals, «لكل طالب», or a filter on students) — not for fish or oil.
 const stuType = (id, name) => id==="schoolmeals" || /مدرس|مدارس|طالب|طلاب|دراس/.test(name||"");
-const stuPlan = (st, t) => st.mode==="student" || (st.mode==="tiers"&&st.tierBy==="students") || st.need==="students" || +st.minStu>0 || stuType(t?.id, t?.name);
+const stuPlan = (st, t) => st.mode==="student" || (st.mode==="tiers"&&st.tierBy==="students") || (st.mode==="group"&&st.gby==="students") || st.need==="students" || +st.minStu>0 || stuType(t?.id, t?.name);
 const stuOn = k => !!(k.basis?.stu || k.basis?.mode==="student" || stuType(k.typeId, k.typeName));
 function whyLine(x, t, stu = true){
   const p=[x.missed?"ماجاتش تستلم المرة اللي فاتت":"", stu&&x.students!=null&&x.stuSrc!=="none"?`${x.students} طالب${x.stuSrc==="list"?" (من كشف المدارس)":""}`:"", x.b.score!=null?`الدرجة ${x.b.score}%`:x.b.grade?`تقدير ${x.b.grade}`:"", x.fam?`${x.fam} أفراد`:"عدد الأفراد مش متسجل", x.lm?`آخر ${t.name}: ${mLabel(x.lm)}`:`ماخدتش ${t.name} قبل كده`];
@@ -1838,7 +1838,7 @@ function newBatch(){
   const ts=types(); if(!ts.length){ toast("أضف نوع مساعدة الأول من الإعدادات"); return; }
   const t0=ts[0];
   const st={ typeId:t0.id, month:curMonth, week:"", dow:6, donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
-    mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, tierBy:"family", total:"", count:"", by:"score", missedFirst:true,
+    mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, tierBy:"family", every:2, gby:"family", round:"up", total:"", count:"", by:"score", missedFirst:true,
     fromBatch:"", onlyLeft:"no", need:"", minStu:"",
     removed:new Set(), added:[], values:{}, showRest:false, showOut:false };
   const srcLists=batches().filter(k=>counts(k)&&!k.single);
@@ -1869,6 +1869,7 @@ function newBatch(){
       <label class="rolec"><input type="radio" name="n_mode" value="fixed"><span><b>نفس الكمية لكل أسرة</b><small><input type="number" id="n_per_f" min="0" step="any" class="mini"> <span class="u"></span> لكل أسرة</small></span></label>
       <label class="rolec"><input type="radio" name="n_mode" value="member"><span><b>حسب عدد الأفراد</b><small><input type="number" id="n_per_m" min="0" step="any" class="mini"> <span class="u"></span> لكل فرد — مثال: وجبة لكل فرد</small></span></label>
       <label class="rolec"><input type="radio" name="n_mode" value="student"><span><b>حسب عدد الطلاب</b><small><input type="number" id="n_per_s" min="0" step="any" class="mini"> <span class="u"></span> لكل طالب — مثال: وجبة مدرسية لكل طالب</small></span></label>
+      <label class="rolec"><input type="radio" name="n_mode" value="group"><span><b>لكل عدد معيّن</b><small>لكل <input type="number" id="n_every" min="1" class="mini"> <select id="n_gby" class="mini" aria-label="أفراد ولا طلاب"><option value="family">أفراد</option><option value="students">طلاب</option></select> = <input type="number" id="n_per_g" min="0" step="any" class="mini"> <span class="u"></span>، والباقي <select id="n_rnd" class="mini" aria-label="الباقي"><option value="up">يتحسب</option><option value="down">مايتحسبش</option></select></small></span></label>
       <label class="rolec"><input type="radio" name="n_mode" value="tiers"><span><b>شرائح</b><small>لحد <input type="number" id="n_cut" min="0" class="mini"> <select id="n_tby" class="mini" aria-label="على حسب"><option value="family">أفراد</option><option value="students">طلاب</option></select> = <input type="number" id="n_small" min="0" step="any" class="mini"> <span class="u"></span>، وأكتر = <input type="number" id="n_big" min="0" step="any" class="mini"> <span class="u"></span></small></span></label>
     </div>
     <div class="grid2">
@@ -1884,10 +1885,10 @@ function newBatch(){
     const fillDays=()=>{ const ds=weekdaysOf(st.month, st.dow); if(+st.week>ds.length) st.week="";
       q("#n_w").innerHTML=`<option value="">الشهر كله</option>${ds.map((d,i)=>`<option value="${i+1}">${dayLabel(d)}</option>`).join("")}`; q("#n_w").value=st.week; };
     const put=()=>{ q("#n_t").value=st.typeId; q("#n_m").value=st.month; q("#n_dow").value=st.dow; fillDays(); q("#n_d").value=st.donor; q("#n_cd").value=st.cooldown; q("#n_tag").value=st.tag;
-      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").value=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_tby").value=st.tierBy; q("#n_small").value=st.small; q("#n_big").value=st.big;
+      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").value=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_tby").value=st.tierBy; q("#n_every").value=st.every; q("#n_gby").value=st.gby; q("#n_per_g").value=st.per; q("#n_rnd").value=st.round; q("#n_small").value=st.small; q("#n_big").value=st.big;
       q("#n_total").value=st.total; q("#n_count").value=st.count; q("#n_by").value=st.by; q("#n_missed").checked=st.missedFirst; fillType(); };
     const read=()=>{ const prevType=st.typeId; st.typeId=q("#n_t").value; const pm=st.month, pd=st.dow; st.month=q("#n_m").value||curMonth; st.dow=+q("#n_dow").value; st.week=q("#n_w").value; if(pm!==st.month||pd!==st.dow) fillDays(); st.donor=q("#n_d").value.trim(); st.cooldown=+q("#n_cd").value||0; st.tag=q("#n_tag").value;
-      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; const pf=st.fromBatch; st.fromBatch=q("#n_src").value;
+      st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):st.mode==="group"?q("#n_per_g"):q("#n_per_f")).value||0; st.every=Math.max(1,+q("#n_every").value||1); st.gby=q("#n_gby").value; st.round=q("#n_rnd").value; const pf=st.fromBatch; st.fromBatch=q("#n_src").value;
       // picking an old list starts with no case-type filter (the aid type's default would silently shrink it); tick types to narrow it
       if(st.fromBatch&&st.fromBatch!==pf){ st.caseTypes=[]; s.querySelectorAll("#n_ct input").forEach(i=>i.checked=false); } st.onlyLeft=q("#n_left").value; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; const ptb=st.tierBy; st.tierBy=q("#n_tby").value; st.cut=q("#n_cut").value===""?(st.tierBy==="students"?2:3):+q("#n_cut").value; if(ptb!==st.tierBy&&(st.cut===3||st.cut===2)){ st.cut=st.tierBy==="students"?2:3; q("#n_cut").value=st.cut; } st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
       st.total=q("#n_total").value; st.count=q("#n_count").value; st.by=q("#n_by").value; st.missedFirst=q("#n_missed").checked;
@@ -1899,7 +1900,7 @@ function newBatch(){
     s.addEventListener("change",e=>{ if(e.target.closest("#n_res")||/^(text|number|search|month)$/.test(e.target.type)) return; read(); draw(); });
     let plan=null;
     function compute(){
-      const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big, ...(st.mode==="tiers"&&st.tierBy==="students"?{ tierBy:"students" }:{})};
+      const t=T.get(st.typeId), basis=st.mode==="group"?{ mode:"group", per:st.per, every:st.every, round:st.round, ...(st.gby==="students"?{ tierBy:"students" }:{}) }:{mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big, ...(st.mode==="tiers"&&st.tierBy==="students"?{ tierBy:"students" }:{})};
       const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag, fromBatch:st.fromBatch, onlyLeft:st.onlyLeft, need:st.need, minStu:+st.minStu||0});
       const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)&&!st.added.includes(x.b.id)), st.by, st.missedFirst);
       const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
@@ -2102,7 +2103,7 @@ function editBatch(id){
   });
 }
 /* ---------- quantity rule editor (used on top of the list and in «تعديل») ---------- */
-const RULE_MODES=[["","بالإيد (كل أسرة تكتب كميتها)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["student","لكل طالب"],["tiers","شرايح: لحد عدد معيّن كمية، وأكتر كمية تانية"]];
+const RULE_MODES=[["","بالإيد (كل أسرة تكتب كميتها)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["student","لكل طالب"],["group","لكل عدد معيّن (مثلاً كل فردين = 2)"],["tiers","شرايح: لحد عدد معيّن كمية، وأكتر كمية تانية"]];
 // one rule for the list, or one per source list on a merged list: [[source title or "", rule]]
 const ruleGroups=(k,split=true)=>{ const titles=mergedSources(k)?[...mergedSources(k).keys()]:[];
   if(titles.length>1&&!split) return [["",ruleOnly(k.basis)||Object.values(k.basis?.src||{})[0]||null]];
@@ -2110,13 +2111,16 @@ const ruleGroups=(k,split=true)=>{ const titles=mergedSources(k)?[...mergedSourc
 const ruleEditorHTML=(k,i,t,r)=>{ r=r||{}; const m=r.mode||"";
   return `<div class="rulebox" data-rg="${i}">${t?`<div class="sub"><b>من «${esc(shortTitle(t))}»</b></div>`:""}
     <div class="grid2"><label class="f">الكمية بتتحسب إزاي<select data-rm2="${i}">${RULE_MODES.map(([v,l])=>`<option value="${v}" ${m===v?"selected":""}>${l}</option>`).join("")}</select></label>
-    <label class="f" data-show="fixed member student" ${["fixed","member","student"].includes(m)?"":"hidden"}><span data-perl>${m==="member"?"لكل فرد":m==="student"?"لكل طالب":"لكل أسرة"}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="per" value="${r.per??""}"></label>
-    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>على حسب<select data-tby><option value="family" ${r.tierBy!=="students"?"selected":""}>عدد أفراد الأسرة</option><option value="students" ${r.tierBy==="students"?"selected":""}>عدد الطلاب</option></select></label>
+    <label class="f" data-show="group" ${m==="group"?"":"hidden"}>لكل كام<input type="number" min="1" data-rp="every" value="${r.every??2}"></label>
+    <label class="f" data-show="fixed member student group" ${["fixed","member","student","group"].includes(m)?"":"hidden"}><span data-perl>${perWord(m)}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="per" value="${r.per??""}"></label>
+    <label class="f" data-show="group" ${m==="group"?"":"hidden"}>الباقي (لو العدد مش بيقسم)<select data-rnd><option value="up" ${r.round!=="down"?"selected":""}>يتحسب مجموعة كاملة (3 أفراد = مجموعتين)</option><option value="down" ${r.round==="down"?"selected":""}>مايتحسبش (3 أفراد = مجموعة واحدة)</option></select></label>
+    <label class="f" data-show="tiers group" ${m==="tiers"||m==="group"?"":"hidden"}>على حسب<select data-tby><option value="family" ${r.tierBy!=="students"?"selected":""}>عدد أفراد الأسرة</option><option value="students" ${r.tierBy==="students"?"selected":""}>عدد الطلاب</option></select></label>
     <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw>${tierWords(r.tierBy).upTo}</span><input type="number" min="0" data-rp="cut" value="${r.cut??(r.tierBy==="students"?2:3)}"></label>
     <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw2>${tierWords(r.tierBy).small}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="small" value="${r.small??""}"></label>
     <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw3>${tierWords(r.tierBy).big}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div>
-    <div data-lvbox ${m==="student"||(m==="tiers"&&r.tierBy==="students")?"":"hidden"}><div class="sub">مين يتحسب طالب (من المراحل المكتوبة في ملف كل حالة):</div>
+    <div data-lvbox ${m==="student"||((m==="tiers"||m==="group")&&r.tierBy==="students")?"":"hidden"}><div class="sub">مين يتحسب طالب (من المراحل المكتوبة في ملف كل حالة):</div>
       <div class="checks">${STU_LEVELS.map(l=>`<label><input type="checkbox" data-lv="${l}" ${(r.levels||(m==="student"?STU_LEVELS:DEF_LEVELS(k))).includes(l)?"checked":""}> ${l}</label>`).join("")}</div></div></div>`; };
+const perWord=m=>m==="member"?"لكل فرد":m==="student"?"لكل طالب":m==="group"?"الكمية لكل مجموعة":"لكل أسرة";
 // words for the two tiers: «لحد كام فرد» / «لحد كام طالب»
 const tierWords=by=>by==="students"?{ upTo:"لحد كام طالب (العدد ده أو أقل)", small:"الكمية لو الطلاب العدد ده أو أقل", big:"الكمية لو أكتر" }:{ upTo:"الأسرة الصغيرة لحد كام فرد", small:"كمية الأسرة الصغيرة", big:"كمية الأسرة الكبيرة" };
 // school meals: school children only; anything else: every stage
@@ -2124,13 +2128,14 @@ const DEF_LEVELS=k=>stuType(k.typeId,k.typeName)?["ابتدائي","إعدادي
 const bindRuleBoxes=root=>root.querySelectorAll(".rulebox").forEach(box=>{ const sel=box.querySelector("[data-rm2]"), tby=box.querySelector("[data-tby]");
   const sync=()=>{ const m=sel.value, st=tby?.value==="students";
     box.querySelectorAll("[data-show]").forEach(f=>f.hidden=!f.dataset.show.split(" ").includes(m));
-    const pl=box.querySelector("[data-perl]"); if(pl) pl.textContent=m==="member"?"لكل فرد":m==="student"?"لكل طالب":"لكل أسرة";
-    const lv=box.querySelector("[data-lvbox]"); if(lv) lv.hidden=!(m==="student"||(m==="tiers"&&st));
+    const pl=box.querySelector("[data-perl]"); if(pl) pl.textContent=perWord(m);
+    const lv=box.querySelector("[data-lvbox]"); if(lv) lv.hidden=!(m==="student"||((m==="tiers"||m==="group")&&st));
     const w=tierWords(st?"students":"family"); box.querySelector("[data-tw]").textContent=w.upTo; box.querySelector("[data-tw2]").textContent=w.small; box.querySelector("[data-tw3]").textContent=w.big; };
   sel.onchange=sync; if(tby) tby.onchange=()=>{ const c=box.querySelector('[data-rp="cut"]'); if(c&&(c.value==="3"||c.value==="2")) c.value=tby.value==="students"?"2":"3"; sync(); }; });
 const readRuleBox=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""?null:+v; };
   const lv=[...box.querySelectorAll("[data-lv]:checked")].map(x=>x.dataset.lv);
-  const lvs=lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}, tst=m==="tiers"&&box.querySelector("[data-tby]")?.value==="students";
+  const lvs=lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}, tst=(m==="tiers"||m==="group")&&box.querySelector("[data-tby]")?.value==="students";
+  if(m==="group") return { mode:m, every:Math.max(1,g("every")||1), per:g("per")||0, round:box.querySelector("[data-rnd]").value, ...(tst?{ tierBy:"students", stu:true, ...lvs }:{}) };
   return m==="tiers"?{ mode:m, cut:g("cut")??(tst?2:3), small:g("small")||0, big:g("big")||0, ...(tst?{ tierBy:"students", stu:true, ...lvs }:{}) }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true, ...lvs }:{}) }; };
 // the new basis from the boxes; budget / priority settings of the list stay as they were
 const basisFrom=(k,root,groups)=>{ const read=[...root.querySelectorAll(".rulebox")].map((box,i)=>[groups[i][0],readRuleBox(box)]);
@@ -2146,7 +2151,7 @@ async function recalcList(id, basis, fromCases){
     if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; } }
     // «لكل طالب»: a family with no students count yet gets it from the children on her case file (by the stages this
     // rule counts); a count someone typed is kept — unless «حدّث من ملفات الحالات» is ticked
-    const byStu=r&&(r.mode==="student"||(r.mode==="tiers"&&r.tierBy==="students"));
+    const byStu=r&&(r.mode==="student"||((r.mode==="tiers"||r.mode==="group")&&r.tierBy==="students"));
     if(b&&((byStu&&it.students==null)||fromCases)){ const st=studentsOf(b, r?.levels||null);
       if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(byStu&&it.students==null) noKids.push(it.name); }
     if(r){ const v=shareFor(r,fam,stu); if(+it.value!==v) row.value=v; }
@@ -2158,10 +2163,10 @@ async function recalcList(id, basis, fromCases){
 }
 /* A list's quantity rule (basis): mode + numbers. A list made from several lists keeps each source's own rule in
    basis.src {source title → rule}, so a family's amount is always worked out by the rule of the list she came from. */
-const RULE_KEYS=["mode","per","cut","small","big","stu","levels","tierBy"];
+const RULE_KEYS=["mode","per","cut","small","big","stu","levels","tierBy","every","round"];
 const ruleOnly=b=>b&&b.mode?Object.fromEntries(RULE_KEYS.filter(x=>b[x]!=null&&b[x]!=="").map(x=>[x,b[x]])):null;
 const ruleOf=(k,it)=>{ const b=k.basis; if(!b) return null; if(b.src){ const t=srcTitles(it)[0]; if(t&&b.src[t]) return b.src[t]; } return b.mode?b:null; };
-const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب${b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?(b.tierBy==="students"?`لحد ${b.cut} طالب ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}${b.levels?` (${b.levels.join("، ")})`:""}`:`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`):b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
+const ruleHow=(b,u)=>b.mode==="group"?`${num(b.per)} ${u} لكل ${num(b.every)} ${b.tierBy==="students"?"طلاب":"أفراد"}${b.round==="down"?" (الباقي مايتحسبش)":""}${b.tierBy==="students"&&b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="student"?`${num(b.per)} ${u} لكل طالب${b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?(b.tierBy==="students"?`لحد ${b.cut} طالب ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}${b.levels?` (${b.levels.join("، ")})`:""}`:`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`):b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
 function basisText(k){
   const b=k.basis||{}, u=k.unit;
   const how=b.src?Object.entries(b.src).map(([t,r])=>`من «${shortTitle(t)}» ${ruleHow(r,u)}`).join("، "):ruleHow(b,u);

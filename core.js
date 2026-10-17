@@ -133,6 +133,8 @@ export function shareFor(basis, fam, students = 0){
   const f = +fam || 1, per = +basis?.per || 0;
   if(basis?.mode === "student") return per * (+students || 0);   // no students → nothing (unlike family size, 0 is a real count)
   if(basis?.mode === "member") return per * f;
+  // group: «per for every `every` members (or students)»; a part-group counts as a whole one unless round is "down"
+  if(basis?.mode === "group"){ const n = basis.tierBy === "students" ? (+students || 0) : f, ev = +basis.every || 1, g = basis.round === "down" ? Math.floor(n / ev) : Math.ceil(n / ev); return g * per; }
   // tiers: «up to cut → small, more → big», counted by family members, or by students (tierBy: "students")
   if(basis?.mode === "tiers"){ const n = basis.tierBy === "students" ? (+students || 0) : f; return n <= (+basis.cut || (basis.tierBy === "students" ? 2 : 3)) ? +basis.small || 0 : +basis.big || 0; }
   return per;
@@ -159,7 +161,7 @@ export function planShares(sorted, basis, { total = null, count = null } = {}){
   const picked = [], rest = [], zero = []; let used = 0, members = 0;
   for(const x of sorted){
     const fam = famSize(x.b), v = shareFor(basis, fam, x.students);
-    if(basis?.mode === "student" && !(v > 0)){ zero.push({ ...x, fam, value:0 }); continue; }   // per-student shares: no students → not on the list at all
+    if((basis?.mode === "student" || (basis?.mode === "group" && basis.tierBy === "students")) && !(v > 0)){ zero.push({ ...x, fam, value:0 }); continue; }   // per-student shares: no students → not on the list at all
     const full = (count != null && picked.length >= count) || (total != null && used + v > total + 1e-9) || rest.length;
     if(full){ rest.push({ ...x, fam, value:v }); continue; }
     picked.push({ ...x, fam, value:v }); used += v; members += fam || 1;

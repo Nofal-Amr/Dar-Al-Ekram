@@ -366,3 +366,10 @@ test("tiers by students: 1 bag for up to 2 students, 2 bags for more", () => {
   assert.deepEqual([0,1,2,3,5].map(n => shareFor(r, 6, n)), [1,1,1,2,2]);
   assert.equal(shareFor({ mode:"tiers", cut:3, small:1, big:2 }, 5, 0), 2);   // by family size, as before
 });
+
+test("per every N: 2 for every 2 members, part-group up or down", () => {
+  const r = { mode:"group", every:2, per:2 };
+  assert.deepEqual([1,2,3,4,5].map(f => shareFor(r, f)), [2,2,4,4,6]);
+  assert.deepEqual([1,2,3,4,5].map(f => shareFor({ ...r, round:"down" }, f)), [0,2,2,4,4]);
+  assert.deepEqual([0,1,2,3].map(n => shareFor({ mode:"group", every:2, per:1, tierBy:"students" }, 6, n)), [0,1,1,2]);
+});
