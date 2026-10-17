@@ -425,13 +425,18 @@ export const EVAL_FORM = [
   { key:"education", name:"مراحل التعليم", max:8, opts:[["0","مفيش أبناء في التعليم",0],["primary","ابتدائي",2],["prep","إعدادي - فني",4],["secondary","ثانوي",8],["university","جامعي",7]] },
   { key:"kids", name:"عدد الأبناء", max:7, opts:[["0","مفيش",0],["1","ابن واحد",2],["2_3","من 2 لـ 3",5],["4","4 فأكتر",7,"البنات حتى الزواج والأولاد حتى إتمام التعليم"]] },
 ];
-export const EVAL_MAX = EVAL_FORM.reduce((s, it) => s + it.max, 0);   // 53
-export const gradeOf = pct => pct == null || pct === "" ? "" : pct >= 81 ? "A" : pct >= 61 ? "B" : pct >= 50 ? "C" : "";
-export function scoreEval(answers = {}){
-  let total = 0, missing = [];
-  for(const it of EVAL_FORM){ const o = it.opts.find(x => x[0] === answers[it.key]); if(o) total += o[2]; else missing.push(it.name); }
-  const pct = Math.round(total / EVAL_MAX * 100);
-  return { total, pct, grade: gradeOf(pct), missing };
+export const EVAL_BANDS = { A:81, B:61, C:50 };
+// The form can be edited from the site (a new REV): { rev, bands, items }. An item's maximum is its highest option.
+export const DEFAULT_EVAL = { rev: EVAL_REV, bands: EVAL_BANDS, items: EVAL_FORM };
+export const itemMax = it => Math.max(0, ...(it.opts || []).map(o => +o[2] || 0));
+export const evalMax = (form = DEFAULT_EVAL) => (form.items || []).reduce((s, it) => s + itemMax(it), 0);
+export const EVAL_MAX = evalMax();   // 53
+export const gradeOf = (pct, bands = EVAL_BANDS) => pct == null || pct === "" ? "" : pct >= bands.A ? "A" : pct >= bands.B ? "B" : pct >= bands.C ? "C" : "";
+export function scoreEval(answers = {}, form = DEFAULT_EVAL){
+  let total = 0; const missing = [], max = evalMax(form);
+  for(const it of form.items || []){ const o = (it.opts || []).find(x => x[0] === answers[it.key]); if(o) total += +o[2] || 0; else missing.push(it.name); }
+  const pct = max ? Math.round(total / max * 100) : 0;
+  return { total, pct, grade: gradeOf(pct, form.bands || EVAL_BANDS), missing, max };
 }
 // A starting point from what's on the case file (everything stays editable): age, marital status, housing, children, school stages.
 export function suggestEval({ age: a = "", marital = "", housing = "", job = "", kids = 0, stages = [] } = {}){

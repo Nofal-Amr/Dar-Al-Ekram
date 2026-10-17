@@ -378,8 +378,8 @@ import { scoreEval, gradeOf, suggestEval, EVAL_MAX } from "../core.js";
 test("evaluation form: 53 points, grade bands", () => {
   assert.equal(EVAL_MAX, 53);
   const all = { age:"gt51", marital:"abandoned", job:"none", debt:"gt1501", housing:"rent", illness:"family", education:"secondary", kids:"4" };
-  assert.deepEqual(scoreEval(all), { total:53, pct:100, grade:"A", missing:[] });
-  assert.deepEqual([81,80,61,60,50,49].map(gradeOf), ["A","B","B","C","C",""]);
+  assert.deepEqual(scoreEval(all), { total:53, pct:100, grade:"A", missing:[], max:53 });
+  assert.deepEqual([81,80,61,60,50,49].map(p => gradeOf(p)), ["A","B","B","C","C",""]);
   assert.equal(scoreEval({ age:"lt30" }).missing.length, 7);
   assert.deepEqual(suggestEval({ age:45, marital:"أرملة", housing:"إيجار", kids:3, stages:["رابعة ابتدائي","تانية إعدادي"] }), { age:"31_50", marital:"widow", housing:"rent", kids:"2_3", education:"prep" });
 });

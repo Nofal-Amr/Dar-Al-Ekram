@@ -1,10 +1,10 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, suggestCode, EVAL_FORM, EVAL_MAX, EVAL_REV, scoreEval, gradeOf, suggestEval, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, suggestCode, DEFAULT_EVAL, evalMax, itemMax, scoreEval, gradeOf, suggestEval, minPin } from "./core.js";
 import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.86";
+export const VERSION = "1.3.87";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -857,55 +857,99 @@ function vReports(){
   </tbody></table></div>`;
 }
 /* ---------- case evaluation form (استمارة تقييم الحالات) ----------
-   The paper form on screen: 8 items, pick one option each, the score (out of 53), the percentage and the grade are worked
-   out as you go. It starts from what's on the case file; saving writes the score and grade (the grade goes into the family
-   code) and keeps the answers to print the filled form. */
+   The paper form on screen: pick one option per item; the score, the percentage and the grade are worked out as you go.
+   It starts from what's on the case file; saving writes the score and grade (the grade goes into the family code) and keeps
+   the answers + the form version used, so an old evaluation still prints as it was after the form is edited. */
+const EVALF = () => APPSET.eval_form?.items?.length ? APPSET.eval_form : DEFAULT_EVAL;
+const bandsTxt = f => { const b=f.bands||{A:81,B:61,C:50}; return `A: ${b.A}% فأكتر · B: من ${b.B}% لـ ${b.A-1}% · C: من ${b.C}% لـ ${b.B-1}%`; };
 function evalSheet(bid){
   const b=B.get(bid); if(!b) return;
-  const ev=b.evaluation||null, kids=(b.children||[]).filter(k=>{ const a=age(k.birth); return a===""||a<26; }).length;
+  const ev=b.evaluation||null, form=EVALF(), max=evalMax(form), kids=(b.children||[]).filter(k=>{ const a=age(k.birth); return a===""||a<26; }).length;
   const ans={ ...suggestEval({ age:age(b.birth||parseNID(b.nationalId||"",now).birth||""), marital:b.marital, housing:b.housing, job:b.job, kids, stages:(b.children||[]).map(stageOf) }), ...(ev?.answers||{}) };
-  const draw=()=>{ const r=scoreEval(ans);
-    return `<p class="sub" style="margin-top:0">${esc(EVAL_REV)} — ${ev?`آخر تقييم ${dLabel(ev.at)} (${esc(who(ev.by))}): ${ev.total} من ${EVAL_MAX} = ${ev.pct}%${ev.grade?` (${ev.grade})`:""}`:"أول تقييم للأسرة دي. الاختيارات المعلّمة جاية من ملفها — راجعها."}</p>
-    <div class="evtot ${r.missing.length?"":"done"}"><b>${r.total}</b> من ${EVAL_MAX} = <b>${r.pct}%</b> ← ${r.grade?`تقدير <b>${r.grade}</b>`:r.missing.length?"":"<b>غير مقبول</b> (أقل من 50%)"}${r.missing.length?` <span class="sub">— فاضل: ${esc(r.missing.join("، "))}</span>`:""}</div>
-    <p class="sub">A: 81% فأكتر · B: من 61% لـ 80% · C: من 50% لـ 60%</p>
-    ${EVAL_FORM.map((it,i)=>`<fieldset class="evit"><legend>${i+1}. ${esc(it.name)} <small>(${it.max})</small></legend>
-      ${it.opts.map(([v,l,sc,note])=>`<label class="chk"><input type="radio" name="ev_${it.key}" value="${v}" ${ans[it.key]===v?"checked":""}> ${esc(l)} <b class="evsc">${sc}</b>${note?` <small class="sub">— ${esc(note)}</small>`:""}</label>`).join("")}</fieldset>`).join("")}
+  const draw=()=>{ const r=scoreEval(ans,form);
+    return `<p class="sub" style="margin-top:0">${esc(form.rev||"")} — ${ev?`آخر تقييم ${dLabel(ev.at)} (${esc(who(ev.by))}): ${ev.total} من ${ev.max||max} = ${ev.pct}%${ev.grade?` (${ev.grade})`:""}${ev.rev&&ev.rev!==form.rev?` على «${esc(ev.rev)}»`:""}`:"أول تقييم للأسرة دي. الاختيارات المعلّمة جاية من ملفها — راجعها."}</p>
+    <div class="evtot ${r.missing.length?"":"done"}"><b>${r.total}</b> من ${max} = <b>${r.pct}%</b> ← ${r.grade?`تقدير <b>${r.grade}</b>`:r.missing.length?"":`<b>غير مقبول</b> (أقل من ${(form.bands||{C:50}).C}%)`}${r.missing.length?` <span class="sub">— فاضل: ${esc(r.missing.join("، "))}</span>`:""}</div>
+    <p class="sub">${bandsTxt(form)}</p>
+    ${(form.items||[]).map((it,i)=>`<fieldset class="evit"><legend>${i+1}. ${esc(it.name)} <small>(${itemMax(it)})</small></legend>
+      ${(it.opts||[]).map(([v,l,sc,note])=>`<label class="chk"><input type="radio" name="ev_${esc(it.key)}" value="${esc(v)}" ${ans[it.key]===v?"checked":""}> ${esc(l)} <b class="evsc">${sc}</b>${note?` <small class="sub">— ${esc(note)}</small>`:""}</label>`).join("")}</fieldset>`).join("")}
     <label class="f">القائم بالبحث<input type="text" id="ev_by" value="${esc(ev?.researcher||me?.full_name||"")}"></label>
     <div class="bar"><button class="btn pri" id="ev_save">${ic("save")}حفظ التقييم</button><button class="btn" id="ev_print">${ic("printer")}اطبع الاستمارة</button></div>`; };
   const mount=s=>{ const q=x=>s.querySelector(x);
     s.querySelectorAll("input[type=radio]").forEach(el=>el.onchange=()=>{ ans[el.name.slice(3)]=el.value; const by=q("#ev_by").value, sc=s.querySelector(".sh-body").scrollTop; s.querySelector(".sh-body").innerHTML=draw(); mount(s); q("#ev_by").value=by; s.querySelector(".sh-body").scrollTop=sc; });
-    q("#ev_print").onclick=()=>{ const r=scoreEval(ans); doPrint(evalHTML(b,{ answers:ans, ...r, researcher:q("#ev_by").value.trim(), at:new Date().toISOString() }), `تقييم ${b.code} ${b.name}`); };
-    q("#ev_save").onclick=async()=>{ const r=scoreEval(ans);
+    q("#ev_print").onclick=()=>{ const r=scoreEval(ans,form); doPrint(evalHTML(b,{ answers:ans, ...r, form, rev:form.rev, researcher:q("#ev_by").value.trim(), at:new Date().toISOString() }), `تقييم ${b.code} ${b.name}`); };
+    q("#ev_save").onclick=async()=>{ const r=scoreEval(ans,form);
       if(r.missing.length&&!await ask(`فاضل: ${r.missing.join("، ")}.\nالبنود الفاضية بتتحسب صفر. تحفظ كده؟`,{title:"التقييم مش كامل",ok:"احفظ",cancel:"أكمّله"})) return;
-      const cur=B.get(bid), evaluation={ rev:EVAL_REV, at:new Date().toISOString(), by:me.id, researcher:q("#ev_by").value.trim(), answers:{ ...ans }, total:r.total, pct:r.pct, grade:r.grade };
+      const cur=B.get(bid), evaluation={ rev:form.rev||"", at:new Date().toISOString(), by:me.id, researcher:q("#ev_by").value.trim(), answers:{ ...ans }, total:r.total, max:r.max, pct:r.pct, grade:r.grade, form };
       q("#ev_save").disabled=true;
       const res=await patchPerson(bid, cur, { ...cur, score:r.pct, grade:r.grade, evaluation });
       if(res.cancelled||res.error){ q("#ev_save").disabled=false; if(res.error) toast(errMsg(res.error,"case","evaluation")); return; }
-      await logIt("beneficiary",bid,`تقييم الحالة (${EVAL_REV}): ${r.total} من ${EVAL_MAX} = ${r.pct}%${r.grade?` — تقدير ${r.grade}`:" — غير مقبول"}${cur.grade&&cur.grade!==r.grade?` (كان ${cur.grade})`:""}`);
+      await logIt("beneficiary",bid,`تقييم الحالة (${form.rev||""}): ${r.total} من ${r.max} = ${r.pct}%${r.grade?` — تقدير ${r.grade}`:" — غير مقبول"}${cur.grade&&cur.grade!==r.grade?` (كان ${cur.grade})`:""}`);
       await refreshPerson(bid); toast(`اتحفظ ✓ ${r.pct}%${r.grade?` — تقدير ${r.grade}`:""}${cur.fcode&&cur.grade!==r.grade?" · التقدير اتغير: لو عايز الكود يتغير اقترح كود جديد":""}`); viewPerson(bid); };
   };
-  const s=sheet(`استمارة تقييم — ${b.name}`, draw(), mount);
+  sheet(`استمارة تقييم — ${b.name}`, draw(), mount);
 }
-// the filled form, laid out like the paper
+// the form laid out like the paper — filled for a family (b + ev), or empty to fill by hand (b = null)
 function evalHTML(b, ev){
-  const tick=v=>v?"✔":"";
-  return `<div class="ps">${hdr()}<h1>استمارة تقييم الحالات</h1><div class="mo">${esc(EVAL_REV)}</div>
+  const form=ev?.form||EVALF(), max=evalMax(form), bd=form.bands||{A:81,B:61,C:50}, a=ev?.answers||{}, tick=v=>v?"✔":"";
+  return `<div class="ps">${hdr()}<h1>استمارة تقييم الحالات</h1><div class="mo">${esc(ev?.rev||form.rev||"")}</div>
     <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:10px">
       <table class="kv" style="flex:2"><tbody>
-        <tr><td>نوع الكفالة</td><td>${esc(b.caseType||"")}</td></tr><tr><td>اسم الحالة</td><td>${esc(b.name)} (${esc(b.fcode||b.code)})</td></tr>
-        <tr><td>رقم الموبايل</td><td>${esc(cleanPhone(b.phone)||"")}</td></tr><tr><td>الدرجة ونسبة القبول</td><td>${ev.total} من ${EVAL_MAX} — ${ev.pct}%${ev.grade?` (${ev.grade})`:" (غير مقبول)"}</td></tr></tbody></table>
-      <table style="flex:1"><thead><tr><th>التقدير</th><th>النسبة</th></tr></thead><tbody><tr><td>A</td><td>&gt;= 81%</td></tr><tr><td>B</td><td>61% — 80%</td></tr><tr><td>C</td><td>50% — 60%</td></tr></tbody></table></div>
-    <table><thead><tr><th>م</th><th>البند</th><th>${EVAL_MAX}</th><th>التفصيل</th><th>Sc</th><th>الدرجة</th><th>ملاحظات</th></tr></thead><tbody>
-    ${EVAL_FORM.map((it,i)=>it.opts.filter(o=>o[0]!=="0"||o[0]===ev.answers[it.key]).map((o,j,arr)=>`<tr>${j?"":`<td rowspan="${arr.length}">${i+1}</td><td rowspan="${arr.length}" class="l"><b>${esc(it.name)}</b></td><td rowspan="${arr.length}">${it.max}</td>`}
-      <td class="l">${tick(ev.answers[it.key]===o[0])} ${esc(o[1])}</td><td>${o[2]}</td><td><b>${ev.answers[it.key]===o[0]?o[2]:""}</b></td><td class="l" style="font-size:10px">${esc(o[3]||"")}</td></tr>`).join("")).join("")}
-    </tbody><tfoot><tr><td colspan="5">الإجمالي</td><td>${ev.total}</td><td>${ev.pct}%${ev.grade?` — ${ev.grade}`:""}</td></tr></tfoot></table>
-    <div class="signs"><div>القائم بالبحث<span></span><em>الاسم: <i>${esc(ev.researcher||"")}</i></em><em>التوقيع: <i></i></em></div><div>مدير الجمعية<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div></div></div>`;
+        <tr><td>نوع الكفالة</td><td>${esc(b?.caseType||"")}</td></tr><tr><td>اسم الحالة</td><td>${b?`${esc(b.name)} (${esc(b.fcode||b.code)})`:""}</td></tr>
+        <tr><td>رقم الموبايل</td><td>${esc(b?cleanPhone(b.phone)||"":"")}</td></tr><tr><td>الدرجة ونسبة القبول</td><td>${ev?`${ev.total} من ${max} — ${ev.pct}%${ev.grade?` (${ev.grade})`:" (غير مقبول)"}`:""}</td></tr></tbody></table>
+      <table style="flex:1"><thead><tr><th>التقدير</th><th>النسبة</th></tr></thead><tbody><tr><td>A</td><td>&gt;= ${bd.A}%</td></tr><tr><td>B</td><td>${bd.B}% — ${bd.A-1}%</td></tr><tr><td>C</td><td>${bd.C}% — ${bd.B-1}%</td></tr></tbody></table></div>
+    <table><thead><tr><th>م</th><th>البند</th><th>${max}</th><th>التفصيل</th><th>Sc</th><th>الدرجة</th><th>ملاحظات</th></tr></thead><tbody>
+    ${(form.items||[]).map((it,i)=>{ const opts=(it.opts||[]).filter(o=>o[0]!=="0"||o[0]===a[it.key]); return opts.map((o,j)=>`<tr>${j?"":`<td rowspan="${opts.length}">${i+1}</td><td rowspan="${opts.length}" class="l"><b>${esc(it.name)}</b></td><td rowspan="${opts.length}">${itemMax(it)}</td>`}
+      <td class="l">${tick(a[it.key]===o[0])} ${esc(o[1])}</td><td>${o[2]}</td><td><b>${a[it.key]===o[0]?o[2]:""}</b></td><td class="l" style="font-size:10px">${esc(o[3]||"")}</td></tr>`).join(""); }).join("")}
+    </tbody><tfoot><tr><td colspan="5">الإجمالي</td><td>${ev?ev.total:""}</td><td>${ev?`${ev.pct}%${ev.grade?` — ${ev.grade}`:""}`:""}</td></tr></tfoot></table>
+    <div class="signs"><div>القائم بالبحث<span></span><em>الاسم: <i>${esc(ev?.researcher||"")}</i></em><em>التوقيع: <i></i></em></div><div>مدير الجمعية<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div></div></div>`;
+}
+/* Editing the form itself (a new version): items, their options with points and notes, the grade bands.
+   Manager or a designated approver. Saved for everyone; evaluations already saved keep the version they were made on. */
+function evalFormSheet(){
+  const cur=EVALF(); let f=JSON.parse(JSON.stringify(cur));
+  const m=String(cur.rev||"").match(/REV\s*(\d+)/i); f.rev=`REV ${m?+m[1]+1:1} — ${today.split("-").reverse().join("/")}`;
+  const draw=()=>`<p class="sub" style="margin-top:0">التعديل بيعمل نسخة جديدة من الاستمارة. التقييمات اللي اتحفظت قبل كده بتفضل بالنسخة اللي اتعملت بيها. أقصى درجة لكل بند = أعلى نقط في اختياراته، والمجموع دلوقتي <b>${evalMax(f)}</b>.</p>
+    <div class="grid2"><label class="f">اسم النسخة<input type="text" id="ef_rev" value="${esc(f.rev)}"></label>
+      <div class="row" style="gap:6px;align-items:flex-end">${["A","B","C"].map(g=>`<label class="f" style="flex:1">${g} من (%)<input type="number" min="0" max="100" data-bd="${g}" value="${(f.bands||{})[g]??""}"></label>`).join("")}</div></div>
+    ${f.items.map((it,i)=>`<fieldset class="evit"><legend><input type="text" data-in="${i}" value="${esc(it.name)}" style="min-width:180px" aria-label="اسم البند"> <small>(${itemMax(it)})</small>
+        <button class="btn sm" data-iu="${i}" ${i?"":"disabled"} aria-label="لفوق">↑</button><button class="btn sm" data-id="${i}" ${i<f.items.length-1?"":"disabled"} aria-label="لتحت">↓</button><button class="btn sm danger" data-ix="${i}" aria-label="شيل البند">×</button></legend>
+      ${it.opts.map((o,j)=>`<div class="row" style="gap:6px;margin:4px 0;flex-wrap:wrap"><input type="text" data-ol="${i}.${j}" value="${esc(o[1])}" style="flex:2 1 150px" aria-label="الاختيار"><input type="number" step="any" data-os="${i}.${j}" value="${o[2]}" class="numin" aria-label="النقط"><input type="text" data-on="${i}.${j}" value="${esc(o[3]||"")}" placeholder="ملاحظة" style="flex:2 1 150px"><button class="btn sm danger" data-ox="${i}.${j}" aria-label="شيل الاختيار">×</button></div>`).join("")}
+      <button class="btn sm" data-oa="${i}">${ic("plus")}اختيار</button></fieldset>`).join("")}
+    <div class="bar"><button class="btn sm" id="ef_add">${ic("plus")}بند جديد</button><button class="btn sm" id="ef_def">${ic("undo")}الاستمارة الأصلية (REV 7)</button><button class="btn sm" id="ef_blank">${ic("printer")}اطبع فاضية</button></div>
+    <div class="bar"><button class="btn pri" id="ef_save">${ic("save")}حفظ النسخة الجديدة</button></div>`;
+  const ij=x=>x.split(".").map(Number);
+  const mount=s=>{ const q=x=>s.querySelector(x), re=()=>{ const sc=s.querySelector(".sh-body").scrollTop; s.querySelector(".sh-body").innerHTML=draw(); mount(s); s.querySelector(".sh-body").scrollTop=sc; };
+    q("#ef_rev").oninput=e=>{ f.rev=e.target.value; };
+    s.querySelectorAll("[data-bd]").forEach(el=>el.oninput=()=>{ f.bands={ ...(f.bands||{}), [el.dataset.bd]:+el.value||0 }; });
+    s.querySelectorAll("[data-in]").forEach(el=>el.oninput=()=>{ f.items[+el.dataset.in].name=el.value; });
+    s.querySelectorAll("[data-ol]").forEach(el=>el.oninput=()=>{ const [i,j]=ij(el.dataset.ol); f.items[i].opts[j][1]=el.value; });
+    s.querySelectorAll("[data-on]").forEach(el=>el.oninput=()=>{ const [i,j]=ij(el.dataset.on); f.items[i].opts[j][3]=el.value; });
+    s.querySelectorAll("[data-os]").forEach(el=>el.onchange=()=>{ const [i,j]=ij(el.dataset.os); f.items[i].opts[j][2]=+el.value||0; re(); });
+    s.querySelectorAll("[data-ox]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const [i,j]=ij(el.dataset.ox); f.items[i].opts.splice(j,1); re(); });
+    s.querySelectorAll("[data-oa]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const it=f.items[+el.dataset.oa]; it.opts.push(["o"+Date.now().toString(36),"",0,""]); re(); });
+    s.querySelectorAll("[data-ix]").forEach(el=>el.onclick=e=>{ e.preventDefault(); f.items.splice(+el.dataset.ix,1); re(); });
+    s.querySelectorAll("[data-iu]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const i=+el.dataset.iu; [f.items[i-1],f.items[i]]=[f.items[i],f.items[i-1]]; re(); });
+    s.querySelectorAll("[data-id]").forEach(el=>el.onclick=e=>{ e.preventDefault(); const i=+el.dataset.id; [f.items[i+1],f.items[i]]=[f.items[i],f.items[i+1]]; re(); });
+    q("#ef_add").onclick=()=>{ f.items.push({ key:"i"+Date.now().toString(36), name:"بند جديد", opts:[["o1","",0,""]] }); re(); };
+    q("#ef_def").onclick=()=>{ f=JSON.parse(JSON.stringify(DEFAULT_EVAL)); re(); };
+    q("#ef_blank").onclick=()=>doPrint(evalHTML(null,{ form:f, rev:f.rev }), "استمارة تقييم فاضية");
+    q("#ef_save").onclick=async()=>{
+      f.items=f.items.map(it=>({ ...it, name:String(it.name||"").trim(), opts:it.opts.filter(o=>String(o[1]||"").trim()).map(o=>[o[0],String(o[1]).trim(),+o[2]||0,String(o[3]||"").trim()]) })).filter(it=>it.name&&it.opts.length);
+      const bd=f.bands||{}; if(!(bd.A>bd.B&&bd.B>bd.C&&bd.C>0&&bd.A<=100)){ toast("النسب لازم تبقى A أكبر من B أكبر من C"); return; }
+      if(!f.items.length){ toast("الاستمارة لازم يبقى فيها بند واحد على الأقل"); return; }
+      if(!await ask(`الاستمارة الجديدة «${f.rev}»: ${f.items.length} بند، المجموع ${evalMax(f)}.\nالتقييمات الجديدة هتتعمل بيها، والقديمة بتفضل زي ما هي.`,{title:"حفظ نسخة جديدة؟",ok:"احفظ"})) return;
+      q("#ef_save").disabled=true;
+      const { error } = await sb.from("app_settings").upsert({ key:"eval_form", value:f, updated_at:new Date().toISOString(), updated_by:me.id });
+      if(error){ q("#ef_save").disabled=false; toast(errMsg(error,"settings","eval_form")); return; }
+      APPSET.eval_form=f; try{ localStorage.setItem("dar-set",JSON.stringify(APPSET)); }catch(e){} changed(); closeSheet(); toast(`اتحفظت «${f.rev}» ✓`); };
+  };
+  sheet("تعديل استمارة التقييم", draw(), mount);
 }
 /* ---------- family codes (propose → approve) ---------- */
 // one family: see her code, propose one (office), approve / reject a proposal (manager or a designated approver)
 function codeDialog(bid){
   const b=B.get(bid); if(!b) return; const g=groupOfB(b), req=b.fcodeReq;
-  const sug=g?suggestCode(b.code,b.grade||gradeOf(b.score),g.letter,nextGroupNo(g.letter)):"";
+  const sug=g?suggestCode(b.code,b.grade||gradeOf(b.score,EVALF().bands),g.letter,nextGroupNo(g.letter)):"";
   const w=document.createElement("div"); w.className="ask-scrim";
   w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="cdT"><h2 id="cdT">كود الأسرة — ${esc(b.name)}</h2>
     <p class="sub" style="margin-top:0">الكود المعتمد: <b dir="ltr">${esc(b.fcode||"لسه مفيش")}</b>${b.fcodeOkBy?` — اعتمده ${esc(who(b.fcodeOkBy))} ${dLabel(b.fcodeOkAt)}`:""}</p>
@@ -947,7 +991,7 @@ function codesSheet(){
       // by case number; each group continues from its last number
       const taken={}, rows=[];
       for(const b of people().filter(b=>!b.fcode&&!b.fcodeReq).sort(byCode)){ const g=groupOfB(b); if(!g) continue;
-        const no=nextGroupNo(g.letter, taken[g.letter]||[]); (taken[g.letter]||=[]).push(no); rows.push({ id:b.id, code:suggestCode(b.code,b.grade||gradeOf(b.score),g.letter,no), group:g.letter, no }); }
+        const no=nextGroupNo(g.letter, taken[g.letter]||[]); (taken[g.letter]||=[]).push(no); rows.push({ id:b.id, code:suggestCode(b.code,b.grade||gradeOf(b.score,EVALF().bands),g.letter,no), group:g.letter, no }); }
       const used=new Set([...B.values()].flatMap(x=>[x.fcode,x.fcodeReq?.code]).filter(Boolean)), clash=rows.filter(r=>used.has(r.code));
       if(clash.length){ toast(`فيه ${num(clash.length)} كود متكرر (${clash[0].code}) — راجع الأرقام`); return; }
       if(!await ask(`هيتقترح ${num(rows.length)} كود (زي ${rows[0]?.code||""})، وبيستنوا الاعتماد.`,{title:"اقتراح الأكواد؟",ok:"اقترح"})) return;
@@ -1007,6 +1051,10 @@ function vSettings(){
   ${canWrite()?`<h3>كود الأسرة والأولوية</h3>
   <p class="sub" style="margin-top:0">كود الأسرة زي <b dir="ltr">AK-4738</b>: التقدير (A) + حرف المجموعة (K كفالات) + رقمها في الجمعية (47) + رقمها في المجموعة (38). الكود بيتعتمد من المدير أو اللي ليه صلاحية اعتماد الأكواد. والمجموعات مترتبة بالأولوية: لما الكمية ماتكفيش، الأول بياخد.</p>
   <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${GROUPS().map((g,i)=>`<span class="chip ${i===0?"red":i===1?"plum":"blue"}"><b>${esc(g.letter)}</b> ${esc(g.name)}</span>${i<GROUPS().length-1?"<span>←</span>":""}`).join("")}</div>
+  <h3>استمارة تقييم الحالات</h3>
+  <p class="sub" style="margin-top:0">النسخة الحالية: <b>${esc(EVALF().rev||"")}</b> — ${num(EVALF().items.length)} بنود، المجموع ${evalMax(EVALF())}. التقييم بيتعمل من ملف كل أسرة.</p>
+  <div class="bar"><button class="btn" id="evBlank">${ic("printer")}اطبع استمارة فاضية</button>${canApproveCodes()?`<button class="btn" id="evForm">${ic("edit")}عدّل الاستمارة</button>`:""}</div>
+  <h3>أكواد الأسر</h3>
   <div class="bar"><button class="btn pri" id="codesOpen">${ic("list")}أكواد الأسر${(()=>{ const n=people().filter(b=>b.fcodeReq).length; return n?` (${num(n)} مستني اعتماد)`:""; })()}</button><button class="btn" id="grpEdit">${ic("edit")}عدّل الحروف والأولوية</button></div>`:""}
   ${isMgr()?`
   <h3>المستخدمين</h3>
@@ -1068,7 +1116,7 @@ function bindView(){
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
   on("#newK","onclick",()=>newBatch()); on("#mergeK","onclick",()=>copyBatch(null));
   on("#newT","onclick",()=>openType(null));
-  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet()); on("#grpEdit","onclick",()=>groupsSheet()); on("#codesOpen","onclick",()=>codesSheet());
+  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet()); on("#grpEdit","onclick",()=>groupsSheet()); on("#codesOpen","onclick",()=>codesSheet()); on("#evForm","onclick",()=>evalFormSheet()); on("#evBlank","onclick",()=>doPrint(evalHTML(null,null),"استمارة تقييم فاضية"));
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
@@ -1443,7 +1491,7 @@ function viewPerson(id){
       ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f(b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2)}${waNum(b)&&waNum(b)!==cleanPhone(b.phone)?f("واتساب",waNum(b)):""}
       ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize||(famSize(b)?famSize(b)+" (من عدد الأبناء)":""))}${f("عدد الأبناء",(b.children||[]).length||"")}
       ${f("المشروع",b.project)}${f("المنطقة",b.area)}${f("العمل",b.job)}${f("الدخل",b.income)}${f("المعاش",b.pension)}${f("السكن",b.housing)}
-      ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?`${b.score}%${b.evaluation?` (${b.evaluation.total} من ${EVAL_MAX})`:""}`:"")}
+      ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?`${b.score}%${b.evaluation?` (${b.evaluation.total} من ${b.evaluation.max||evalMax(b.evaluation.form||DEFAULT_EVAL)})`:""}`:"")}
     </div>
     ${b.address?`<p><span class="sub">العنوان:</span> ${esc(b.address)}</p>`:""}
     ${b.notes?`<div class="note">${esc(b.notes)}</div>`:""}
