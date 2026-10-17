@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.63";
+export const VERSION = "1.3.64";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2040,8 +2040,11 @@ function copyBatch(id){
       const src=chosen(); if(!src.length){ toast("مفيش حد مطابق للقواعد"); return; }
       q("#c_go").disabled=true; q("#c_go").innerHTML=`<span class="spin"></span>`;
       const many=srcs().length>1, title=q("#c_t").value.trim()||defTitle();
+      // the quantity rule: the same one if every list has the same rule, otherwise each list's own rule (by its title)
+      const rl=srcs().map(x=>ruleOnly(x.basis)), first=rl.find(Boolean);
+      const basis=!many?k.basis:!first?null:rl.every(r=>r&&same(r,first))?first:{ ...first, src:Object.fromEntries(srcs().map((x,i)=>[x.title,rl[i]]).filter(([,r])=>r)) };
       const nk=await run(sb.from("batches").insert({title,type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
-        donor:k.donor||"",basis:many?null:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
+        donor:k.donor||"",basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
       if(!nk){ q("#c_go").disabled=false; q("#c_go").innerHTML=`${ic("copy")}اعمل الكشف (مسودة)`; return; }
       const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why=SRC_PREFIX+it.from.map(x=>x.title).join(" + "); return toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i); });
       const saved=await insertItems(rows);
@@ -2058,6 +2061,19 @@ function editBatch(id){
   let dow=k.days?.length?new Date(k.days[0]+"T00:00:00Z").getUTCDay():6, days=new Set(k.days||[]);
   const autoTitle=()=>{ const ds=[...days].sort(), d=q_("#e_d").value.trim(); return `كشف ${k.typeName}${d?` (${d})`:""} — ${ds.length?`${daysText(ds)} ${ds[ds.length-1].slice(0,4)}`:mLabel(k.month)}`; };
   let q_=()=>null;
+  // one rule for the list, or one per source list on a merged list
+  const titles=mergedSources(k)?[...mergedSources(k).keys()]:[];
+  const groups=titles.length>1?titles.map(t=>[t,k.basis?.src?.[t]||(!k.basis?.src&&k.basis?.mode?ruleOnly(k.basis):null)]):[["",ruleOnly(k.basis)]];
+  const MODES=[["","بالإيد (من غير قاعدة)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["tiers","على حسب حجم الأسرة (صغيرة / كبيرة)"],["student","لكل طالب"]];
+  const ruleEditor=(i,t,r)=>{ r=r||{}; const m=r.mode||"";
+    return `<div class="rulebox" data-rg="${i}">${t?`<div class="sub"><b>من «${esc(shortTitle(t))}»</b></div>`:""}
+      <div class="grid2"><label class="f">إزاي تتحسب<select data-rm2="${i}">${MODES.map(([v,l])=>`<option value="${v}" ${m===v?"selected":""}>${l}</option>`).join("")}</select></label>
+      <label class="f" data-show="fixed member student" ${["fixed","member","student"].includes(m)?"":"hidden"}>الكمية (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="per" value="${r.per??""}"></label>
+      <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>الأسرة الصغيرة لحد كام فرد<input type="number" min="1" data-rp="cut" value="${r.cut??3}"></label>
+      <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الصغيرة<input type="number" min="0" step="any" data-rp="small" value="${r.small??""}"></label>
+      <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الكبيرة<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div></div>`; };
+  const readRule=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""?null:+v; };
+    return m==="tiers"?{ mode:m, cut:g("cut")||3, small:g("small")||0, big:g("big")||0 }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true }:{}) }; };
   const dayBoxes=()=>[k.month,next].map(mo=>`<div class="sub" style="margin-top:6px">${mLabel(mo)}</div><div class="checks">${weekdaysOf(mo,dow).map(d=>`<label><input type="checkbox" value="${d}" ${days.has(d)?"checked":""}> ${dayLabel(d)}</label>`).join("")}</div>`).join("");
   sheet("تعديل الكشف",`
     <label class="f">اسم الكشف<input type="text" id="e_t" value="${esc(k.title)}"></label>
@@ -2065,24 +2081,46 @@ function editBatch(id){
     <label class="f">الجهة المتبرعة<input type="text" id="e_d" value="${esc(k.donor||"")}" list="e_dl"><datalist id="e_dl">${DONORS.map(d=>`<option value="${esc(d)}">`).join("")}</datalist></label>
     <label class="f">يوم التوزيع<select id="e_dow">${DAYS.map((d,i)=>`<option value="${i}" ${i===dow?"selected":""}>كل ${d}</option>`).join("")}</select></label>
     <div class="sub">الكشف شغال في الأيام دي (علّم عليهم):</div><div id="e_days">${dayBoxes()}</div>
+    <h3>حساب الكمية</h3>
+    <p class="sub" style="margin-top:0">${groups.length>1?"الكشف ده مدموج: كل كشف ليه قاعدته، والأسرة بتتحسب بقاعدة الكشف اللي جاية منه.":"لما تغيّر عدد أفراد أسرة في الكشف، الكمية بتتحسب بالقاعدة دي."}</p>
+    ${groups.map(([t,r],i)=>ruleEditor(i,t,r)).join("")}
+    <label class="chk"><input type="checkbox" id="e_recalc"> احسب كميات كل الأسر اللي لسه ما استلمتش من جديد بالقاعدة</label>
     <div class="bar"><button class="btn pri" id="e_s">${ic("save")}حفظ</button></div>`, s=>{
     q_=x=>s.querySelector(x);
     const readDays=()=>{ s.querySelectorAll("#e_days input").forEach(i=>i.checked?days.add(i.value):days.delete(i.value)); };
     s.querySelector("#e_days").onchange=readDays;
     q_("#e_dow").onchange=e=>{ readDays(); dow=+e.target.value; q_("#e_days").innerHTML=dayBoxes(); };
     q_("#e_auto").onclick=()=>{ readDays(); q_("#e_t").value=autoTitle(); };
+    s.querySelectorAll("[data-rm2]").forEach(el=>el.onchange=()=>{ el.closest(".rulebox").querySelectorAll("[data-show]").forEach(f=>f.hidden=!f.dataset.show.split(" ").includes(el.value)); });
     q_("#e_s").onclick=async()=>{
       readDays(); const ds=[...days].sort(), title=q_("#e_t").value.trim()||autoTitle();
+      const read=[...s.querySelectorAll(".rulebox")].map((box,i)=>[groups[i][0],readRule(box)]);
+      const keep=Object.fromEntries(Object.entries(k.basis||{}).filter(([x])=>!RULE_KEYS.includes(x)&&x!=="src"));   // budget, priority… stay as they were
+      const first=read.map(([,r])=>r).find(Boolean);
+      const basis=!first?(Object.keys(keep).length?keep:null):read.length>1?{ ...keep, ...first, src:Object.fromEntries(read.filter(([,r])=>r)) }:{ ...keep, ...first };
+      const ruleChanged=!same(ruleOnly(k.basis)&&{ ...ruleOnly(k.basis), src:k.basis.src }, basis&&ruleOnly(basis)&&{ ...ruleOnly(basis), src:basis.src });
       q_("#e_s").disabled=true;
-      if(await run(sb.from("batches").update({title, donor:q_("#e_d").value.trim(), dist_days:ds, dist_date:ds[0]||null}).eq("id",id),"اتحفظ ✓")){
-        await logIt("batch",id,`تعديل الكشف: ${title}${ds.length?` · الأيام: ${daysText(ds)}`:""}`); await refreshBatch(id); openBatch(id);
-      } else q_("#e_s").disabled=false;
+      if(!await run(sb.from("batches").update({title, donor:q_("#e_d").value.trim(), dist_days:ds, dist_date:ds[0]||null, basis}).eq("id",id))){ q_("#e_s").disabled=false; return; }
+      await logIt("batch",id,`تعديل الكشف: ${title}${ds.length?` · الأيام: ${daysText(ds)}`:""}${ruleChanged?` · القاعدة: ${basis?basisText({ ...k, basis })||"بالإيد":"بالإيد"}`:""}`);
+      let msg="اتحفظ ✓";
+      if(q_("#e_recalc").checked&&basis){ const nk={ ...k, basis }, upd=k.items.filter(it=>!it.received).map(it=>{ const r=ruleOf(nk,it); return r?[it,shareFor(r,it.familySize,it.students)]:null; }).filter(x=>x&&+x[0].value!==x[1]);
+        let done=0, failed=null;
+        for(let i=0;i<upd.length;i+=10){ const res=await Promise.all(upd.slice(i,i+10).map(([it,v])=>sb.from("batch_items").update({ value:v }).eq("id",it.id).eq("received",false))); const bad=res.find(r=>r.error); if(bad){ failed=bad.error; break; } done+=res.length; }
+        if(done) await logIt("batch",id,`إعادة حساب الكميات بالقاعدة: ${done} أسرة`);
+        msg=failed?`اتحفظ، بس الكميات اتحسبت لـ ${num(done)} بس من ${num(upd.length)} — ${errMsg(failed,"batch","recalc")}`:`اتحفظ ✓ — اتحسبت كميات ${num(done)} أسرة`; }
+      toast(msg); await refreshBatch(id); openBatch(id);
     };
   });
 }
+/* A list's quantity rule (basis): mode + numbers. A list made from several lists keeps each source's own rule in
+   basis.src {source title → rule}, so a family's amount is always worked out by the rule of the list she came from. */
+const RULE_KEYS=["mode","per","cut","small","big","stu"];
+const ruleOnly=b=>b&&b.mode?Object.fromEntries(RULE_KEYS.filter(x=>b[x]!=null&&b[x]!=="").map(x=>[x,b[x]])):null;
+const ruleOf=(k,it)=>{ const b=k.basis; if(!b) return null; if(b.src){ const t=srcTitles(it)[0]; if(t&&b.src[t]) return b.src[t]; } return b.mode?b:null; };
+const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
 function basisText(k){
   const b=k.basis||{}, u=k.unit;
-  const how=b.mode==="student"?`${num(b.per)} ${u} لكل طالب`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
+  const how=b.src?Object.entries(b.src).map(([t,r])=>`من «${shortTitle(t)}» ${ruleHow(r,u)}`).join("، "):ruleHow(b,u);
   return [how&&"النصيب: "+how, b.total!=null&&b.total!==undefined?`من ${num(b.total)} ${u} متاحين`:"", b.by&&"الأولوية: "+(b.missedFirst?"اللي ماجاش المرة اللي فاتت، بعدين ":"")+(PRIORITY[b.by]||"")].filter(Boolean).join(" · ");
 }
 function openBatch(id, giveMode){
@@ -2120,7 +2158,7 @@ function openBatch(id, giveMode){
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
     :(()=>{ const ed=canEditList(k), stu=stuOn(k), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
-      return `${ed?`<p class="sub" style="margin:0 0 6px">تقدر تعدّل الأفراد${stu?" والطلاب":""} والكمية لكل أسرة من هنا — بيتحفظ لوحده${k.basis&&k.basis.total==null?"، ولو غيّرت الأفراد الكمية بتتحسب تاني على نفس القاعدة":""}.</p>`:""}
+      return `${ed?`<p class="sub" style="margin:0 0 6px">تقدر تعدّل الأفراد${stu?" والطلاب":""} والكمية لكل أسرة من هنا — بيتحفظ لوحده${k.basis?"، ولو غيّرت الأفراد الكمية بتتحسب تاني على قاعدة الكشف":"، ولو عايز الكمية تتحسب لوحدها حط قاعدة من «تعديل»"}.</p>`:""}
       <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
       ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(it.code)}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td><td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`; })()}
@@ -2155,8 +2193,8 @@ function openBatch(id, giveMode){
       undoable(`${it.name}: اتعدلت الأعداد`, ()=>{ const cur=K.get(id)?.items.find(x=>x.id===it.id); if(!cur||cur.received) return false; return saveItem(cur,prev); });
       return true; };
     // a new family size / students count gives the amount by the list's own rule (when it has one and no fixed total to split)
-    const autoValue=(k,it,patch)=>{ if(!k.basis||k.basis.total!=null||"value" in patch) return patch;
-      const fam=patch.familySize??it.familySize, stu=patch.students??it.students; return { ...patch, value:shareFor(k.basis, fam, stu) }; };
+    const autoValue=(k,it,patch)=>{ const r=ruleOf(k,it); if(!r||"value" in patch) return patch;
+      const fam=patch.familySize??it.familySize, stu=patch.students??it.students; return { ...patch, value:shareFor(r, fam, stu) }; };
     s.querySelectorAll("[data-ei]").forEach(el=>el.onchange=()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.ei); if(!it) return;
       const v=el.value===""?null:+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
       saveItem(it, autoValue(k,it,{ [el.dataset.ef]:v })); });
