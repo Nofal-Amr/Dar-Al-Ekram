@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.87";
+export const VERSION = "1.3.88";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -181,8 +181,8 @@ const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, ph
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[], evaluation:b.evaluation??null });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemId:r.item_id||null, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
-  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, feedback:r.feedback||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
-const fromI = r => ({ id:r.id, position:r.position??0, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by, feedback:r.feedback||"" });
+  createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, feedback:r.feedback||null, parts:Array.isArray(r.parts)?r.parts:[], items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
+const fromI = r => ({ id:r.id, position:r.position??0, bid:r.beneficiary_id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", familySize:r.family_size||"", students:r.students??null, value:+r.value, reason:r.reason||"", received:r.received, receivedAt:r.received_at, receivedBy:r.received_by, feedback:r.feedback||"", extra:r.extra||{} });
 const fromC = r => ({ id:r.id, bid:r.beneficiary_id, batchId:r.batch_id||(r.event_id?"ev:"+r.event_id:null), result:r.result, at:r.at, by:r.by, cancelledAt:r.cancelled_at||null });
 const fromTk = r => ({ id:r.id, title:r.title, notes:r.notes||"", due:r.due||"", bid:r.beneficiary_id||null, assignee:r.assignee||null, doneAt:r.done_at||null, doneBy:r.done_by||null, createdAt:r.created_at, createdBy:r.created_by, archivedAt:r.archived_at||null });
 const toI = (it, batchId, i) => ({ batch_id:batchId, beneficiary_id:it.bid||null, position:i, code:it.code, name:it.name, national_id:it.nationalId||null, phone:it.phone||null, family_size:+it.familySize||null, students:it.students??null, value:+it.value||0, reason:it.reason||"", received:!!it.received, received_at:it.received?new Date().toISOString():null });
@@ -1268,7 +1268,7 @@ function vSimple(){
       <h2 class="s-title">${esc(k.typeName)} <small>${mLabel(k.month)}</small></h2>
       <div class="s-count"><span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span>استلم <b>${num(rec)}</b> من <b>${num(k.items.length)}</b></div>
       <input type="search" class="s-search" id="s_q" placeholder="اكتب الاسم" value="${esc(sq)}">
-      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(fcodeIt(it))} · ${num(it.value)} ${esc(k.unit)}</small></span>
+      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(fcodeIt(it))} · ${num(it.value)} ${esc(k.unit)}${partsOf(k).length?` · ${esc(partsText(k,it))}`:""}</small></span>
         ${it.received?`<span class="s-ok">✓ استلم${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}</span>${canUngive(it)?`<button class="s-ungive" data-ungive="${it.id}">رجّع</button>`:""}`:`<button class="s-give" data-give="${it.id}">استلم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
   }
   if(scr==="cb"){
@@ -2251,9 +2251,9 @@ function copyBatch(id){
       const rl=srcs().map(x=>ruleOnly(x.basis)), first=rl.find(Boolean);
       const basis=!many?k.basis:!first?null:rl.every(r=>r&&same(r,first))?first:{ ...first, src:Object.fromEntries(srcs().map((x,i)=>[x.title,rl[i]]).filter(([,r])=>r)) };
       const nk=await run(sb.from("batches").insert({title,type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
-        donor:k.donor||"",basis,feedback:srcs().map(x=>x.feedback).find(Boolean)||null,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
+        donor:k.donor||"",basis,feedback:srcs().map(x=>x.feedback).find(Boolean)||null,parts:many?[]:partsOf(k),cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
       if(!nk){ q("#c_go").disabled=false; q("#c_go").innerHTML=`${ic("copy")}اعمل الكشف (مسودة)`; return; }
-      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why=SRC_PREFIX+it.from.map(x=>x.title).join(" + "); return toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i); });
+      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why=SRC_PREFIX+it.from.map(x=>x.title).join(" + "); return { ...toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i), ...(many?{}:{ extra:it.extra||{} }) }; });
       const saved=await insertItems(rows);
       const ruleText=rules.map(r=>`${r.type||"كل الأنواع"} · ${RECV[r.recv]}`).join(" أو ");
       await logIt("batch",nk.id,`${many?"من الكشوف":"نسخة من"} «${srcs().map(x=>x.title).join("» + «")}» (${saved===rows.length?rows.length:`${saved} من ${rows.length}`} أسرة: ${ruleText})`);
@@ -2345,6 +2345,29 @@ const basisFrom=(k,root,groups)=>{ const read=[...root.querySelectorAll(".rulebo
   return !first?(Object.keys(keep).length?keep:null):read.length>1?{ ...keep, ...first, src:Object.fromEntries(read.filter(([,r])=>r)) }:{ ...keep, ...first }; };
 /* Work out every not-yet-received family's amount again by the rule. fromCases: also take the family size (and
    students) fresh from each case file first. Only rows that change are written. Returns { done, total, failed }. */
+/* ---------- more than one handout in the same list ----------
+   A list can carry other handouts beside its main one (e.g. bags + oil + a meal for every 2): each «part» has a name, a unit
+   and its own quantity rule; every family's amounts are kept in batch_items.extra { part key → amount }. One «استلم» covers all. */
+const partsOf = k => Array.isArray(k?.parts) ? k.parts.filter(p=>p&&p.key&&p.name) : [];
+const partVal = (it,p) => +((it.extra||{})[p.key]) || 0;
+const partUnit = p => p.unit && p.unit !== p.name ? p.unit : "";   // «وجبة (وجبة)» is just «وجبة»
+const partHead = p => `${p.name}${partUnit(p)?` (${partUnit(p)})`:""}`;
+const partsText = (k,it) => partsOf(k).map(p=>`${num(partVal(it,p))} ${partUnit(p)} ${p.name}`.replace(/\s+/g," ").trim()).join(" · ");
+const ruleByStu = r => !!r && (r.mode==="student" || ((r.mode==="tiers"||r.mode==="group") && r.tierBy==="students"));
+async function recalcParts(id, parts, fromCases){
+  const k=K.get(id), upd=[], noKids=[], anyStu=parts.some(p=>ruleByStu(p.rule)), lv=parts.find(p=>ruleByStu(p.rule))?.rule?.levels||null;
+  for(const it of k.items){ if(it.received) continue; const b=it.bid&&B.get(it.bid), row={}, extra={};
+    let fam=it.familySize, stu=it.students;
+    if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; } }
+    if(b&&((anyStu&&it.students==null)||fromCases)){ const st=studentsOf(b, lv); if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(anyStu&&it.students==null) noKids.push(it.name); }
+    for(const p of parts){ if(!p.rule) continue; const v=shareFor(p.rule,fam,stu); if(partVal(it,p)!==v||!(p.key in (it.extra||{}))) extra[p.key]=v; }
+    if(Object.keys(extra).length) row.extra=extra;
+    if(Object.keys(row).length) upd.push([it,row]); }
+  let done=0, failed=null;
+  for(let i=0;i<upd.length;i+=100){ const part=upd.slice(i,i+100), { data, error } = await sb.rpc("set_item_counts", { rows:part.map(([it,row])=>({ id:it.id, ...row })) }); if(error){ failed=error; break; } done+=data||0; }
+  if(done) await logIt("batch",id,`حساب التوزيعات التانية (${parts.map(p=>p.name).join("، ")}): ${done} أسرة`);
+  return { done, total:upd.length, failed, noKids };
+}
 async function recalcList(id, basis, fromCases){
   const k=K.get(id), nk={ ...k, basis }, upd=[];
   const noKids=[];
@@ -2413,7 +2436,7 @@ async function feedbackFromExcel(id, files){
   });
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null, enough=0;
+  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null, enough=0, partsEdit=null, partsOpen=false;
   // Families taken off this list (from its log), so they can be put back with one tap.
   const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
     for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
@@ -2426,7 +2449,7 @@ function openBatch(id, giveMode){
       .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
     const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
-    <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
+    <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${partsOf(k).map(p=>` + ${num(items.reduce((a,it)=>a+partVal(it,p),0))} ${esc(partUnit(p))} ${esc(p.name)}`).join("")}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis&&!canAdjust(k)?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
     ${enough>0?`<div class="note ${reach<items.length?"":"green"}">${ic("info")} <span class="grow">عندك <b>${num(enough)}</b> ${esc(k.unit)}: ${reach>=items.length?`بيكفّوا الكشف كله (${num(acc)}) وفاضل ${num(enough-acc)}`:`بيكفّوا أول <b>${num(reach)}</b> أسرة من ${num(items.length)} — آخر واحدة: ${reach?`${esc(items[reach-1].name)} (${esc(fcodeIt(items[reach-1]))})`:"—"}. الباقي ${num(items.length-reach)} أسرة باهتين تحت.`}</span> <button class="btn sm" id="b_enoughx">شيل</button></div>`:""}
     ${canAdjust(k)?(()=>{ const groups=ruleGroups(k,ruleSplit), bt=k.basis?basisText(k).replace(/^النصيب: /,""):"";
@@ -2435,6 +2458,17 @@ function openBatch(id, giveMode){
       ${groups.map(([t,r],i)=>ruleEditorHTML(k,i,t,r)).join("")}
       <label class="chk"><input type="checkbox" id="rp_fam"> هات عدد الأفراد والطلاب من ملفات الحالات (أوتوماتيك — هيكتب فوق الأعداد اللي اتكتبت في الكشف)</label>
       <div class="bar"><button class="btn pri" id="rp_go">${ic("refresh")}طبّق على كل اللي ما استلموش</button></div></details>`; })():""}
+    ${canAdjust(k)?(()=>{ const pe=partsEdit||JSON.parse(JSON.stringify(partsOf(k)));
+      return `<details class="rulepanel partspanel" ${partsOpen?"open":""}><summary>${ic("plus")} توزيعات تانية في نفس الكشف${partsOf(k).length?`: <b>${esc(partsOf(k).map(p=>p.name).join("، "))}</b>`:""}</summary>
+      <p class="sub" style="margin-top:0">كذا توزيعة في نفس الكشف، كل واحدة بقاعدتها — مثلاً «زيت (زجاجة) 1 لكل أسرة» و«وجبة لكل فردين». كل توزيعة ليها عمود، والأسرة بتستلم كله بـ«استلم» واحدة.</p>
+      ${pe.map((p,i)=>`<div class="partbox" data-pi="${i}"><div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <label class="f" style="flex:2 1 150px">التوزيعة<input type="text" data-pn="${i}" value="${esc(p.name||"")}" placeholder="مثال: زيت"></label>
+          <label class="f" style="flex:1 1 90px">الوحدة<input type="text" data-pu="${i}" value="${esc(p.unit||"")}" placeholder="زجاجة"></label>
+          <button class="btn sm danger" data-px="${i}" aria-label="شيل التوزيعة">×</button></div>
+        ${ruleEditorHTML({ ...k, unit:p.unit||"" }, i, "", p.rule)}</div>`).join("")}
+      <div class="bar"><button class="btn sm" id="pt_add">${ic("plus")}توزيعة ${pe.length?"تانية":""}</button></div>
+      ${pe.length||partsOf(k).length?`<label class="chk"><input type="checkbox" id="pt_fam"> هات عدد الأفراد والطلاب من ملفات الحالات (هيكتب فوق الأعداد اللي في الكشف)</label>
+      <div class="bar"><button class="btn pri" id="pt_go">${ic("refresh")}احفظ واحسب للي ما استلموش</button></div>`:""}</details>`; })():""}
     ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
@@ -2450,7 +2484,7 @@ function openBatch(id, giveMode){
       <div id="b_addRes"></div></details>`:""}
     ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
-      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)} ${i>=reach?"over":""}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span>${itemTags(k,it)}<br><span class="sub">${esc(fcodeIt(it))} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)} ${i>=reach?"over":""}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span>${itemTags(k,it)}<br><span class="sub">${esc(fcodeIt(it))} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}${partsOf(k).length?` · ${esc(partsText(k,it))}`:""}</span></span>
       ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
       ${fbOn(k)?(canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" placeholder="${esc(k.feedback)}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:it.feedback?`<span class="why">${esc(k.feedback)}: ${esc(it.feedback)}</span>`:""):""}
       ${canAdjust(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
@@ -2458,8 +2492,8 @@ function openBatch(id, giveMode){
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"استلم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
     :(()=>{ const ed=canEditList(k), stu=ed||stuOn(k)||items.some(i=>i.students!=null), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
       return `${ed?`<p class="sub" style="margin:0 0 6px">اكتب عدد الأفراد والطلاب لكل أسرة — بيتحفظ لوحده، و<b>الكمية مابتتغيرش لوحدها</b>. لما تخلص (قبل أو بعد الاعتماد) افتح «حساب الكمية» فوق واختار القاعدة ودوس «طبّق»، أو اكتب الكمية بإيدك.</p>`:""}
-      <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th>${fbOn(k)?`<th>${esc(k.feedback)}</th>`:""}<th></th></tr></thead><tbody>
-      ${shown.map(({it,i})=>`<tr class="${i>=reach?"over":""}"><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(fcodeIt(it))}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td>${fbOn(k)?`<td>${canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:esc(it.feedback||"")}</td>`:""}<td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
+      <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th>${partsOf(k).map(p=>`<th>${esc(partHead(p))}</th>`).join("")}${fbOn(k)?`<th>${esc(k.feedback)}</th>`:""}<th></th></tr></thead><tbody>
+      ${shown.map(({it,i})=>`<tr class="${i>=reach?"over":""}"><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(fcodeIt(it))}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td>${partsOf(k).map(p=>`<td class="n">${cell(it,"x:"+p.key,(it.extra||{})[p.key]??"",p.name)}</td>`).join("")}${fbOn(k)?`<td>${canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:esc(it.feedback||"")}</td>`:""}<td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`; })()}
     ${logs&&logs.length?`<h3>سجل الكشف</h3><ul class="log">${logs.slice(0,20).map(l=>`<li><b>${dLabel(l.at)}</b> — ${esc(l.text)}${l.by?` (${esc(who(l.by))})`:""}</li>`).join("")}</ul>`:""}`;
   };
@@ -2482,20 +2516,22 @@ function openBatch(id, giveMode){
     // counts and amounts after the list is made: one family's numbers, saved on their own (never the whole list)
     const saveItem=async(it,patch)=>{ const k=K.get(id); if(!k) return false;
       const cols={ familySize:"family_size", students:"students", value:"value" }, prev={}, row={};
-      for(const [f,v] of Object.entries(patch)){ if(same(it[f]===""?null:it[f], v)) continue; prev[f]=it[f]; row[cols[f]]=v; }
+      for(const [f,v] of Object.entries(patch)){
+        if(f.startsWith("x:")){ const key=f.slice(2), old=(it.extra||{})[key]; if(same(old??null, v)) continue; prev[f]=old??null; (row.extra||={})[key]=v??0; continue; }
+        if(same(it[f]===""?null:it[f], v)) continue; prev[f]=it[f]; row[cols[f]]=v; }
       if(!Object.keys(row).length) return true;
       if(row.value!=null&&row.value<0){ toast("الكمية مينفعش تبقى بالسالب"); return false; }
       const { data, error } = await sb.rpc("set_item_counts", { rows:[{ id:it.id, ...row }] });
       if(error){ toast(`ماتحفظش — ${errMsg(error,"batch","edit_item")}`); refreshSheet(); return false; }
       if(!data){ toast(`${it.name} استلمت خلاص — الأعداد بتاعتها مابقتش تتعدل`); await refreshBatch(id); return false; }
-      const lbl={ familySize:"الأفراد", students:"الطلاب", value:k.template==="cash"?"المبلغ":"الكمية" };
+      const lbl={ familySize:"الأفراد", students:"الطلاب", value:k.template==="cash"?"المبلغ":"الكمية", ...Object.fromEntries(partsOf(k).map(p=>["x:"+p.key,p.name])) };
       await logIt("batch",id,`تعديل ${it.name}: ${Object.keys(prev).map(f=>`${lbl[f]} ${prev[f]??"—"} ← ${patch[f]??"—"}`).join("، ")}`); logs=await loadLog("batch",id); await refreshBatch(id);
       undoable(`${it.name}: اتعدلت الأعداد`, ()=>{ const cur=K.get(id)?.items.find(x=>x.id===it.id); if(!cur||cur.received) return false; return saveItem(cur,prev); });
       return true; };
     // Typing a family size or students count changes only that number — never the amount by itself.
     // The amounts are worked out when you choose, from «حساب الكمية» (before or after approval), or typed by hand.
     s.querySelectorAll("[data-ei]").forEach(el=>el.onchange=()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.ei); if(!it) return;
-      const v=el.value===""?(el.dataset.ef==="value"?0:null):+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
+      const v=el.value===""?(el.dataset.ef==="value"||el.dataset.ef.startsWith("x:")?0:null):+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
       saveItem(it, { [el.dataset.ef]:v }); });
     s.querySelectorAll("[data-eit]").forEach(el=>el.onclick=async()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.eit); if(!it) return;
       const stu=true, w=document.createElement("div"); w.className="ask-scrim";
@@ -2541,6 +2577,22 @@ function openBatch(id, giveMode){
         undoable(`خانة «${label}» اتضافت`, async()=>{ const r=await sb.rpc("set_batch_extras", { batch:id, patch:{ feedback:"" } }); if(r.error){ toast(errMsg(r.error)); return false; } await refreshBatch(id); }); };
       w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(a) done(a.dataset.a==="1"); else if(e.target===w) done(false); };
       n.onkeydown=e=>{ if(e.key==="Enter") done(true); }; };
+    // other handouts in the same list
+    const ppn=q(".partspanel"); if(ppn){ ppn.ontoggle=()=>{ partsOpen=ppn.open; }; bindRuleBoxes(ppn);
+      const pe=()=>(partsEdit||=JSON.parse(JSON.stringify(partsOf(K.get(id)))));
+      const readBoxes=()=>{ ppn.querySelectorAll(".partbox").forEach(box=>{ const i=+box.dataset.pi, p=pe()[i]; if(!p) return; p.name=box.querySelector("[data-pn]").value; p.unit=box.querySelector("[data-pu]").value; p.rule=readRuleBox(box.querySelector(".rulebox")); }); };
+      ppn.addEventListener("input",()=>readBoxes()); ppn.addEventListener("change",e=>{ if(e.target.id!=="pt_fam") readBoxes(); });
+      q("#pt_add").onclick=()=>{ readBoxes(); pe().push({ key:"p"+Date.now().toString(36), name:"", unit:"", rule:{ mode:"fixed", per:1 } }); partsOpen=true; refreshSheet(); };
+      ppn.querySelectorAll("[data-px]").forEach(el=>el.onclick=e=>{ e.preventDefault(); readBoxes(); pe().splice(+el.dataset.px,1); refreshSheet(); });
+      const go=q("#pt_go"); if(go) go.onclick=async()=>{ readBoxes(); const parts=pe().map(p=>({ key:p.key, name:String(p.name||"").trim(), unit:String(p.unit||"").trim(), rule:p.rule||null })).filter(p=>p.name);
+        go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
+        const { error } = await sb.rpc("set_batch_extras", { batch:id, patch:{ parts } });
+        if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","parts")); return; }
+        await logIt("batch",id,`التوزيعات التانية: ${parts.map(p=>`${p.name}${p.rule?` (${ruleHow(p.rule,p.unit||"")})`:" (بالإيد)"}`).join("، ")||"اتشالت"}`);
+        await refreshBatch(id); const r=parts.some(p=>p.rule)?await recalcParts(id, parts, q("#pt_fam")?.checked):{ done:0, total:0, noKids:[] };
+        partsEdit=null; partsOpen=false; logs=await loadLog("batch",id); await refreshBatch(id); refreshSheet();
+        toast(r.failed?`اتحفظ، بس الحساب وقف عند ${num(r.done)} من ${num(r.total)} — ${errMsg(r.failed,"batch","parts")}`:`اتحفظ ✓${r.done?` — اتحسب لـ ${num(r.done)} أسرة`:""}${r.noKids?.length?` · ${num(r.noKids.length)} أسرة مالهاش أبناء متسجلين — اكتب عدد الطلاب بإيدك`:""}`); };
+    }
     if(q("#b_enoughx")) q("#b_enoughx").onclick=()=>{ enough=0; refreshSheet(); };
     // order the list (who comes first when there isn't enough): alphabetical, by group priority then alphabetical, or by case number
     if(q("#b_sort")) q("#b_sort").onclick=()=>{ const k=K.get(id), w=document.createElement("div"); w.className="ask-scrim";
@@ -3727,9 +3779,9 @@ function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
   const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
-    <table class="bt"><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th class="cid">الرقم القومي</th><th class="cf">عدد الأفراد</th>${stu?`<th class="cf">عدد الطلاب</th>`:""}<th class="cv">${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th class="sig">التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(fcodeIt(it))}</td><td class="nm">${esc(it.name)}</td><td class="cid">${esc(it.nationalId)}</td><td class="cf">${esc(it.familySize)}</td>${stu?`<td class="cf">${it.students??""}</td>`:""}<td class="cv">${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
+    <table class="bt"><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th class="cid">الرقم القومي</th><th class="cf">عدد الأفراد</th>${stu?`<th class="cf">عدد الطلاب</th>`:""}<th class="cv">${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${partsOf(k).map(p=>`<th class="cv">${esc(partHead(p))}</th>`).join("")}${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th class="sig">التوقيع</th></tr></thead><tbody>
+    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(fcodeIt(it))}</td><td class="nm">${esc(it.name)}</td><td class="cid">${esc(it.nationalId)}</td><td class="cf">${esc(it.familySize)}</td>${stu?`<td class="cf">${it.students??""}</td>`:""}<td class="cv">${num(it.value)}</td>${partsOf(k).map(p=>`<td class="cv">${num(partVal(it,p))}</td>`).join("")}${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${partsOf(k).map(p=>`<td>${num(k.items.reduce((a,it)=>a+partVal(it,p),0))}</td>`).join("")}${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
 function caseHTML(b,logs){
@@ -3825,14 +3877,14 @@ async function doPrint(html, title){
 /* ================= excel / files ================= */
 function batchXlsx(k){
   const cash=k.template==="cash", su=k.items.some(i=>i.students!=null), S=a=>su?a:[];
-  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",...S(["عدد الطلاب"]),cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج",...(fbOn(k)?[k.feedback]:[]),"التوقيع"]];
-  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",...S([it.students??""]),+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",...(fbOn(k)?[it.feedback||""]:[]),""]));
-  rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),...S([k.items.reduce((s,i)=>s+(+i.students||0),0)]),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
+  const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",...S(["عدد الطلاب"]),cash?"المبلغ بالجنيه":"الكمية",...partsOf(k).map(partHead),"التليفون","استلم","سبب الإدراج",...(fbOn(k)?[k.feedback]:[]),"التوقيع"]];
+  k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",...S([it.students??""]),+it.value||0,...partsOf(k).map(p=>partVal(it,p)),cleanPhone(it.phone),it.received?"✓":"",it.reason||"",...(fbOn(k)?[it.feedback||""]:[]),""]));
+  rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),...S([k.items.reduce((s,i)=>s+(+i.students||0),0)]),k.items.reduce((s,i)=>s+(+i.value||0),0),...partsOf(k).map(p=>k.items.reduce((s,i)=>s+partVal(i,p),0))],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
   // first sheet: exactly like the printed page; second: the data (phone, received, reason…) for working on
   const box=document.createElement("div"); box.innerHTML=batchHTML(k); const rh=printRowH();
   if(rh) box.querySelectorAll("table:not(.kv) tbody tr").forEach(tr=>tr.style.height=rh+"mm"); splitRows(box, printRows());
   (async()=>{ try{ const sh=htmlToSheet(box,"زي الورقة"), lg=await logoPNG(); if(lg.png) sh.image=lg;
-      saveFile(`${k.title||k.typeName}.xlsx`, new Blob([buildXlsx([sh, plainSheet("بيانات", rows, [5,10,30,18,10,...S([10]),12,14,7,30,...(fbOn(k)?[34]:[]),16])])],{ type:XLSX_TYPE })); }
+      saveFile(`${k.title||k.typeName}.xlsx`, new Blob([buildXlsx([sh, plainSheet("بيانات", rows, [5,10,30,18,10,...S([10]),12,...partsOf(k).map(()=>12),14,7,30,...(fbOn(k)?[34]:[]),16])])],{ type:XLSX_TYPE })); }
     catch(e){ toast(`ماقدرناش نعمل الـExcel — ${errMsg(e,"batch","xlsx")}`); } })();
 }
 function peopleRows(list){

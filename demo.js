@@ -186,9 +186,9 @@ export function createDemoClient(){
       if(fn === "set_positions"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id); if(it){ it.position = r.p; n++; } } return { data: n, error: null }; }
       if(fn === "set_item_counts"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id), k = it && db.batches.find(x => x.id === it.batch_id);
           if(!it || it.received || !k || k.archived_at || !["مسودة","معتمد"].includes(k.status)) continue;
-          for(const c of ["family_size","students","value"]) if(c in r) it[c] = c === "value" ? (+r[c] || 0) : r[c]; n++; } return { data: n, error: null }; }
+          for(const c of ["family_size","students","value"]) if(c in r) it[c] = c === "value" ? (+r[c] || 0) : r[c]; if(r.extra) it.extra = { ...(it.extra || {}), ...r.extra }; n++; } return { data: n, error: null }; }
       if(fn === "set_batch_extras"){ const k = db.batches.find(x => x.id === args.batch); if(!k || k.archived_at || !["مسودة","معتمد"].includes(k.status)) return { data: null, error: { message: "batch_archived" } };
-        if("basis" in args.patch) k.basis = args.patch.basis; if("feedback" in args.patch) k.feedback = args.patch.feedback || null; return { data: null, error: null }; }
+        if("basis" in args.patch) k.basis = args.patch.basis; if("feedback" in args.patch) k.feedback = args.patch.feedback || null; if("parts" in args.patch) k.parts = args.patch.parts || []; return { data: null, error: null }; }
       if(fn === "set_feedback"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id); if(it){ it.feedback = r.text || ""; n++; } } return { data: n, error: null }; }
       if(fn === "ep_got" || fn === "ep_came"){ const r = db.event_people.find(x => x.id === args.ep); if(!r) return { data: null, error: { message: "item_not_found" } };
         if(fn === "ep_got"){ const g = r.got = { ...(r.got || {}) };
