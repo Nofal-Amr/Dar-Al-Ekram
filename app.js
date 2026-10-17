@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.77";
+export const VERSION = "1.3.78";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -3354,7 +3354,7 @@ function eventHTML(id, mode="normal", rsv=true, nid=false, bus=null, order=null)
   const total=t.adults+t.kids+(rsv?t.rsvYes:0), wait=t.reserve-t.rsvYes-t.rsvNo;
   const rsvLine=rsv&&t.reserve?` · احتياطي جاي ${num(t.rsvYes)}${wait?` · مستني ${num(wait)}`:""}`:"";
   if(mode==="nid") return `${head}
-    <table><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${rsv?"<th>احتياطي</th>":""}<th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
+    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${rsv?"<th>احتياطي</th>":""}<th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num(cnt(r))}</td>${rsv?`<td>${esc(reserveOf(r).filter(x=>x.coming!==false).map(x=>x.who||"؟").join("، "))}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة${rsvLine}</td><td>${num(total)}</td>${rsv?"<td></td>":""}<td></td></tr></tfoot></table>${signsHTML()}</div>`;
   if(mode==="fam"){ const box=x=>`<span class="cb">☐ ${x}</span>`;
@@ -3460,7 +3460,7 @@ const PRINT_CSS=`
 .ps h1{text-align:center;font-size:17px;margin:6px 0 2px}.ps .mo{text-align:center;margin-bottom:10px}
 .ps table{width:100%;border-collapse:collapse;margin-bottom:10px}
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
-.ps td.nm,.ps td.l{text-align:right}.ps .cn{width:4%}.ps .cc{width:6%;font-size:11px}.ps th.nm,.ps td.nm{width:34%;white-space:nowrap}.ps .sig{height:26px;min-width:90px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{min-width:170px;text-align:right}
+.ps td.nm,.ps td.l{text-align:right}.ps table.bt{table-layout:fixed}.ps .bt .cn{width:4%}.ps .bt .cc{width:6%;font-size:11px}.ps .bt .cid{width:15%;font-size:11.5px}.ps .bt .cf{width:6%}.ps .bt .cv{width:8%}.ps .bt .fbc{width:15%}.ps .bt .sig{width:12%}.ps .bt th{font-size:10.5px;padding:3px 2px;white-space:normal;overflow-wrap:anywhere;line-height:1.25}.ps .bt td.nm{overflow-wrap:anywhere}.ps .sig{height:26px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{text-align:right}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
 .ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
 .ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
@@ -3480,8 +3480,8 @@ function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
   const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th>التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    <table class="bt"><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th class="cid">الرقم القومي</th><th class="cf">عدد الأفراد</th>${stu?`<th class="cf">عدد الطلاب</th>`:""}<th class="cv">${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th class="sig">التوقيع</th></tr></thead><tbody>
+    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td class="cid">${esc(it.nationalId)}</td><td class="cf">${esc(it.familySize)}</td>${stu?`<td class="cf">${it.students??""}</td>`:""}<td class="cv">${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
@@ -3557,7 +3557,7 @@ async function doPrint(html, title){
   bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else if(b.dataset.pv==="xlsx") printXlsx(box, title||"طباعة"); else if(b.dataset.pv==="alone") printAlone(box.innerHTML, title||"طباعة"); else close(); };
   pvClose=close; document.body.appendChild(bar); document.body.classList.add("pv"); box.scrollTop=0;
   // the page is drawn at paper width and shrunk to fit a phone screen; the pages start below the bar
-  box.style.setProperty("--pvz", String(Math.min(1, (innerWidth-28)/760))); box.style.paddingTop=(bar.offsetHeight+14)+"px";
+  box.style.setProperty("--pvz", String(Math.min(1, (innerWidth-28)/703))); box.style.paddingTop=(bar.offsetHeight+14)+"px";
   if(title) document.title=title.replace(/[\\/:*?"<>|]/g,"-");   // the name a saved PDF gets
   history.pushState({ pv:1 },""); window.addEventListener("popstate",onBack); window.addEventListener("afterprint",after); document.addEventListener("keydown",key,true);
   // the print window opens only when «اطبع» is tapped: on some computers it comes up white, so the choice stays with you
