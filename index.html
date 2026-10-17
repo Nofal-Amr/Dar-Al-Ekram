@@ -153,7 +153,8 @@ body.pv #pvbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;position:f
 body.pv #pvbar .sub{flex:1 1 220px;font-size:12px}
 @media print{
   body{background:#fff;color:#000}
-  .wrap,nav.tabs,.scrim,.toast,.ask-scrim,#net,#pvbar{display:none!important}
+  nav.tabs,.scrim,.toast,.ask-scrim,#net,#pvbar{display:none!important}
+  body.pv .wrap,body.pvq .wrap{display:none!important}
   #print{display:block}
   body.pv{overflow:visible}
   body.pv #print{position:static;inset:auto;overflow:visible;padding:0!important;z-index:auto}

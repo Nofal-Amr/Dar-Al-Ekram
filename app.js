@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.78";
+export const VERSION = "1.3.79";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1147,7 +1147,7 @@ function sheet(title,body,onMount,refresh){
   document.body.appendChild(s); document.body.style.overflow="hidden";
   sheetRefresh=refresh||null; onMount&&onMount(s); return s;
 }
-function closeSheet(){ const s=$("#scrim"); if(s) s.remove(); document.body.style.overflow=""; sheetRefresh=null; }
+function closeSheet(){ const s=$("#scrim"); if(s) s.remove(); document.body.style.overflow=""; sheetRefresh=null; printCtx=null; }
 // Keeps the scroll position, and the cursor in a number box that has data-ei (editing a list's counts: Tab to the next box keeps working).
 function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0, a=document.activeElement, keep=a?.dataset?.ei?`[data-ei="${a.dataset.ei}"][data-ef="${a.dataset.ef}"]`:a?.dataset?.fb?`[data-fb="${a.dataset.fb}"]`:null;
   sheetRefresh(); const b=$("#scrim .sh-body"); if(b) b.scrollTop=sc; if(keep){ const n=$("#scrim "+keep); if(n&&document.activeElement!==n) n.focus(); } } }
@@ -2073,9 +2073,9 @@ function editBatch(id){
     <label class="f">الجهة المتبرعة<input type="text" id="e_d" value="${esc(k.donor||"")}" list="e_dl"><datalist id="e_dl">${DONORS.map(d=>`<option value="${esc(d)}">`).join("")}</datalist></label>
     <label class="f">يوم التوزيع<select id="e_dow">${DAYS.map((d,i)=>`<option value="${i}" ${i===dow?"selected":""}>كل ${d}</option>`).join("")}</select></label>
     <div class="sub">الكشف شغال في الأيام دي (علّم عليهم):</div><div id="e_days">${dayBoxes()}</div>
-    <h3>خانة feedback</h3>
+    <h3>خانة التعليقات</h3>
     <label class="chk"><input type="checkbox" id="e_fb" ${k.feedback?"checked":""}> ضيف خانة في الكشف تتطبع فاضية وتتكتب فيها، وبعدين تترفع في الكشف</label>
-    <label class="f" id="e_fbl" ${k.feedback?"":"hidden"}>اسم الخانة<input type="text" id="e_fbt" value="${esc(k.feedback||"Feedback")}" placeholder="مثال: Feedback، رأي الأسرة، ملاحظات"></label>
+    <label class="f" id="e_fbl" ${k.feedback?"":"hidden"}>اسم الخانة<input type="text" id="e_fbt" value="${esc(k.feedback||"التعليقات")}" placeholder="مثال: التعليقات، رأي الأسرة، ملاحظات"></label>
     <h3>حساب الكمية</h3>
     <p class="sub" style="margin-top:0">${groups.length>1?"الكشف ده مدموج: كل كشف ليه قاعدته، والأسرة بتتحسب بقاعدة الكشف اللي جاية منه.":"لما تغيّر عدد أفراد أسرة في الكشف، الكمية بتتحسب بالقاعدة دي."}</p>
     ${groups.map(([t,r],i)=>ruleEditorHTML(k,i,t,r)).join("")}
@@ -2093,7 +2093,7 @@ function editBatch(id){
       const basis=basisFrom(k, s, groups);
       const ruleChanged=!same(ruleOnly(k.basis)&&{ ...ruleOnly(k.basis), src:k.basis.src }, basis&&ruleOnly(basis)&&{ ...ruleOnly(basis), src:basis.src });
       q_("#e_s").disabled=true;
-      if(!await run(sb.from("batches").update({title, donor:q_("#e_d").value.trim(), dist_days:ds, dist_date:ds[0]||null, basis, feedback:q_("#e_fb").checked?(q_("#e_fbt").value.trim()||"Feedback"):null}).eq("id",id))){ q_("#e_s").disabled=false; return; }
+      if(!await run(sb.from("batches").update({title, donor:q_("#e_d").value.trim(), dist_days:ds, dist_date:ds[0]||null, basis, feedback:q_("#e_fb").checked?(q_("#e_fbt").value.trim()||"التعليقات"):null}).eq("id",id))){ q_("#e_s").disabled=false; return; }
       await logIt("batch",id,`تعديل الكشف: ${title}${ds.length?` · الأيام: ${daysText(ds)}`:""}${ruleChanged?` · القاعدة: ${basis?basisText({ ...k, basis })||"بالإيد":"بالإيد"}`:""}`);
       let msg="اتحفظ ✓";
       if(q_("#e_recalc").checked&&basis){ const r=await recalcList(id, basis, false); msg=r.failed?`اتحفظ، بس الكميات اتحسبت لـ ${num(r.done)} بس من ${num(r.total)} — ${errMsg(r.failed,"batch","recalc")}`:`اتحفظ ✓ — اتحسبت كميات ${num(r.done)} أسرة`; }
@@ -2176,9 +2176,9 @@ async function feedbackFromExcel(id, files){
     for(const sn of wb.SheetNames){
       const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn], { header:1, raw:false, defval:"" });
       // the header row: the one that has the feedback column (by its title, or «feedback» / «ملاحظات» / «رأي»)
-      const hi=rows.findIndex(r=>r.some(c=>{ const t=norm(String(c)); return t&&(t===label||/feedback|ملاحظ|راي|رأي/i.test(t)); })); if(hi<0) continue;
+      const hi=rows.findIndex(r=>r.some(c=>{ const t=norm(String(c)); return t&&(t===label||/feedback|ملاحظ|راي|رأي|تعليق|مقترح/i.test(t)); })); if(hi<0) continue;
       const h=rows[hi].map(c=>norm(String(c))), col=re=>h.findIndex(t=>re.test(t));
-      const fc=h.findIndex(t=>t===label)>=0?h.findIndex(t=>t===label):col(/feedback|ملاحظ|راي|رأي/i), cc=col(/رقم الحاله|رقم الحالة|الكود|^كود/), nc=col(/القومي/), mc=col(/^الاسم|اسم/);
+      const fc=h.findIndex(t=>t===label)>=0?h.findIndex(t=>t===label):col(/feedback|ملاحظ|راي|رأي|تعليق|مقترح/i), cc=col(/رقم الحاله|رقم الحالة|الكود|^كود/), nc=col(/القومي/), mc=col(/^الاسم|اسم/);
       for(const r of rows.slice(hi+1)){ const text=String(r[fc]??"").trim(); if(!text) continue; rowsRead++;
         const it=(cc>=0&&byCode.get(latinDigits(String(r[cc])).replace(/^0+/,"").trim()))||(nc>=0&&byNid.get(latinDigits(String(r[nc])).trim()))||(mc>=0&&byName.get(norm(String(r[mc]))));
         if(it) found.set(it.id,{ it, text }); else notMatched.push({ name:String(r[mc]??r[cc]??"").trim(), text }); }
@@ -2221,7 +2221,7 @@ function openBatch(id, giveMode){
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة feedback</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة التعليقات</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -2247,6 +2247,7 @@ function openBatch(id, giveMode){
   const upd=async(patch,text,okMsg)=>{ if(await run(sb.from("batches").update(patch).eq("id",id),okMsg)){ await logIt("batch",id,text); logs=await loadLog("batch",id); await refreshBatch(id); } };
   const mount=s=>{
     const q=x=>s.querySelector(x);
+    printCtx=()=>{ const k=K.get(id); return k?{ html:batchHTML(k), title:k.title }:null; };
     if(q("#b_ok")) q("#b_ok").onclick=async()=>{ if(!isMgr()&&!await ask("بعد الاعتماد مش هتقدر تعدّل الأسامي أو الكميات — التعديل هيبقى للمدير بس.",{title:"اعتماد الكشف؟",ok:"اعتماد"})) return; upd({status:"معتمد",approved_at:new Date().toISOString(),approved_by:me.id},`اعتماد الكشف${isMgr()?"":` (${me.full_name||"موظف"})`}`,"اتعتمد ✓"); };
     if(q("#b_settle")) q("#b_settle").onclick=()=>settleBatch(K.get(id));
     if(q("#b_paid")) q("#b_paid").onclick=async()=>{ await upd({status:"مصروف",paid_at:new Date().toISOString()},"إغلاق الكشف — تم الصرف","تمام ✓"); await settleBatch(K.get(id)); };
@@ -2303,12 +2304,12 @@ function openBatch(id, giveMode){
       const prev=it.feedback||""; it.feedback=text; if(await saveFeedback(id,[{ id:it.id, text }])) undoable(`${it.name}: اتسجل «${K.get(id).feedback}»`, async()=>{ if(!await saveFeedback(id,[{ id:it.id, text:prev }])) return false; }); else it.feedback=prev; });
     // one tap: name the column (Feedback, رأي الأسرة…) and it's on the list, the print and the Excel
     if(q("#b_addfb")) q("#b_addfb").onclick=()=>{ const w=document.createElement("div"); w.className="ask-scrim";
-      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="fbT"><h2 id="fbT">ضيف خانة feedback</h2>
+      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="fbT"><h2 id="fbT">ضيف خانة التعليقات</h2>
         <p class="sub" style="margin-top:0">بتتطبع عمود فاضي تكتبوا فيه وقت التوزيع، وبعدين تكتبوها جنب كل اسم أو ترفعوا الإكسيل.</p>
-        <label class="f">اسم الخانة<input type="text" id="fb_n" value="Feedback" list="fb_l"><datalist id="fb_l"><option value="Feedback"><option value="رأي الأسرة"><option value="ملاحظات"></datalist></label>
+        <label class="f">اسم الخانة<input type="text" id="fb_n" value="التعليقات" list="fb_l"><datalist id="fb_l"><option value="التعليقات"><option value="رأي الأسرة"><option value="ملاحظات"></datalist></label>
         <div class="bar"><button class="btn pri" data-a="1">${ic("plus")}ضيف</button><button class="btn" data-a="0">رجوع</button></div></div>`;
       document.body.appendChild(w); const n=w.querySelector("#fb_n"); n.select();
-      const done=async ok=>{ if(!ok){ w.remove(); return; } const label=n.value.trim()||"Feedback"; w.querySelector("[data-a='1']").disabled=true;
+      const done=async ok=>{ if(!ok){ w.remove(); return; } const label=n.value.trim()||"التعليقات"; w.querySelector("[data-a='1']").disabled=true;
         const { error } = await sb.rpc("set_batch_extras", { batch:id, patch:{ feedback:label } });
         if(error){ w.querySelector("[data-a='1']").disabled=false; toast(errMsg(error,"batch","add_feedback")); return; }
         w.remove(); await logIt("batch",id,`ضيف خانة «${label}»`); logs=await loadLog("batch",id); await refreshBatch(id); toast(`اتضافت خانة «${label}» ✓`);
@@ -3536,6 +3537,18 @@ function splitRows(root, n){
    always brings you back to where you were — never a white screen that needs a refresh.
    On a computer the preview closes by itself after the print dialog. */
 let pvClose=null;
+/* Ctrl+P (or the browser's own «Print») used to print an empty page: the pages only exist after tapping «طباعة».
+   Now Ctrl+P goes through the same print button of whatever is open (a list, a case, a trip…);
+   and the browser menu's Print fills the pages of an open list on the spot. Nothing open → the screen as it is. */
+const PRINT_BTNS=["#b_print","#v_print","#e_print","#d_rep","#su_print","#g_print","#ag_print","#dv_print"];
+const openPrintBtn=()=>PRINT_BTNS.map(x=>$("#scrim "+x)).find(b=>b&&b.offsetParent);
+let printCtx=null;   // set by an open list: () => { html, title }
+document.addEventListener("keydown",e=>{ if(!(e.ctrlKey||e.metaKey)||e.key.toLowerCase()!=="p"&&e.code!=="KeyP"||e.altKey) return;
+  if(document.body.classList.contains("pv")){ e.preventDefault(); window.print(); return; }
+  const b=openPrintBtn(); if(b){ e.preventDefault(); b.click(); } },true);
+window.addEventListener("beforeprint",()=>{ if(document.body.classList.contains("pv")||!printCtx||!$("#scrim")) return;
+  const c=printCtx(); if(!c) return; $("#print").innerHTML=c.html; document.body.classList.add("pvq"); });
+window.addEventListener("afterprint",()=>{ if(document.body.classList.contains("pvq")){ document.body.classList.remove("pvq"); if(!document.body.classList.contains("pv")) $("#print").innerHTML=""; } });
 async function doPrint(html, title){
   if(pvClose) pvClose();
   const box=$("#print"); box.innerHTML=html;
