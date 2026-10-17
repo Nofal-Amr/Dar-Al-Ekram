@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.65";
+export const VERSION = "1.3.66";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2184,7 +2184,7 @@ function openBatch(id, giveMode){
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canEditList(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة feedback</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
@@ -2259,6 +2259,20 @@ function openBatch(id, giveMode){
     });
     s.querySelectorAll("[data-fb]").forEach(el=>el.onchange=async()=>{ const it=K.get(id)?.items.find(x=>x.id===el.dataset.fb); if(!it) return; const text=el.value.trim(); if(text===(it.feedback||"")) return;
       const prev=it.feedback||""; it.feedback=text; if(await saveFeedback(id,[{ id:it.id, text }])) undoable(`${it.name}: اتسجل «${K.get(id).feedback}»`, async()=>{ if(!await saveFeedback(id,[{ id:it.id, text:prev }])) return false; }); else it.feedback=prev; });
+    // one tap: name the column (Feedback, رأي الأسرة…) and it's on the list, the print and the Excel
+    if(q("#b_addfb")) q("#b_addfb").onclick=()=>{ const w=document.createElement("div"); w.className="ask-scrim";
+      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="fbT"><h2 id="fbT">ضيف خانة feedback</h2>
+        <p class="sub" style="margin-top:0">بتتطبع عمود فاضي تكتبوا فيه وقت التوزيع، وبعدين تكتبوها جنب كل اسم أو ترفعوا الإكسيل.</p>
+        <label class="f">اسم الخانة<input type="text" id="fb_n" value="Feedback" list="fb_l"><datalist id="fb_l"><option value="Feedback"><option value="رأي الأسرة"><option value="ملاحظات"></datalist></label>
+        <div class="bar"><button class="btn pri" data-a="1">${ic("plus")}ضيف</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+      document.body.appendChild(w); const n=w.querySelector("#fb_n"); n.select();
+      const done=async ok=>{ if(!ok){ w.remove(); return; } const label=n.value.trim()||"Feedback"; w.querySelector("[data-a='1']").disabled=true;
+        const { error } = await sb.from("batches").update({ feedback:label }).eq("id",id);
+        if(error){ w.querySelector("[data-a='1']").disabled=false; toast(errMsg(error,"batch","add_feedback")); return; }
+        w.remove(); await logIt("batch",id,`ضيف خانة «${label}»`); logs=await loadLog("batch",id); await refreshBatch(id); toast(`اتضافت خانة «${label}» ✓`);
+        undoable(`خانة «${label}» اتضافت`, async()=>{ const r=await sb.from("batches").update({ feedback:null }).eq("id",id); if(r.error){ toast(errMsg(r.error)); return false; } await refreshBatch(id); }); };
+      w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(a) done(a.dataset.a==="1"); else if(e.target===w) done(false); };
+      n.onkeydown=e=>{ if(e.key==="Enter") done(true); }; };
     const fbu=q("#b_fb"); if(fbu) fbu.onchange=()=>{ const fs=[...fbu.files]; if(fs.length) feedbackFromExcel(id, fs); };
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
