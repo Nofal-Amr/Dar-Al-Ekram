@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.74";
+export const VERSION = "1.3.75";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -3478,10 +3478,10 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0), merged=!!mergedSources(k);
+  const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th>التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}${merged?`<div class="tg">${esc((it.bid&&B.get(it.bid)?.caseType)||"غير محدد")} · من ${esc(srcTitles(it).map(shortTitle).join(" + "))}</div>`:""}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
