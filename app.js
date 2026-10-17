@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.62";
+export const VERSION = "1.3.63";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1067,7 +1067,7 @@ function vSimple(){
       <h2 class="s-title">${esc(k.typeName)} <small>${mLabel(k.month)}</small></h2>
       <div class="s-count"><span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span>استلم <b>${num(rec)}</b> من <b>${num(k.items.length)}</b></div>
       <input type="search" class="s-search" id="s_q" placeholder="اكتب الاسم" value="${esc(sq)}">
-      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b><small>رقم ${esc(it.code)} · ${num(it.value)} ${esc(k.unit)}</small></span>
+      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(it.code)} · ${num(it.value)} ${esc(k.unit)}</small></span>
         ${it.received?`<span class="s-ok">✓ استلم${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}</span>${canUngive(it)?`<button class="s-ungive" data-ungive="${it.id}">رجّع</button>`:""}`:`<button class="s-give" data-give="${it.id}">سلّم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
   }
   if(scr==="cb"){
@@ -1974,6 +1974,16 @@ async function insertItems(rows){
 const partialMsg=(saved,total)=>`اتحفظ ${num(saved)} بس من ${num(total)} — النت وقف في النص. الكشف مسودة: افتحه وضيف الباقي أو أرشفه وابدأ تاني`;
 // A copy never brings back a family that has since been cancelled, stopped or archived.
 const copyable=it=>{ const b=it.bid&&B.get(it.bid); return !it.bid||(!!b&&!b.archivedAt&&b.status==="نشط"); };
+/* Where each family on a merged list came from: the reason line «منسوخ من: A + B» (written when the list is made),
+   shown as small tags next to the name with her case type — only on lists made from two or more lists. */
+const SRC_PREFIX="منسوخ من: ";
+const shortTitle=t=>String(t||"").replace(/^كشف\s+/,"").replace(/\s+—\s+.*$/,"").replace(/\s*\(نسخة\)$/,"").trim();
+const srcTitles=it=>String(it.reason||"").startsWith(SRC_PREFIX)?it.reason.slice(SRC_PREFIX.length).split(" + ").map(x=>x.trim()).filter(Boolean):[];
+const mergedSources=k=>{ const m=new Map(); for(const it of k.items) for(const t of srcTitles(it)) m.set(t,(m.get(t)||0)+1); return m.size>1?m:null; };
+const itemTags=(k,it)=>{ if(!mergedSources(k)) return ""; const ty=(it.bid&&B.get(it.bid)?.caseType)||"غير محدد", from=srcTitles(it);
+  return `<span class="srctags"><span class="chip ${/أيتام/.test(ty)?"plum":/مساعدات/.test(ty)?"blue":"grey"}">${esc(ty)}</span>${from.map(t=>`<span class="chip gold">من ${esc(shortTitle(t))}</span>`).join("")}</span>`; };
+const sourcesLine=k=>{ const m=mergedSources(k); if(!m) return ""; const both=k.items.filter(it=>srcTitles(it).length>1).length;
+  return `<p class="sub" style="margin-top:-4px">الكشف ده مدموج: ${[...m].map(([t,n])=>`من «${esc(shortTitle(t))}» ${num(n)}`).join(" · ")}${both?` · منهم ${num(both)} أسرة كانت في أكتر من كشف`:""}</p>`; };
 /* A new draft from one or more old lists (e.g. «وجبات مدرسية» + «وجبات مدرسية مساعدات»): same aid, families and amounts.
    A family that is on two of the lists comes over once (from the first list it's on). Who comes over is decided by rules —
    each rule = case type + collected or not; a family is copied if it matches ANY rule. */
@@ -1983,8 +1993,9 @@ function copyBatch(id){
   let rules=[{type:"",recv:"all"}];
   const srcs=()=>srcIds.map(x=>K.get(x)).filter(Boolean);
   // every item of every chosen list, first list wins for a family on more than one
-  const pool=()=>{ const seen=new Set(), out=[], dup=[];
-    for(const k of srcs()) for(const it of k.items){ const key=it.bid||"c:"+it.code; if(seen.has(key)){ dup.push(it); continue; } seen.add(key); out.push({ ...it, src:k }); }
+  const pool=()=>{ const seen=new Map(), out=[], dup=[];
+    for(const k of srcs()) for(const it of k.items){ const key=it.bid||"c:"+it.code; if(seen.has(key)){ dup.push(it); const o=seen.get(key); if(!o.from.includes(k)) o.from.push(k); continue; }
+      const o={ ...it, src:k, from:[k] }; seen.set(key,o); out.push(o); }
     return { out, dup }; };
   const types=()=>[...new Set(pool().out.map(i=>(i.bid&&B.get(i.bid)?.caseType)||"غير محدد"))].sort();
   const chosen=()=>pool().out.filter(it=>copyable(it)&&rules.some(r=>itemMatches(it,r)));
@@ -2032,7 +2043,7 @@ function copyBatch(id){
       const nk=await run(sb.from("batches").insert({title,type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
         donor:k.donor||"",basis:many?null:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
       if(!nk){ q("#c_go").disabled=false; q("#c_go").innerHTML=`${ic("copy")}اعمل الكشف (مسودة)`; return; }
-      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why="منسوخ من: "+it.src.title; return toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i); });
+      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why=SRC_PREFIX+it.from.map(x=>x.title).join(" + "); return toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i); });
       const saved=await insertItems(rows);
       const ruleText=rules.map(r=>`${r.type||"كل الأنواع"} · ${RECV[r.recv]}`).join(" أو ");
       await logIt("batch",nk.id,`${many?"من الكشوف":"نسخة من"} «${srcs().map(x=>x.title).join("» + «")}» (${saved===rows.length?rows.length:`${saved} من ${rows.length}`} أسرة: ${ruleText})`);
@@ -2087,7 +2098,7 @@ function openBatch(id, giveMode){
     const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=stuOn(k)&&items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
-    ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}
+    ${k.basis?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
     ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
@@ -2103,7 +2114,7 @@ function openBatch(id, giveMode){
       <div id="b_addRes"></div></details>`:""}
     ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
-      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span>${itemTags(k,it)}<br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
       ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
       ${canEditList(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
@@ -2111,7 +2122,7 @@ function openBatch(id, giveMode){
     :(()=>{ const ed=canEditList(k), stu=stuOn(k), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
       return `${ed?`<p class="sub" style="margin:0 0 6px">تقدر تعدّل الأفراد${stu?" والطلاب":""} والكمية لكل أسرة من هنا — بيتحفظ لوحده${k.basis&&k.basis.total==null?"، ولو غيّرت الأفراد الكمية بتتحسب تاني على نفس القاعدة":""}.</p>`:""}
       <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
-      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td><td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
+      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(it.code)}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td><td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`; })()}
     ${logs&&logs.length?`<h3>سجل الكشف</h3><ul class="log">${logs.slice(0,20).map(l=>`<li><b>${dLabel(l.at)}</b> — ${esc(l.text)}${l.by?` (${esc(who(l.by))})`:""}</li>`).join("")}</ul>`:""}`;
   };
@@ -3309,7 +3320,7 @@ const PRINT_CSS=`
 .ps h1{text-align:center;font-size:17px;margin:6px 0 2px}.ps .mo{text-align:center;margin-bottom:10px}
 .ps table{width:100%;border-collapse:collapse;margin-bottom:10px}
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
-.ps td.nm,.ps td.l{text-align:right}.ps .sig{height:26px;min-width:90px}
+.ps td.nm,.ps td.l{text-align:right}.ps .sig{height:26px;min-width:90px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
 .ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
 .ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
@@ -3326,10 +3337,10 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  const stu=stuOn(k)&&k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
+  const stu=stuOn(k)&&k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0), merged=!!mergedSources(k);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th><th>التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
+    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}${merged?`<div class="tg">${esc((it.bid&&B.get(it.bid)?.caseType)||"غير محدد")} · من ${esc(srcTitles(it).map(shortTitle).join(" + "))}</div>`:""}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td><td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
