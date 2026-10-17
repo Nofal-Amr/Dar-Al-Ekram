@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.82";
+export const VERSION = "1.3.83";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2211,7 +2211,7 @@ async function feedbackFromExcel(id, files){
   });
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src;
+  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null;
   // Families taken off this list (from its log), so they can be put back with one tap.
   const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
     for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
@@ -2304,14 +2304,20 @@ function openBatch(id, giveMode){
         if(Object.values(patch).some(v=>v!=null&&(isNaN(v)||v<0))){ toast("اكتب أرقام صحيحة (صفر أو أكتر)"); return; }
         a.disabled=true; if(await saveItem(it,patch)){ w.remove(); toast("اتحفظ ✓"); } else a.disabled=false; };
     });
-    const rpn=q(".rulepanel"); if(rpn){ rpn.ontoggle=()=>{ ruleOpen=rpn.open; }; bindRuleBoxes(rpn);
-      const rps=q("#rp_split"); if(rps) rps.onchange=()=>{ ruleSplit=rps.checked; refreshSheet(); };
+    const rpn=q(".rulepanel"); if(rpn){ rpn.ontoggle=()=>{ ruleOpen=rpn.open; if(!rpn.open) ruleDraft=null; }; bindRuleBoxes(rpn);
+      // what's being chosen survives the list redrawing (a save or someone else's change arriving) until «طبّق»
+      const ctrls=()=>[...rpn.querySelectorAll("select,input")].filter(x=>x.id!=="rp_split");
+      if(ruleDraft){ const v=ruleDraft; ctrls().forEach((x,i)=>{ if(v[i]===undefined) return; if(x.type==="checkbox") x.checked=v[i]; else x.value=v[i]; });
+        rpn.querySelectorAll(".rulebox [data-rm2]").forEach(sel=>sel.dispatchEvent(new Event("change"))); }
+      const keepDraft=()=>{ ruleDraft=ctrls().map(x=>x.type==="checkbox"?x.checked:x.value); };
+      rpn.addEventListener("input",keepDraft); rpn.addEventListener("change",e=>{ if(e.target.id!=="rp_split") keepDraft(); });
+      const rps=q("#rp_split"); if(rps) rps.onchange=()=>{ ruleSplit=rps.checked; ruleDraft=null; refreshSheet(); };
       q("#rp_go").onclick=async()=>{ const k=K.get(id), groups=ruleGroups(k,ruleSplit), basis=basisFrom(k,rpn,groups), fromCases=q("#rp_fam").checked, go=q("#rp_go");
         if(!ruleOf({ ...k, basis },k.items[0]||{})&&!fromCases&&!(basis&&basis.src)){ toast("اختار القاعدة الأول (لكل فرد، ثابتة، …) أو علّم «حدّث عدد الأفراد»"); return; }
         go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
         if(!same(basis,k.basis)){ const { error } = await sb.rpc("set_batch_extras", { batch:id, patch:{ basis } }); if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","rule")); return; }
           await logIt("batch",id,`القاعدة: ${basis?basisText({ ...k, basis })||"بالإيد":"بالإيد"}`); await refreshBatch(id); }
-        const r=await recalcList(id, basis, fromCases); logs=await loadLog("batch",id); await refreshBatch(id); ruleOpen=false; refreshSheet();
+        const r=await recalcList(id, basis, fromCases); logs=await loadLog("batch",id); ruleDraft=null; ruleOpen=false; await refreshBatch(id); refreshSheet();
         const nk=r.noKids.length?` · ${num(r.noKids.length)} أسرة مالهاش أبناء متسجلين في ملفها (${r.noKids.slice(0,3).join("، ")}${r.noKids.length>3?"…":""}) — اكتب عدد الطلاب بإيدك`:"";
         toast(r.failed?`اتعدّل ${num(r.done)} بس من ${num(r.total)} — ${errMsg(r.failed,"batch","recalc")}`:(r.total?`اتحسب ✓ — اتغيّر ${num(r.done)} أسرة`:"كل الكميات مظبوطة على القاعدة دي ✓")+nk); }; }
     s.querySelectorAll("[data-fb]").forEach(el=>el.onchange=async()=>{ const it=K.get(id)?.items.find(x=>x.id===el.dataset.fb); if(!it) return; const text=el.value.trim(); if(text===(it.feedback||"")) return;
