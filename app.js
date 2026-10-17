@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.75";
+export const VERSION = "1.3.76";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -3354,7 +3354,7 @@ function eventHTML(id, mode="normal", rsv=true, nid=false, bus=null, order=null)
   const total=t.adults+t.kids+(rsv?t.rsvYes:0), wait=t.reserve-t.rsvYes-t.rsvNo;
   const rsvLine=rsv&&t.reserve?` · احتياطي جاي ${num(t.rsvYes)}${wait?` · مستني ${num(wait)}`:""}`:"";
   if(mode==="nid") return `${head}
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${rsv?"<th>احتياطي</th>":""}<th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
+    <table><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${rsv?"<th>احتياطي</th>":""}<th style="width:28%">الختم / التوقيع</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}</td><td>${esc(b.nationalId||"")}</td><td>${num(cnt(r))}</td>${rsv?`<td>${esc(reserveOf(r).filter(x=>x.coming!==false).map(x=>x.who||"؟").join("، "))}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(t.yes)} أسرة${rsvLine}</td><td>${num(total)}</td>${rsv?"<td></td>":""}<td></td></tr></tfoot></table>${signsHTML()}</div>`;
   if(mode==="fam"){ const box=x=>`<span class="cb">☐ ${x}</span>`;
@@ -3460,7 +3460,7 @@ const PRINT_CSS=`
 .ps h1{text-align:center;font-size:17px;margin:6px 0 2px}.ps .mo{text-align:center;margin-bottom:10px}
 .ps table{width:100%;border-collapse:collapse;margin-bottom:10px}
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
-.ps td.nm,.ps td.l{text-align:right}.ps .sig{height:26px;min-width:90px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{min-width:170px;text-align:right}
+.ps td.nm,.ps td.l{text-align:right}.ps .cn{width:4%}.ps .cc{width:6%;font-size:11px}.ps th.nm,.ps td.nm{width:34%;white-space:nowrap}.ps .sig{height:26px;min-width:90px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{min-width:170px;text-align:right}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
 .ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
 .ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
@@ -3481,7 +3481,7 @@ function batchHTML(k){
   const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th>التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
@@ -3631,7 +3631,7 @@ function htmlToSheet(root, name, { rowMM=EXCEL_ROW_MM }={}){
         for(let i=0;i<rs;i++){ const g=(grid[rows.length+i]||=[]); for(let j=0;j<cs;j++) if(i||j) g[c+j]=1; }
         for(let j=1;j<cs;j++) cells[c+j]={ v:"", s:st };
         if(cs>1||rs>1) merges.push(`${colName(c)}${r}:${colName(c+cs-1)}${r+rs-1}`);
-        const len=td.classList.contains("fbc")?26:td.classList.contains("sig")?14:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
+        const cl=td.classList, len=cl.contains("fbc")?26:cl.contains("sig")?14:cl.contains("cn")?2:cl.contains("cc")?4:cl.contains("nm")?Math.max(30,txt.length):sec==="THEAD"?txt.length/2:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
         c+=cs; }
       for(let j=0;j<ncol;j++) if(!cells[j]&&(grid[rows.length]||[])[j]) cells[j]={ v:"", s:sec==="TFOOT"?"foot":"td" };
       const mm=Math.max(parseFloat(tr.style.height)||0, sec==="TBODY"?rowMM:0), h=mm?Math.round(mm*2.835):tr.querySelector(".tg")?30:undefined;
