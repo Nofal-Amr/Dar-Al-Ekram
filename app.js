@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.61";
+export const VERSION = "1.3.62";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -749,7 +749,7 @@ function vBatches(){
   if(batchTab==="events") return tabs+vEvents();
   const list=batches();
   return `${tabs}
-  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${canDraft()?`<button class="btn pri" id="newK">${ic("list")}كشف جديد</button>`:""}</div>
+  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${canDraft()?`<span class="row" style="gap:6px"><button class="btn" id="mergeK">${ic("copy")}من كشوف قديمة</button><button class="btn pri" id="newK">${ic("list")}كشف جديد</button></span>`:""}</div>
   <div class="list">${list.length?list.map(batchRow).join(""):`<div class="empty">${canDraft()?"لا توجد كشوف بعد. اضغط «كشف جديد».":"مفيش كشوف معتمدة لسه"}</div>`}</div>
   ${isMgr()?(()=>{ const n=[...K.values()].filter(k=>k.archivedAt).length; return `<div class="bar"><button class="btn sm" data-go="archive">${ic("archive")}الكشوف المؤرشفة (${num(n)})</button></div>`; })():""}`;
 }
@@ -913,7 +913,7 @@ function bindView(){
   on("#addP","onclick",()=>editPerson(null));
   on("#pPhones","onclick",()=>phoneSheet("الحالات المعروضة", filteredPeople().map(b=>({bid:b.id,name:b.name,phone:b.phone,code:b.code}))));
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
-  on("#newK","onclick",()=>newBatch());
+  on("#newK","onclick",()=>newBatch()); on("#mergeK","onclick",()=>copyBatch(null));
   on("#newT","onclick",()=>openType(null));
   on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet());
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
@@ -1145,7 +1145,9 @@ function sheet(title,body,onMount,refresh){
   sheetRefresh=refresh||null; onMount&&onMount(s); return s;
 }
 function closeSheet(){ const s=$("#scrim"); if(s) s.remove(); document.body.style.overflow=""; sheetRefresh=null; }
-function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0; sheetRefresh(); const b=$("#scrim .sh-body"); if(b) b.scrollTop=sc; } }
+// Keeps the scroll position, and the cursor in a number box that has data-ei (editing a list's counts: Tab to the next box keeps working).
+function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0, a=document.activeElement, keep=a?.dataset?.ei?`[data-ei="${a.dataset.ei}"][data-ef="${a.dataset.ef}"]`:null;
+  sheetRefresh(); const b=$("#scrim .sh-body"); if(b) b.scrollTop=sc; if(keep){ const n=$("#scrim "+keep); if(n&&document.activeElement!==n) n.focus(); } } }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeSheet(); });
 
 /* ================= case file ================= */
@@ -1972,43 +1974,69 @@ async function insertItems(rows){
 const partialMsg=(saved,total)=>`اتحفظ ${num(saved)} بس من ${num(total)} — النت وقف في النص. الكشف مسودة: افتحه وضيف الباقي أو أرشفه وابدأ تاني`;
 // A copy never brings back a family that has since been cancelled, stopped or archived.
 const copyable=it=>{ const b=it.bid&&B.get(it.bid); return !it.bid||(!!b&&!b.archivedAt&&b.status==="نشط"); };
+/* A new draft from one or more old lists (e.g. «وجبات مدرسية» + «وجبات مدرسية مساعدات»): same aid, families and amounts.
+   A family that is on two of the lists comes over once (from the first list it's on). Who comes over is decided by rules —
+   each rule = case type + collected or not; a family is copied if it matches ANY rule. */
 function copyBatch(id){
-  const k=K.get(id); if(!k||!canDraft()) return;
-  const types=[...new Set(k.items.map(i=>(i.bid&&B.get(i.bid)?.caseType)||"غير محدد"))].sort();
+  if(!canDraft()) return;
+  const srcIds=id&&K.get(id)?[id]:[];
   let rules=[{type:"",recv:"all"}];
-  const chosen=()=>k.items.filter(it=>copyable(it)&&rules.some(r=>itemMatches(it,r)));
-  const count=r=>k.items.filter(it=>copyable(it)&&itemMatches(it,r)).length;
-  const gone=k.items.filter(it=>!copyable(it)).length;
-  const drawRules=()=>`${rules.map((r,i)=>`<div class="rule"><span class="sub">${i?"أو":"اللي"}</span>
-      <select data-rt="${i}" aria-label="نوع الحالة"><option value="">كل الأنواع</option>${types.map(t=>`<option ${r.type===t?"selected":""}>${esc(t)}</option>`).join("")}</select>
+  const srcs=()=>srcIds.map(x=>K.get(x)).filter(Boolean);
+  // every item of every chosen list, first list wins for a family on more than one
+  const pool=()=>{ const seen=new Set(), out=[], dup=[];
+    for(const k of srcs()) for(const it of k.items){ const key=it.bid||"c:"+it.code; if(seen.has(key)){ dup.push(it); continue; } seen.add(key); out.push({ ...it, src:k }); }
+    return { out, dup }; };
+  const types=()=>[...new Set(pool().out.map(i=>(i.bid&&B.get(i.bid)?.caseType)||"غير محدد"))].sort();
+  const chosen=()=>pool().out.filter(it=>copyable(it)&&rules.some(r=>itemMatches(it,r)));
+  const count=r=>pool().out.filter(it=>copyable(it)&&itemMatches(it,r)).length;
+  const others=()=>batches().filter(k=>!srcIds.includes(k.id)&&!k.single);
+  const drawSrc=()=>{ const ks=srcs(), units=[...new Set(ks.map(k=>k.unit))];
+    return `${ks.map((k,i)=>`<div class="item"><span class="grow"><span class="nm">${esc(k.title)}</span><br><span class="sub">${mLabel(k.month)} · ${num(k.items.length)} أسرة · ${num(k.items.filter(x=>x.received).length)} استلموا${i===0&&ks.length>1?" · النوع والوحدة بتوع الكشف الجديد من الكشف ده":""}</span></span>${ks.length>1||!id?`<button class="btn sm danger" data-sx="${k.id}" aria-label="شيل الكشف">×</button>`:""}</div>`).join("")||`<div class="empty">اختار كشف من تحت</div>`}
+    <div class="row" style="margin-top:8px"><select id="c_more" style="flex:1 1 220px"><option value="">+ ${ks.length?"ضم كشف تاني":"اختار الكشف"}…</option>${others().map(k=>`<option value="${k.id}">${esc(k.title)} — ${mLabel(k.month)} (${num(k.items.length)})</option>`).join("")}</select></div>
+    ${units.length>1?`<div class="note">${ic("alert")} الكشوف دي وحداتها مختلفة (${units.map(esc).join(" / ")}) — الكميات هتتنقل زي ما هي، راجعها بعد النسخ.</div>`:""}`; };
+  const drawRules=()=>{ const { out, dup } = pool(), gone=out.filter(it=>!copyable(it)).length;
+    return `${rules.map((r,i)=>`<div class="rule"><span class="sub">${i?"أو":"اللي"}</span>
+      <select data-rt="${i}" aria-label="نوع الحالة"><option value="">كل الأنواع</option>${types().map(t=>`<option ${r.type===t?"selected":""}>${esc(t)}</option>`).join("")}</select>
       <select data-rr="${i}" aria-label="الاستلام">${Object.entries(RECV).map(([v,l])=>`<option value="${v}" ${r.recv===v?"selected":""}>${l}</option>`).join("")}</select>
       <span class="chip">${num(count(r))}</span>${rules.length>1?`<button class="btn sm danger" data-rx="${i}" aria-label="شيل القاعدة">×</button>`:""}</div>`).join("")}
     <button class="btn sm" id="c_addr">${ic("plus")}قاعدة تانية (أو)</button>
-    <div class="note green" style="margin-top:10px">هيتنسخ <b>${num(chosen().length)}</b> أسرة من ${num(k.items.length)}${gone?` · ${num(gone)} مش هيتنسخوا لأنهم بقوا ملغي أو موقوف أو في الأرشيف`:""}</div>`;
-  sheet("نسخة جديدة من الكشف",`
-    <p class="sub" style="margin-top:0">من: <b>${esc(k.title)}</b> — ${num(k.items.filter(i=>i.received).length)} استلموا من ${num(k.items.length)}</p>
-    <label class="f">اسم الكشف الجديد<input type="text" id="c_t" value="${esc(k.title.replace(/\s*\(نسخة\)$/,""))} (نسخة)"></label>
+    <div class="note green" style="margin-top:10px">هيتنسخ <b>${num(chosen().length)}</b> أسرة${srcs().length>1?` من ${num(srcs().length)} كشوف`:` من ${num(out.length)}`}${dup.length?` · ${num(dup.length)} أسرة موجودة في أكتر من كشف اتحسبت مرة واحدة`:""}${gone?` · ${num(gone)} مش هيتنسخوا لأنهم بقوا ملغي أو موقوف أو في الأرشيف`:""}</div>`; };
+  const defTitle=()=>{ const ks=srcs(); return ks.length>1?ks.map(k=>k.title.replace(/\s*\(نسخة\)$/,"")).join(" + "):ks[0]?`${ks[0].title.replace(/\s*\(نسخة\)$/,"")} (نسخة)`:""; };
+  let titleTouched=false;
+  sheet(id?"نسخة جديدة من الكشف":"كشف جديد من كشوف قديمة",`
+    <p class="sub" style="margin-top:0">الكشف الجديد بيتعمل مسودة بنفس الأسر والكميات. تقدر تضم أكتر من كشف (مثلاً «وجبات مدرسية» + «وجبات مدرسية مساعدات»).</p>
+    <h3>من كشف</h3><div id="c_src" class="list">${drawSrc()}</div>
+    <label class="f">اسم الكشف الجديد<input type="text" id="c_t" value="${esc(defTitle())}"></label>
     <label class="f">عن شهر<input type="month" id="c_m" value="${curMonth}"></label>
     <h3>مين يتنسخ؟</h3><div id="c_rules">${drawRules()}</div>
-    <div class="bar"><button class="btn pri" id="c_go">${ic("copy")}اعمل النسخة (مسودة)</button></div>`, s=>{
+    <div class="bar"><button class="btn pri" id="c_go">${ic("copy")}اعمل الكشف (مسودة)</button></div>`, s=>{
     const q=x=>s.querySelector(x);
+    q("#c_t").oninput=()=>{ titleTouched=true; };
     const bindR=()=>{ q("#c_rules").innerHTML=drawRules();
       s.querySelectorAll("[data-rt]").forEach(el=>el.onchange=()=>{ rules[+el.dataset.rt].type=el.value; bindR(); });
       s.querySelectorAll("[data-rr]").forEach(el=>el.onchange=()=>{ rules[+el.dataset.rr].recv=el.value; bindR(); });
       s.querySelectorAll("[data-rx]").forEach(el=>el.onclick=()=>{ rules.splice(+el.dataset.rx,1); bindR(); });
       q("#c_addr").onclick=()=>{ rules.push({type:"",recv:"all"}); bindR(); }; };
-    bindR();
+    const bindS=()=>{ q("#c_src").innerHTML=drawSrc(); if(!titleTouched) q("#c_t").value=defTitle();
+      // a rule on a case type that isn't in the lists anymore goes back to «كل الأنواع»
+      rules.forEach(r=>{ if(r.type&&!types().includes(r.type)) r.type=""; });
+      q("#c_more").onchange=e=>{ if(e.target.value){ srcIds.push(e.target.value); bindS(); } };
+      s.querySelectorAll("[data-sx]").forEach(el=>el.onclick=()=>{ srcIds.splice(srcIds.indexOf(el.dataset.sx),1); bindS(); });
+      bindR(); };
+    bindS();
     q("#c_go").onclick=async()=>{
+      const k=srcs()[0]; if(!k){ toast("اختار الكشف اللي هتنسخ منه"); return; }
       const src=chosen(); if(!src.length){ toast("مفيش حد مطابق للقواعد"); return; }
       q("#c_go").disabled=true; q("#c_go").innerHTML=`<span class="spin"></span>`;
-      const nk=await run(sb.from("batches").insert({title:q("#c_t").value.trim()||k.title+" (نسخة)",type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
-        donor:k.donor||"",basis:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
-      if(!nk){ q("#c_go").disabled=false; return; }
-      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid); return toI(b?itemFor(b,it.value,"منسوخ من: "+k.title,it.students):{...it, received:false, reason:"منسوخ من: "+k.title},nk.id,i); });
+      const many=srcs().length>1, title=q("#c_t").value.trim()||defTitle();
+      const nk=await run(sb.from("batches").insert({title,type_id:k.typeId,type_name:k.typeName,unit:k.unit,template:k.template,month:q("#c_m").value||curMonth,
+        donor:k.donor||"",basis:many?null:k.basis,cooldown:k.cooldown??0,status:"مسودة",created_by:me.id}).select("id").single());
+      if(!nk){ q("#c_go").disabled=false; q("#c_go").innerHTML=`${ic("copy")}اعمل الكشف (مسودة)`; return; }
+      const rows=src.map((it,i)=>{ const b=it.bid&&B.get(it.bid), why="منسوخ من: "+it.src.title; return toI(b?itemFor(b,it.value,why,it.students):{...it, received:false, reason:why},nk.id,i); });
       const saved=await insertItems(rows);
       const ruleText=rules.map(r=>`${r.type||"كل الأنواع"} · ${RECV[r.recv]}`).join(" أو ");
-      await logIt("batch",nk.id,`نسخة من «${k.title}» (${saved===rows.length?rows.length:`${saved} من ${rows.length}`} أسرة: ${ruleText})`);
-      toast(saved===rows.length?"اتعملت النسخة ✓":partialMsg(saved,rows.length)); await refreshBatch(nk.id); openBatch(nk.id);
+      await logIt("batch",nk.id,`${many?"من الكشوف":"نسخة من"} «${srcs().map(x=>x.title).join("» + «")}» (${saved===rows.length?rows.length:`${saved} من ${rows.length}`} أسرة: ${ruleText})`);
+      toast(saved===rows.length?"اتعمل الكشف ✓":partialMsg(saved,rows.length)); view="batches"; await refreshBatch(nk.id); openBatch(nk.id);
     };
   });
 }
@@ -2077,11 +2105,14 @@ function openBatch(id, giveMode){
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
       <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span><br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
       ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
+      ${canEditList(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
-    :`<div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th><th>${k.template==="cash"?"الرقم القومي":"أفراد"}</th><th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
-      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td><td class="n">${esc(k.template==="cash"?it.nationalId:it.familySize)}</td><td class="n">${num(it.value)}</td><td>${canEditList(k)?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
-    </tbody></table></div>`}
+    :(()=>{ const ed=canEditList(k), stu=stuOn(k), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
+      return `${ed?`<p class="sub" style="margin:0 0 6px">تقدر تعدّل الأفراد${stu?" والطلاب":""} والكمية لكل أسرة من هنا — بيتحفظ لوحده${k.basis&&k.basis.total==null?"، ولو غيّرت الأفراد الكمية بتتحسب تاني على نفس القاعدة":""}.</p>`:""}
+      <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th><th></th></tr></thead><tbody>
+      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}<div class="why">${esc(it.code)} · ${esc(it.reason||"")}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td><td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
+    </tbody></table></div>`; })()}
     ${logs&&logs.length?`<h3>سجل الكشف</h3><ul class="log">${logs.slice(0,20).map(l=>`<li><b>${dLabel(l.at)}</b> — ${esc(l.text)}${l.by?` (${esc(who(l.by))})`:""}</li>`).join("")}</ul>`:""}`;
   };
   const upd=async(patch,text,okMsg)=>{ if(await run(sb.from("batches").update(patch).eq("id",id),okMsg)){ await logIt("batch",id,text); logs=await loadLog("batch",id); await refreshBatch(id); } };
@@ -2099,6 +2130,41 @@ function openBatch(id, giveMode){
       if(await run(sb.from("batch_items").delete().eq("id",it.id))){ await logIt("batch",id,`استبعاد ${it.name}`); logs=await loadLog("batch",id); await refreshBatch(id);
         undoable(`${it.name} اتشالت من الكشف`, async()=>{ if(!K.get(id)||K.get(id).items.some(x=>x.id===row.id||x.bid===row.beneficiary_id)) return false;
           if(!await run(sb.from("batch_items").insert(row))) return false; await logIt("batch",id,`رجوع ${it.name} (تراجع)`); logs=await loadLog("batch",id); await refreshBatch(id); }); } });
+    // counts and amounts after the list is made: one family's numbers, saved on their own (never the whole list)
+    const saveItem=async(it,patch)=>{ const k=K.get(id); if(!k) return false;
+      const cols={ familySize:"family_size", students:"students", value:"value" }, prev={}, row={};
+      for(const [f,v] of Object.entries(patch)){ if(same(it[f]===""?null:it[f], v)) continue; prev[f]=it[f]; row[cols[f]]=v; }
+      if(!Object.keys(row).length) return true;
+      if(row.value!=null&&row.value<0){ toast("الكمية مينفعش تبقى بالسالب"); return false; }
+      const { data, error } = await sb.from("batch_items").update(row).eq("id",it.id).eq("received",false).select("id");
+      if(error){ toast(`ماتحفظش — ${errMsg(error,"batch","edit_item")}`); refreshSheet(); return false; }
+      if(!data?.length){ toast(`${it.name} استلمت خلاص — الأعداد بتاعتها مابقتش تتعدل`); await refreshBatch(id); return false; }
+      const lbl={ familySize:"الأفراد", students:"الطلاب", value:k.template==="cash"?"المبلغ":"الكمية" };
+      await logIt("batch",id,`تعديل ${it.name}: ${Object.keys(prev).map(f=>`${lbl[f]} ${prev[f]??"—"} ← ${patch[f]??"—"}`).join("، ")}`); logs=await loadLog("batch",id); await refreshBatch(id);
+      undoable(`${it.name}: اتعدلت الأعداد`, ()=>{ const cur=K.get(id)?.items.find(x=>x.id===it.id); if(!cur||cur.received) return false; return saveItem(cur,prev); });
+      return true; };
+    // a new family size / students count gives the amount by the list's own rule (when it has one and no fixed total to split)
+    const autoValue=(k,it,patch)=>{ if(!k.basis||k.basis.total!=null||"value" in patch) return patch;
+      const fam=patch.familySize??it.familySize, stu=patch.students??it.students; return { ...patch, value:shareFor(k.basis, fam, stu) }; };
+    s.querySelectorAll("[data-ei]").forEach(el=>el.onchange=()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.ei); if(!it) return;
+      const v=el.value===""?null:+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
+      saveItem(it, autoValue(k,it,{ [el.dataset.ef]:v })); });
+    s.querySelectorAll("[data-eit]").forEach(el=>el.onclick=async()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.eit); if(!it) return;
+      const stu=stuOn(k), w=document.createElement("div"); w.className="ask-scrim";
+      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="eiT"><h2 id="eiT">${esc(it.name)}</h2>
+        <div class="grid2"><label class="f">عدد الأفراد<input type="number" min="0" id="ei_f" value="${esc(it.familySize??"")}"></label>${stu?`<label class="f">عدد الطلاب<input type="number" min="0" id="ei_s" value="${esc(it.students??"")}"></label>`:""}
+        <label class="f">${k.template==="cash"?"المبلغ":"الكمية"} (${esc(k.unit)})<input type="number" min="0" step="any" id="ei_v" value="${esc(it.value)}"></label></div>
+        <div class="bar"><button class="btn pri" data-a="1">${ic("save")}حفظ</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+      document.body.appendChild(w); const g=x=>w.querySelector(x); g("#ei_f").focus();
+      // changing the family size fills in the amount by the list's rule; typing the amount yourself wins
+      let vTouched=false; g("#ei_v").oninput=()=>{ vTouched=true; };
+      const re=()=>{ if(vTouched) return; const p=autoValue(k,it,{ familySize:g("#ei_f").value===""?null:+g("#ei_f").value, ...(stu?{ students:g("#ei_s").value===""?null:+g("#ei_s").value }:{}) }); if("value" in p) g("#ei_v").value=p.value; };
+      g("#ei_f").oninput=re; if(stu) g("#ei_s").oninput=re;
+      w.onclick=async e=>{ const a=e.target.closest("[data-a]"); if(!a&&e.target!==w) return; if(!a||a.dataset.a==="0"){ w.remove(); return; }
+        const n=x=>x.value===""?null:+x.value, patch={ familySize:n(g("#ei_f")), value:n(g("#ei_v"))??0, ...(stu?{ students:n(g("#ei_s")) }:{}) };
+        if(Object.values(patch).some(v=>v!=null&&(isNaN(v)||v<0))){ toast("اكتب أرقام صحيحة (صفر أو أكتر)"); return; }
+        a.disabled=true; if(await saveItem(it,patch)){ w.remove(); toast("اتحفظ ✓"); } else a.disabled=false; };
+    });
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
       if(!v&&!await ask(`${it.name} هيرجع «ماستلمش».`,{title:"إلغاء الاستلام؟",ok:"إلغاء الاستلام",danger:true})) return;
