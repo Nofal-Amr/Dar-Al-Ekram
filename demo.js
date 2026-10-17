@@ -93,7 +93,7 @@ function makeData(){
     { id: uuid(), item_id: items[1].id, date: "2026-09-01", qty: 40, reason: "جرد", note: "رصيد أول مدة", cancelled_at: null, created_at: "2026-09-01T09:00:00Z" },
   ];
   return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks,
-    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
+    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], client_errors: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
 }
 
 export function createDemoClient(){
@@ -160,8 +160,29 @@ export function createDemoClient(){
     }) },
     rpc: async (fn, args) => {
       await delay(); const f = netFail(); if(f) return f;
-      if(fn === "set_received"){ const it = db.batch_items.find(x => x.id === args.item_id); if(!it) return { error: { message: "not found" } };
-        it.received = args.is_received; it.received_at = args.is_received ? new Date().toISOString() : null; it.received_by = args.is_received ? session.user.id : null; return { data: null, error: null }; }
+      if(fn === "set_received" || fn === "mark_received"){ const it = db.batch_items.find(x => x.id === args.item_id); if(!it) return { data: null, error: { message: "item_not_found" } };
+        const k = db.batches.find(x => x.id === it.batch_id); if(k?.archived_at) return { data: null, error: { message: "batch_archived" } }; if(k?.status === "مسودة") return { data: null, error: { message: "batch_not_approved" } };
+        if(!!it.received === !!args.is_received) return { data: { changed: false, by: it.received_by, at: it.received_at }, error: null };
+        it.received = args.is_received; it.received_at = args.is_received ? new Date().toISOString() : null; it.received_by = args.is_received ? session.user.id : null; return { data: { changed: true }, error: null }; }
+      // same contract as the database function: all rows or none
+      if(fn === "write_many"){ const keep = JSON.stringify(["donors","items","donations","ledger","stock_moves"].map(t => db[t])), named = {}, rows = [], refs = {};
+        try{
+          for(const op of args.ops){
+            if(op.op === "insert"){ const row = Object.fromEntries(Object.entries(op.row).map(([k, v]) => [k, typeof v === "string" && v[0] === "@" ? refs[v.slice(1)] : v]));
+              if(op.t === "donations") row.receipt_no = db.donations.reduce((m, d) => Math.max(m, d.receipt_no || 0), 0) + 1;
+              const r = await query(op.t).insert(row).select().single(); if(r.error) throw r.error; rows.push({ t: op.t, row: r.data }); if(op.as){ refs[op.as] = r.data.id; named[op.as] = r.data; } }
+            else if(op.op === "cancel"){ const col = op.donation_id ? "donation_id" : "id", val = op.donation_id || op.id; const hit = db[op.t].filter(r => r[col] === val && !r.cancelled_at);
+              if(col === "id" && !hit.length) throw { message: "nothing_changed" }; hit.forEach(r => { r.cancelled_at = new Date().toISOString(); r.cancelled_by = session.user.id; rows.push({ t: op.t, row: { ...r } }); }); }
+          }
+          return { data: { named, rows }, error: null };
+        }catch(e){ const back = JSON.parse(keep); ["donors","items","donations","ledger","stock_moves"].forEach((t, i) => db[t] = back[i]); return { data: null, error: e }; }
+      }
+      if(fn === "ep_got" || fn === "ep_came"){ const r = db.event_people.find(x => x.id === args.ep); if(!r) return { data: null, error: { message: "item_not_found" } };
+        if(fn === "ep_got"){ const g = r.got = { ...(r.got || {}) };
+          if(args.is_on) g[args.slot] = [...new Set([...(g[args.slot] || []), args.item])];
+          else for(const k of Object.keys(g)) if(args.whole_family || k === args.slot){ g[k] = g[k].filter(x => x !== args.item); if(!g[k].length) delete g[k]; } }
+        else { const c = r.came = { ...(r.came || {}) }, a = Array.from({ length: Math.max(args.len, args.idx + 1) }, (_, i) => (c[args.grp] || [])[i] ?? false); a[args.idx] = args.val; c[args.grp] = a; }
+        return { data: JSON.parse(JSON.stringify(r)), error: null }; }
       return { data: null, error: { message: "unknown rpc" } };
     },
     functions: { invoke: async (name, { body }) => { await delay(); if(body.action === "status") return { data: { hasManager: true }, error: null };

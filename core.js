@@ -372,3 +372,15 @@ export function parseKidAge(raw){
   const stage = kg ? `رياض أطفال ${kg[2] === "1" ? "١" : "٢"}` : normalizeStage(t);
   return stage ? { age: stageAge(stage), stage } : { age: null, stage: t };
 }
+
+// Three-way merge of a list of {id,…} objects: start from `theirs` (the newest copy), then apply what changed from
+// `base` to `mine` — items added, removed or edited by id. Changes made by someone else to other items are kept.
+export function mergeById(base, mine, theirs){
+  const key = x => JSON.stringify(x);
+  const b = new Map((base || []).map(x => [x.id, x])), m = new Map((mine || []).map(x => [x.id, x]));
+  const out = (theirs || []).filter(x => !(b.has(x.id) && !m.has(x.id)))                       // removed here
+    .map(x => m.has(x.id) && (!b.has(x.id) || key(b.get(x.id)) !== key(m.get(x.id))) ? m.get(x.id) : x);   // edited here
+  const have = new Set(out.map(x => x.id));
+  for(const x of mine || []) if(!have.has(x.id) && !b.has(x.id)) out.push(x);                     // added here
+  return out;
+}

@@ -1,9 +1,9 @@
-import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
+import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.60";
+export const VERSION = "1.3.61";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -60,7 +60,8 @@ const simple = () => role === "helper";
 const cleanUser = u => latinDigits(u).trim().toLowerCase().replace(/[^a-z0-9._-]/g,"");
 const who = id => id ? (P.get(id)?.full_name || P.get(id)?.username || "مستخدم") : "";
 
-function toast(msg, action){ document.querySelectorAll(".toast").forEach(t => t.remove()); const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); t.textContent = msg;
+// quiet: a background notice (sync done…) — it never pushes away a message that has a button (تراجع) on it.
+function toast(msg, action, { quiet = false } = {}){ if(quiet && document.querySelector(".toast .undo")) return; document.querySelectorAll(".toast").forEach(t => t.remove()); const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); t.textContent = msg;
   if(action){ const b = document.createElement("button"); b.className = "undo"; b.textContent = action.label; b.onclick = () => { t.remove(); action.fn(); }; t.appendChild(b); }
   const x = document.createElement("button"); x.className = "tx"; x.setAttribute("aria-label","اقفل"); x.textContent = "×"; x.onclick = () => t.remove(); t.appendChild(x);
   // swipe it sideways (or down) to get it out of the way
@@ -75,25 +76,73 @@ function toast(msg, action){ document.querySelectorAll(".toast").forEach(t => t.
    Changes inside lists (remove, add, received, archive) can be taken back: «تراجع» on the message, or Ctrl+Z outside text boxes.
    Each entry undoes itself against the current data, so it still works after other changes. */
 const undoStack = [];
-function undoable(msg, fn){ undoStack.push({ msg, fn }); if(undoStack.length > 30) undoStack.shift(); toast(msg, { label:"تراجع ↶", fn:undoLast }); }
+// Where an action happened (screen + open window). Ctrl+Z only takes back something done on the screen you're looking at.
+const undoWhere = () => `${view}|${$("#scrim") ? sheetSeq : 0}`;
+function undoable(msg, fn){ undoStack.push({ msg, fn, where: undoWhere() }); if(undoStack.length > 30) undoStack.shift(); toast(msg, { label:"تراجع ↶", fn:undoLast }); }
 let undoing = false;
-async function undoLast(){
-  if(undoing) return; const u = undoStack.pop(); if(!u){ toast("مفيش حاجة ترجع فيها"); return; }
+async function undoLast(fromKey){
+  if(undoing) return; const top = undoStack[undoStack.length - 1]; if(!top){ toast("مفيش حاجة ترجع فيها"); return; }
+  if(fromKey && top.where !== undoWhere()){ toast(`آخر حاجة اتعملت («${top.msg}») كانت في شاشة تانية — ارجعلها وجرّب تاني`); return; }
+  const u = undoStack.pop();
   undoing = true; try{ if(await u.fn() !== false) toast(`اترجع: ${u.msg}`); }catch(e){ toast(errMsg(e)); } finally { undoing = false; }
 }
 document.addEventListener("keydown", e => {
   if(!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== "KeyZ") return;
   if(e.target.closest?.("input,textarea,select,[contenteditable]") || document.querySelector(".ask-scrim") || !me) return;
-  e.preventDefault(); undoLast();
+  e.preventDefault(); undoLast(true);
 });
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|network|Load failed|fetch/i.test(String(e?.message || e || ""));
-function errMsg(e){
-  const m = String(e?.message || e || "");
-  if(/row-level security|permission|not allowed|violates/i.test(m)) return "مش مسموحلك تعمل ده";
-  if(/duplicate key.*national_id/i.test(m)) return "الرقم القومي ده متسجل لحالة تانية";
-  if(/duplicate key.*code/i.test(m)) return "رقم الحالة ده مستخدم قبل كده";
-  if(isNetErr(e)) return "مفيش إنترنت — جرّب تاني لما النت يرجع";
-  return "حصلت مشكلة: " + m.slice(0,120);
+/* ---------- errors ----------
+   Every error becomes one stable key with a clear Arabic message that says what to do.
+   Unexpected ones are also written to `client_errors` with a short ref (#K7Q2M) the user can quote to the office. */
+const ERR_TEXT = {
+  offline: "مفيش إنترنت — اللي عملته ماتحفظش. جرّب تاني لما النت يرجع",
+  auth_expired: "الدخول انتهى — اقفل الموقع وافتحه وادخل تاني. التسليمات والكلام اللي كنت كاتبه محفوظين على الجهاز",
+  not_allowed: "حسابك مش مسموحله بده — لو محتاجه كلّم المدير",
+  not_found_or_denied: "ماتحفظش: يا إما مش مسموحلك تعدّل ده، يا إما حد مسحه من شوية. اعمل تحديث للصفحة وجرّب تاني",
+  item_not_found: "الاسم ده اتشال من الكشف من المكتب — ماتسلّمش، وكلّم المكتب",
+  batch_not_approved: "الكشف ده رجع مسودة ومش متاح للتسليم دلوقتي — كلّم المدير",
+  batch_archived: "الكشف ده اتقفل واتأرشف — التسليم عليه وقف. كلّم المدير",
+  undo_window_passed: "فات أكتر من 5 دقايق على التسليم — إلغاؤه دلوقتي من المكتب بس",
+  nothing_changed: "دي اتلغت قبل كده — اعمل تحديث للصفحة",
+  dup_nid: "الرقم القومي ده متسجل لحالة تانية — دوّر عليه في الحالات قبل ما تسجّل تاني",
+  dup_code: "رقم الحالة ده مستخدم قبل كده — اختار رقم تاني",
+  too_big: "الملف كبير أوي — صغّره أو صوّره تاني بجودة أقل",
+};
+let authLost = false;
+function errKey(e){
+  const m = String(e?.message || e || ""), c = String(e?.code || "");
+  if(isNetErr(e)) return "offline";
+  if(c === "PGRST301" || c === "PGRST303" || e?.status === 401 || /JWT|token is expired|invalid claim/i.test(m)) return "auth_expired";
+  const k = ["item_not_found","batch_not_approved","batch_archived","undo_window_passed","nothing_changed","not_allowed"].find(k => m.includes(k)); if(k) return k;
+  if(/duplicate key.*national_id/i.test(m)) return "dup_nid";
+  if(/duplicate key.*code/i.test(m)) return "dup_code";
+  if(c === "PGRST116") return authLost ? "auth_expired" : "not_found_or_denied";
+  if(/row-level security|permission denied|not allowed/i.test(m) || c === "42501") return authLost ? "auth_expired" : "not_allowed";
+  if(/payload too large|413|exceeded the maximum/i.test(m)) return "too_big";
+  return "unknown";
+}
+const errSeen = new Map();   // the same error twice in 10 seconds is logged once
+function report(feature, action, e, ctx = {}){
+  const key = errKey(e), msg = String(e?.message || e || "");
+  const ref = Math.random().toString(36).slice(2, 7).toUpperCase();
+  const entry = { ref, feature, action, key, code: e?.code ?? null, status: e?.status ?? null, message: msg.slice(0, 500), details: e?.details ?? null, hint: e?.hint ?? null, ctx, view: (() => { try{ return view; }catch(_){ return ""; } })(), online: navigator.onLine, ver: VERSION, uid: me?.id ?? null, at: new Date().toISOString() };
+  (key === "offline" ? console.warn : console.error)(`[${feature}${action ? "/" + action : ""}] ${key} #${ref}`, entry, e);
+  const sig = `${feature}|${action}|${key}|${msg.slice(0, 80)}`, last = errSeen.get(sig);
+  if(key !== "offline" && !DEMO && me && navigator.onLine && !(last && Date.now() - last < 10000)){
+    errSeen.set(sig, Date.now());
+    sb.from("client_errors").insert({ ref, feature, action, key, detail: entry, ver: VERSION }).then(() => {}, () => {});
+  }
+  return { key, ref, text: ERR_TEXT[key] || `ماقدرناش نكمّل — جرّب تاني، ولو اتكررت ابعت للمكتب الكود #${ref}` };
+}
+function errMsg(e, feature = "app", action = ""){ return report(feature, action, e).text; }
+window.addEventListener("error", e => { if(e.error) report("app", "uncaught", e.error, { src: e.filename, line: e.lineno }); });
+window.addEventListener("unhandledrejection", e => report("app", "promise", e.reason));
+// Edge functions answer errors with a non-2xx status; read their JSON body so {error:"exists"} reaches the screen.
+async function callFn(name, body){
+  const { data, error } = await sb.functions.invoke(name, { body });
+  if(error && error.context && typeof error.context.json === "function"){ try{ const b = await error.context.json(); if(b && b.error) return { data: b, error: null }; }catch(_){} }
+  return { data, error };
 }
 /* In-app confirm (the browser's confirm() looks broken on Windows 7 and can't be styled).
    Resolves true/false; stacks above an open sheet without closing it. */
@@ -117,7 +166,7 @@ async function run(promise, okMsg){
   if(okMsg) toast(okMsg);
   return data ?? true;
 }
-async function logIt(entity, id, text){ if(!canWrite() || !text) return; await sb.from("activity_log").insert({entity, entity_id:id, text}); logCache.delete(entity+id); }
+async function logIt(entity, id, text){ if(!canWrite() || !text) return; const { error } = await sb.from("activity_log").insert({entity, entity_id:id, text}); if(error) report("log", entity, error, { id, text }); logCache.delete(entity+id); }
 
 /* ================= mapping ================= */
 const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", whatsapp:r.whatsapp||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
@@ -184,9 +233,24 @@ async function reload(){
 }
 // Targeted refreshes after our own writes — one row instead of five whole tables.
 async function refreshPerson(id){ const { data } = await sb.from("beneficiaries").select("*").eq("id", id).single(); if(data){ B.set(id, fromB(data)); upsertRaw("bs", data); changed(); } }
+/* Save a case without erasing what someone else changed meanwhile: only the fields this form changed are sent,
+   and if another person changed one of those same fields since the form opened, we ask before writing over it.
+   Returns { ok } | { none } (nothing changed) | { cancelled } | { error }. */
+const B_LABEL = { code:"رقم الحالة", name:"الاسم", national_id:"الرقم القومي", phone:"التليفون", phone2:"التليفون التاني", phone2_owner:"صاحب التليفون التاني", whatsapp:"الواتساب", birth:"تاريخ الميلاد", case_type:"نوع الحالة", grade:"التقدير", project:"المشروع", area:"المنطقة", address:"العنوان", marital:"الحالة الاجتماعية", job:"العمل", income:"الدخل", pension:"المعاش", housing:"السكن", family_size:"عدد الأفراد", status:"الحالة", last_review:"آخر مراجعة", next_review:"المراجعة الجاية", notes:"الملاحظات", children:"الأبناء", tags:"قوايم المتبرعين" };
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+async function patchPerson(id, orig, next){
+  const a = toB(orig), b = toB(next), keys = Object.keys(b).filter(k => !same(a[k], b[k]));
+  if(!keys.length) return { none: true };
+  const { data: cur, error } = await sb.from("beneficiaries").select(keys.join(",")).eq("id", id).single();
+  if(error) return { error };
+  const clash = keys.filter(k => !same(cur[k], a[k]) && !same(cur[k], b[k]));
+  if(clash.length && !await ask(`حد تاني عدّل «${clash.map(k => B_LABEL[k] || k).join("، ")}» في الحالة دي من ساعة ما فتحت الشاشة.\nلو حفظت، اللي انت كاتبه هيتكتب فوق تعديله. باقي التعديلات التانية مش هتتأثر.`, { title:"فيه تعديل جديد على نفس الخانة", ok:"احفظ بتاعي", cancel:"رجوع" })) return { cancelled: true };
+  const { error: e2 } = await sb.from("beneficiaries").update(Object.fromEntries(keys.map(k => [k, b[k]]))).eq("id", id);
+  return e2 ? { error: e2 } : { ok: true, keys };
+}
 async function refreshBatch(id){
   const [{ data:k }, { data:items }] = await Promise.all([sb.from("batches").select("*").eq("id", id).single(), sb.from("batch_items").select("*").eq("batch_id", id)]);
-  if(k){ K.set(id, fromK(k, items || [])); upsertRaw("ks", k); snapRaw && (snapRaw.is = snapRaw.is.filter(r => r.batch_id !== id).concat(items || [])); changed(); }
+  if(k){ K.set(id, fromK(k, items || [])); upsertRaw("ks", k); snapRaw && (snapRaw.is = snapRaw.is.filter(r => r.batch_id !== id).concat(items || [])); overlayQueue(); changed(); }
 }
 async function refreshTable(t){ const rows = await fetchAll(t).catch(() => null); if(!rows) return; if(t === "aid_types"){ T.clear(); rows.forEach(r => T.set(r.id, fromT(r))); if(snapRaw) snapRaw.ts = rows; } if(t === "profiles"){ P.clear(); rows.forEach(r => P.set(r.id, r)); if(snapRaw) snapRaw.ps = rows; } changed(); }
 
@@ -235,15 +299,37 @@ const clearSnapshot = () => idbSet("snap", undefined);
 const QKEY = "dar-rq";
 const readQ = () => { try{ return JSON.parse(localStorage.getItem(QKEY) || "[]"); }catch(e){ return []; } };
 const writeQ = q => { try{ localStorage.setItem(QKEY, JSON.stringify(q)); }catch(e){} };
+// Each waiting mark carries who made it: another account signing in on this device never sends it under their name.
+const myQ = () => readQ().filter(x => !x.uid || x.uid === me?.id);
 // Marks still waiting to be sent win over whatever the server last said.
-function overlayQueue(){ for(const x of readQ()){ const { it } = findItem(x.id); if(it){ it.received = x.v; it.receivedAt = x.at; it.pending = true; } } }
+function overlayQueue(){ for(const x of myQ()){ const { it } = findItem(x.id); if(it){ it.received = x.v; it.receivedAt = x.at; it.pending = true; } } }
 function findItem(id){ for(const k of K.values()){ const it = k.items.find(x => x.id === id); if(it) return { k, it }; } return {}; }
+const inflight = new Set();   // items being sent right now — a second tap waits for the first answer
+const tLabel = iso => { try{ return new Date(iso).toLocaleTimeString("ar-EG", { hour:"numeric", minute:"2-digit" }); }catch(e){ return ""; } };
+/* Returns "ok" | "queued" (no internet / signed out: kept on the device) | "already" (someone marked it first) | "busy" | "error".
+   The database decides: a second «سلّم» on a family that already got it changes nothing and says who gave it and when. */
 async function markReceived(it, v){
-  it.received = v; it.receivedAt = v ? new Date().toISOString() : null; it.receivedBy = v ? me?.id : null; changed();
-  const { error } = await sb.rpc("set_received", { item_id: it.id, is_received: v });
-  if(!error){ it.pending = false; changed(); return "ok"; }
-  if(isNetErr(error)){ writeQ(readQ().filter(x => x.id !== it.id).concat({ id: it.id, v, at: it.receivedAt })); it.pending = true; changed(); netBanner(); return "queued"; }
-  it.received = !v; it.receivedAt = null; changed(); toast(errMsg(error)); return "error";
+  if(inflight.has(it.id)) return "busy";
+  inflight.add(it.id);
+  const prev = { received: it.received, receivedAt: it.receivedAt, receivedBy: it.receivedBy };
+  Object.assign(it, { received: v, receivedAt: v ? new Date().toISOString() : null, receivedBy: v ? me?.id : null }); changed();
+  try{
+    const { data, error } = await sb.rpc("mark_received", { item_id: it.id, is_received: v });
+    if(!error){
+      it.pending = false;
+      if(data && data.changed === false && v){
+        Object.assign(it, { receivedBy: data.by || null, receivedAt: data.at || it.receivedAt }); changed();
+        toast(`${it.name} استلمت قبل كده${data.at ? ` الساعة ${tLabel(data.at)}` : ""}${data.by ? ` (سلّمها ${who(data.by)})` : ""} — ماتسلّمهاش تاني`); return "already";
+      }
+      changed(); return "ok";
+    }
+    const r = report("receive", v ? "give" : "ungive", error, { item: it.id, batch: findItem(it.id).k?.id });
+    if(r.key === "offline" || r.key === "auth_expired"){
+      writeQ(readQ().filter(x => x.id !== it.id).concat({ id: it.id, v, at: it.receivedAt, uid: me?.id }));
+      it.pending = true; changed(); netBanner(); if(r.key === "auth_expired") toast(r.text); return "queued";
+    }
+    Object.assign(it, prev); changed(); toast(r.text); return "error";
+  } finally { inflight.delete(it.id); }
 }
 // One case search everywhere (q already norm()'d): part of the name, the national ID, the case number,
 // or 4+ digits of any of her numbers (phone, second phone, WhatsApp).
@@ -255,17 +341,24 @@ const canUngive = it => it.received && (canWrite() || ((it.receivedBy===me?.id |
 async function undoReceive(itemId, v, batchId){ const it = batchId ? K.get(batchId)?.items.find(x => x.id === itemId) : findItem(itemId).it; if(!it || it.received === v) return false; const r = await markReceived(it, v); if(r === "error") return false; logCache.clear(); render(); refreshSheet(); }
 let flushing = false;
 async function flushQueue(){
-  if(flushing || !navigator.onLine || !me) return; const q = readQ(); if(!q.length) return;
-  flushing = true; let sent = 0;
+  if(flushing || !navigator.onLine || !me) return; const q = myQ(); if(!q.length) return;
+  flushing = true; let sent = 0; const failed = [];
   try{
     for(const x of q){
-      const { error } = await sb.rpc("set_received", { item_id: x.id, is_received: x.v });
-      if(error && isNetErr(error)) break;
+      const send = () => sb.rpc("mark_received", { item_id: x.id, is_received: x.v });
+      let { error } = await send();
+      // signed out while offline: refresh the sign-in once, then try again — a delivery is never dropped for that
+      if(error && errKey(error) === "auth_expired"){ await sb.auth.refreshSession().catch(() => {}); ({ error } = await send()); }
+      const k = error && errKey(error);
+      if(k === "offline" || k === "auth_expired"){ if(k === "auth_expired") toast(ERR_TEXT.auth_expired); break; }   // stays queued
       writeQ(readQ().filter(y => y.id !== x.id)); sent++;
-      const { it } = findItem(x.id); if(it){ it.pending = false; if(error){ it.received = !x.v; toast(errMsg(error)); } }
+      const { it } = findItem(x.id);
+      if(it){ it.pending = false; if(error){ it.received = !x.v; failed.push(`${it.name}: ${report("receive", "flush", error, { item: x.id }).text}`); } }
     }
   } finally { flushing = false; }
-  if(sent){ changed(); netBanner(); toast(`اترفع ${num(sent)} تسليم كانوا مستنيين النت ✓`); }
+  if(sent){ changed(); netBanner(); }
+  if(failed.length) toast(failed.join(" · "));
+  else if(sent) toast(`اترفع ${num(sent)} تسليم كانوا مستنيين النت ✓`, null, { quiet:true });
 }
 setInterval(flushQueue, 30000);
 
@@ -393,14 +486,15 @@ function phoneFix(bid){
       if(q("#pf_wa").checked) patch.whatsapp=n;
       q("#pf_ok").disabled=true;
       const { error } = await sb.from("beneficiaries").update(patch).eq("id",bid);
-      if(error){ q("#pf_ok").disabled=false; q("#pf_msg").textContent=errMsg(error); return; }
+      if(error){ q("#pf_ok").disabled=false; q("#pf_msg").textContent=errMsg(error,"calls","phone_fix"); return; }
       await logIt("beneficiary",bid,who?`رقم ${who}: ${n}`:`تصحيح الرقم: ${old.phone?cleanPhone(old.phone):"مكانش فيه"} ← ${n}`); await refreshPerson(bid);
       done(true);
-      undoable(`رقم ${b.name} اتحفظ`, async()=>{ const r=await sb.from("beneficiaries").update(old).eq("id",bid); if(r.error){ toast(errMsg(r.error)); return false; } await logIt("beneficiary",bid,"رجوع الرقم القديم (تراجع)"); await refreshPerson(bid); });
+      undoable(`رقم ${b.name} اتحفظ`, async()=>{ const r=await sb.from("beneficiaries").update(Object.fromEntries(Object.keys(patch).map(k=>[k,old[k]]))).eq("id",bid); if(r.error){ toast(errMsg(r.error)); return false; } await logIt("beneficiary",bid,"رجوع الرقم القديم (تراجع)"); await refreshPerson(bid); });
     };
     document.addEventListener("keydown",key,true); document.body.appendChild(w); q("#pf_n").focus();
   });
 }
+const callRsvp=new Map();   // call id → the trip answer it changed { id, prev, next }
 function bindCalls(root, redraw){
   root.querySelectorAll("[data-dial]").forEach(a=>a.addEventListener("click",()=>{ dialed={bid:a.dataset.dial,batchId:a.dataset.cbatch||null}; setTimeout(redraw,400); }));
   root.querySelectorAll("[data-cfix]").forEach(b=>b.onclick=async()=>{ if(await phoneFix(b.dataset.cfix)){ dialed={ bid:b.dataset.cfix, batchId:b.dataset.cbatch||null }; redraw(); } });
@@ -411,8 +505,10 @@ function bindCalls(root, redraw){
     const setCancel=async on=>{ const { data, error } = await sb.from("calls").update({ cancelled_at:on?new Date().toISOString():null, cancelled_by:on?me.id:null }).eq("id",id).select().single();
       if(error||!data){ toast(error?errMsg(error):"مش مسموحلك تمسح المكالمة دي"); return false; } C.set(id, fromC(data)); upsertRaw("cs", data); changed(); redraw(); return true; };
     if(!await setCancel(true)){ b.disabled=false; return; }
+    // a «مش هييجي» on a trip list also wrote her answer — cancelling the call puts the answer back
+    const back=callRsvp.get(id); if(back){ callRsvp.delete(id); await setRsvp(back.id, back.prev); }
     dialed=null; redraw();
-    undoable(`اتمسحت «${CALL_RES[before?.result]?.label||"المكالمة"}»`, ()=>setCancel(false));
+    undoable(`اتمسحت «${CALL_RES[before?.result]?.label||"المكالمة"}»`, async()=>{ if(!await setCancel(false)) return false; if(back){ callRsvp.set(id,back); await setRsvp(back.id, back.next); } });
   });
   root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
@@ -421,7 +517,7 @@ function bindCalls(root, redraw){
     if(error){ b.disabled=false; toast(errMsg(error)); return; }
     C.set(data.id, fromC(data)); upsertRaw("cs", data); dialed=null; changed();
     // on a trip list, «مش هيعرف ييجي» is also her answer
-    if(ctx.event_id&&b.dataset.cres==="مش هييجي"){ const r=[...EP.values()].find(x=>x.event_id===ctx.event_id&&x.beneficiary_id===bid); if(r&&r.answer!=="مش جاية") await setRsvp(r.id,{ answer:"مش جاية", adults:0, kids:0 }); }
+    if(ctx.event_id&&b.dataset.cres==="مش هييجي"){ const r=[...EP.values()].find(x=>x.event_id===ctx.event_id&&x.beneficiary_id===bid); if(r&&r.answer!=="مش جاية"){ const next={ answer:"مش جاية", adults:0, kids:0 }; callRsvp.set(data.id,{ id:r.id, prev:{ answer:r.answer, adults:r.adults, kids:r.kids }, next }); await setRsvp(r.id,next); } }
     redraw();
   });
 }
@@ -455,7 +551,10 @@ function notReceived(t,months){
   const since=mIdx(curMonth)-months+1; const got=new Set(receipts().filter(r=>r.typeId===t.id&&mIdx(r.month)>=since).map(r=>r.bid)); const last=lastByType(t.id);
   return people().filter(b=>eligible(t,b)&&!got.has(b.id)).map(b=>({b,lm:last.get(b.id)}));
 }
-async function nextCode(){ let m=0; for(const b of B.values()){ const n=parseInt(b.code,10); if(n>m) m=n; } return String(m+1).padStart(3,"0"); }
+// fresh: ask the database (a case someone just added may not have reached this screen yet)
+async function nextCode(fresh){ let codes=[...B.values()].map(b=>b.code);
+  if(fresh){ const { data } = await sb.from("beneficiaries").select("code").range(0,9999); if(data) codes=codes.concat(data.map(r=>r.code)); }
+  let m=0; for(const c of codes){ const n=parseInt(c,10); if(n>m) m=n; } return String(m+1).padStart(3,"0"); }
 
 /* ================= auth ================= */
 function showAuth(html){ $("#app").hidden = true; const a = $("#auth"); a.hidden = false; a.innerHTML = `<div class="wrap"><div class="auth"><img class="mark" src="${$("#logoImg").src}" alt="">${html}</div></div>`; }
@@ -491,7 +590,7 @@ function setupScreen(){
     const n=$("#s_n").value.trim(), u=cleanUser($("#s_u").value), p=$("#s_p").value;
     if(!n||u.length<3||p.length<minPin("manager")){ toast("اكمل البيانات — رقم المدير السري 8 أرقام على الأقل"); return; }
     $("#s_go").innerHTML=`<span class="spin"></span>`;
-    const { data, error } = await sb.functions.invoke("manage-users", { body:{action:"bootstrap", full_name:n, username:u, password:p} });
+    const { data, error } = await callFn("manage-users", {action:"bootstrap", full_name:n, username:u, password:p});
     if(error || data?.error){ $("#s_go").textContent="إنشاء حساب المدير"; toast(data?.error==="already_setup"?"فيه مدير متسجل خلاص — سجّل دخول":errMsg(error||data.error)); if(data?.error==="already_setup") loginScreen(); return; }
     const r = await sb.auth.signInWithPassword({ email:`${u}@${DOMAIN}`, password:p });
     if(r.error){ toast(errMsg(r.error)); return loginScreen(); }
@@ -557,7 +656,7 @@ function setWho(){
   document.querySelectorAll("[data-money]").forEach(b => b.hidden = !seeMoney());
 }
 function netBanner(){
-  const q = readQ().length, off = !navigator.onLine;
+  const q = myQ().length, off = !navigator.onLine;
   $("#net").innerHTML = (DEMO ? `<div class="offline demo">${ic("info")} وضع تجريبي — بيانات وهمية، مفيش أي حاجة بتتحفظ على السيرفر</div>` : "")
     + (off || fromSnapshot ? `<div class="offline" role="status">${ic("offline")} <span>مفيش إنترنت${fromSnapshot?` — بتشوف آخر نسخة محفوظة (${dLabel(fromSnapshot)})`:""}. التسليم بيتسجل ويترفع لوحده، وباقي التعديلات لما النت يرجع${q?` · <b>${num(q)}</b> تسليم مستني`:""}</span></div>`
     : q ? `<div class="offline sync" role="status">${ic("refresh")} <span>${num(q)} تسليم مستني يترفع…</span></div>` : "");
@@ -740,6 +839,18 @@ function vReports(){
   ${Object.entries(yT).map(([n,v])=>`<tr><td>${esc(n)}</td><td class="n">${num(v.n)}</td><td class="n">${num(v.p.size)}</td><td class="n">${num(v.total)} ${esc(v.unit)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">لا يوجد صرف معتمد هذه السنة بعد</td></tr>`}
   </tbody></table></div>`;
 }
+// The manager's view of what went wrong on any device: the ref users quote (#K7Q2M), when, who, where and the raw message.
+async function errLogSheet(){
+  sheet("سجل الأخطاء",`<div id="el_b"><p class="sub">بيحمّل…</p></div>`, async s=>{
+    const { data, error } = await sb.from("client_errors").select("*").order("at",{ ascending:false }).limit(100);
+    const box=s.querySelector("#el_b"); if(!box) return;
+    if(error){ box.innerHTML=`<p class="sub">${esc(errMsg(error,"settings","error_log"))}</p>`; return; }
+    box.innerHTML=`<p class="sub">آخر 100 خطأ على كل الأجهزة. لما حد يقولك كود زي <b dir="ltr">#K7Q2M</b> دوّر عليه هنا.</p>
+      <div class="tbl"><table><thead><tr><th>الكود</th><th>إمتى</th><th>مين</th><th>فين</th><th>النوع</th><th>الرسالة</th></tr></thead><tbody>
+      ${(data||[]).map(r=>`<tr><td dir="ltr"><b>#${esc(r.ref)}</b></td><td class="n">${dLabel(r.at)} ${tLabel(r.at)}</td><td>${esc(who(r.uid))}</td><td dir="ltr">${esc(r.feature)}${r.action?"/"+esc(r.action):""}</td><td dir="ltr">${esc(r.key)}</td><td class="why" dir="ltr">${esc(r.detail?.message||"")}</td></tr>`).join("")||`<tr><td colspan="6" class="empty">مفيش أخطاء متسجلة ✓</td></tr>`}
+      </tbody></table></div>`;
+  });
+}
 function vSettings(){
   const users=[...P.values()].sort((a,b)=>(a.role==="pending"?-1:0)-(b.role==="pending"?-1:0));
   return `
@@ -751,7 +862,7 @@ function vSettings(){
     <span class="chip ${u.role==="manager"?"plum":u.role==="pending"?"red":u.role==="viewer"?"grey":u.role==="helper"?"blue":""}">${ROLE_AR[u.role]}</span>${!u.active?`<span class="chip red">موقوف</span>`:""}</button>`).join("")}</div>
   <div class="bar"><button class="btn pri" id="newU">${ic("plus")}إضافة موظف</button></div>
   <div class="note green">${["manager","worker","helper","viewer"].map(r=>`• <b>${ROLE_AR[r]}</b>: ${ROLE_DESC[r]}`).join("<br>")}<br>الصلاحيات دي مقفولة من قاعدة البيانات نفسها.</div>
-  <div class="bar"><button class="btn" data-preview="worker">${ic("eye")}شوف شاشة الموظف</button><button class="btn" data-preview="helper">${ic("eye")}شوف شاشة العامل</button></div>
+  <div class="bar"><button class="btn" data-preview="worker">${ic("eye")}شوف شاشة الموظف</button><button class="btn" data-preview="helper">${ic("eye")}شوف شاشة العامل</button><button class="btn" id="errLog">${ic("alert")}سجل الأخطاء</button></div>
   <h3>أنواع المساعدات</h3>
   <div class="list">${types().map(t=>`
     <button class="item" data-type="${t.id}"><span class="grow"><span class="nm">${esc(t.name)}</span><br>
@@ -804,7 +915,7 @@ function bindView(){
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
   on("#newK","onclick",()=>newBatch());
   on("#newT","onclick",()=>openType(null));
-  on("#newU","onclick",()=>newUser());
+  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet());
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
@@ -857,12 +968,13 @@ function go(what){
   else if(what==="phones") phoneChooser();
 }
 
+let loggingOut=false;
 async function logout(){
-  const q=readQ().length;
+  const q=myQ().length;
   if(q&&!await ask(`فيه ${num(q)} تسليم لسه ماترفعوش لأن النت كان فاصل.
 لو خرجت دلوقتي هيضيعوا. استنى لما النت يرجع الأول.`,{title:"استنى شوية",ok:"اخرج برضو",cancel:"استنى",danger:true})) return;
   if(!q&&!await ask("تخرج من الحساب؟",{ok:"خروج"})) return;
-  await sb.auth.signOut(); await clearSnapshot(); writeQ([]); clearAllDrafts(); me=null; loaded=false; snapRaw=null; if(rt){ sb.removeChannel(rt); rt=null; } loginScreen();
+  loggingOut=true; await sb.auth.signOut(); loggingOut=false; await clearSnapshot(); writeQ([]); clearAllDrafts(); undoStack.length=0; me=null; loaded=false; snapRaw=null; if(rt){ sb.removeChannel(rt); rt=null; } loginScreen();
 }
 
 /* ================= preview (manager sees other roles' screens) ================= */
@@ -1004,7 +1116,8 @@ function bindSimple(){
     const bid=sv.screen.split(":")[1]; const k=K.get(bid); const it=k?.items.find(x=>x.id===el.dataset.give); if(!it) return;
     el.disabled=true; el.innerHTML=`<span class="spin" aria-hidden="true"></span>`;
     const r=await markReceived(it,true);
-    if(r==="error"){ el.disabled=false; el.textContent="سلّم"; return; }
+    if(r==="error"||r==="busy"){ el.disabled=false; el.textContent="سلّم"; return; }
+    if(r==="already") return;
     if(navigator.vibrate) navigator.vibrate(40);
     if(r==="queued") toast(`${it.name} — اتسجل، وهيترفع لما النت يرجع`); else undoable(`✓ ${it.name} استلم`, ()=>undoReceive(it.id,false,bid));
   });
@@ -1044,6 +1157,7 @@ async function loadLog(entity,id){
 async function editPerson(id){
   if(!canWrite()) return;
   const draftKey=`draft:person:${id||"new"}`;
+  const orig=id?B.get(id):null;   // as it was when the form opened — used to send only what this form changed
   const b=id?{...B.get(id)}:{code:await nextCode(),name:"",nationalId:"",phone:"",phone2:"",birth:"",caseType:"",grade:"",score:null,project:"",area:"",address:"",marital:"",job:"",income:"",housing:"",pension:"",notes:"",familySize:null,children:[],tags:[],status:"انتظار",lastReview:"",nextReview:""};
   b.tags=[...(b.tags||[])];
   b.children=[...(b.children||[])].map(k=>({...k}));
@@ -1133,8 +1247,16 @@ async function editPerson(id){
       if(prev){ if(prev.status!==rec.status) changes.push(`الحالة: ${prev.status} ← ${rec.status}`); if((prev.familySize??"")!==(rec.familySize??"")) changes.push(`أفراد الأسرة: ${prev.familySize||"—"} ← ${rec.familySize||"—"}`); if((prev.phone||"")!==rec.phone) changes.push("تغيير التليفون"); if((prev.lastReview||"")!==rec.lastReview&&rec.lastReview) changes.push(`مراجعة بتاريخ ${dLabel(rec.lastReview)}`); if((prev.children||[]).length!==rec.children.length) changes.push(`عدد الأبناء: ${(prev.children||[]).length} ← ${rec.children.length}`); }
       q("#saveP").disabled=true;
       let newId=id;
-      if(id){ if(!await run(sb.from("beneficiaries").update(toB(rec)).eq("id",id))){ q("#saveP").disabled=false; return; } }
-      else { const d=await run(sb.from("beneficiaries").insert({...toB(rec), created_by:me.id}).select("id").single()); if(!d){ q("#saveP").disabled=false; return; } newId=d.id; }
+      if(id){ const r=await patchPerson(id, orig, rec);
+        if(r.cancelled){ q("#saveP").disabled=false; return; }
+        if(r.error){ q("#saveP").disabled=false; toast(errMsg(r.error,"case","save")); return; } }
+      else {
+        let { data:d, error } = await sb.from("beneficiaries").insert({...toB(rec), created_by:me.id}).select("id").single();
+        // two people opened «حالة جديدة» at the same time and got the same number: offer the next free one
+        if(error&&errKey(error)==="dup_code"){ const nc=await nextCode(true);
+          if(await ask(`رقم ${rec.code} اتاخد لحالة تانية دلوقتي. نسجّلها برقم ${nc}؟`,{title:"الرقم اتاخد",ok:`سجّل برقم ${nc}`,cancel:"رجوع"})){ rec.code=nc; q("#p_code").value=nc; ({ data:d, error } = await sb.from("beneficiaries").insert({...toB(rec), created_by:me.id}).select("id").single()); }
+          else { q("#saveP").disabled=false; q("#p_code").focus(); return; } }
+        if(error){ q("#saveP").disabled=false; toast(errMsg(error,"case","create")); return; } newId=d.id; }
       await logIt("beneficiary",newId, prev?[g("#p_why"),...changes].filter(Boolean).join(" · ")||"تعديل بيانات":"تسجيل الحالة");
       clearDraft(draftKey); toast("تم الحفظ ✓"); await refreshPerson(newId); viewPerson(newId);
     };
@@ -1230,9 +1352,10 @@ function reviewSheet(id){
       const cur=B.get(id); const fam=q("#r_f").value?+q("#r_f").value:null;
       const parts=["مراجعة ميدانية", q("#r_by").value.trim()&&`بواسطة ${q("#r_by").value.trim()}`, cur.status!==q("#r_s").value&&`الحالة: ${cur.status} ← ${q("#r_s").value}`, (cur.familySize??null)!==fam&&`أفراد الأسرة: ${cur.familySize||"—"} ← ${fam||"—"}`, q("#r_t").value.trim()].filter(Boolean);
       q("#r_go").disabled=true;
-      if(await run(sb.from("beneficiaries").update({last_review:d, next_review:nx, family_size:fam, status:q("#r_s").value, grade:q("#r_g").value}).eq("id",id))){
-        await logIt("beneficiary",id,parts.join(" · ")); toast("تم تسجيل المراجعة ✓"); await refreshPerson(id); viewPerson(id);
-      } else q("#r_go").disabled=false;
+      const r=await patchPerson(id, cur, {...cur, lastReview:d, nextReview:nx, familySize:fam, status:q("#r_s").value, grade:q("#r_g").value});
+      if(r.cancelled){ q("#r_go").disabled=false; return; }
+      if(r.error){ q("#r_go").disabled=false; toast(errMsg(r.error,"case","review")); return; }
+      await logIt("beneficiary",id,parts.join(" · ")); toast("تم تسجيل المراجعة ✓"); await refreshPerson(id); viewPerson(id);
     };
   });
 }
@@ -1246,13 +1369,18 @@ function singleGive(bid){
     s.querySelector("#s_t").onchange=e=>{ s.querySelector("#s_v").value=T.get(e.target.value).amount; };
     s.querySelector("#s_go").onclick=async()=>{
       const t=T.get(s.querySelector("#s_t").value); const m=s.querySelector("#s_m").value||curMonth;
+      const val=+s.querySelector("#s_v").value||0; if(!t){ toast("اختار نوع المساعدة"); return; } if(val<=0){ toast("اكتب قيمة أكبر من صفر"); s.querySelector("#s_v").focus(); return; }
       s.querySelector("#s_go").disabled=true;
       const k=await run(sb.from("batches").insert({title:`صرف فردي ${t.name} — ${b.name}`,type_id:t.id,type_name:t.name,unit:t.unit,template:t.template,month:m,status:"مصروف",single:true,created_by:me.id,approved_at:new Date().toISOString(),approved_by:me.id,paid_at:new Date().toISOString()}).select("id").single());
       if(!k){ s.querySelector("#s_go").disabled=false; return; }
-      const it={...itemFor(b,+s.querySelector("#s_v").value||0,s.querySelector("#s_r").value||"صرف فردي"),received:true};
-      await run(sb.from("batch_items").insert({...toI(it,k.id,0), received_by:me.id}));
+      const it={...itemFor(b,val,s.querySelector("#s_r").value||"صرف فردي"),received:true};
+      const { error } = await sb.from("batch_items").insert({...toI(it,k.id,0), received_by:me.id});
+      if(error){   // never leave an empty «مصروف» list behind, and never say «تم» when it wasn't
+        await sb.from("batches").update({ archived_at:new Date().toISOString(), archived_by:me.id }).eq("id",k.id);
+        s.querySelector("#s_go").disabled=false; toast(`الصرف ماتسجلش — ${errMsg(error,"single_give","item")}`); return; }
       await logIt("batch",k.id,"صرف فردي"); await logIt("beneficiary",bid,`صرف فردي: ${t.name} ${it.value} ${t.unit}`);
       toast("تم تسجيل الصرف ✓"); await refreshBatch(k.id); viewPerson(bid);
+      await settleBatch(K.get(k.id));   // and out of the cash box / the store, like any closed list
     };
   });
 }
@@ -1659,7 +1787,7 @@ function newUser(){
       const n=q("#u_n").value.trim(), u=cleanUser(q("#u_u").value), p=q("#u_p").value.trim(), r=s.querySelector("input[name=u_r]:checked").value;
       if(!n||u.length<3||p.length<minPin(r)){ toast(`اكمل البيانات — الرقم السري ${minPin(r)} أرقام على الأقل${r==="manager"?" للمدير":""}`); return; }
       q("#u_go").disabled=true;
-      const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"create", full_name:n, username:u, password:p, role:s.querySelector("input[name=u_r]:checked").value} });
+      const { data, error } = await callFn("manage-users",{action:"create", full_name:n, username:u, password:p, role:s.querySelector("input[name=u_r]:checked").value});
       if(error||data?.error){ q("#u_go").disabled=false; toast(data?.error==="exists"?"الرقم ده عليه حساب فعلاً":errMsg(error||data.error)); return; }
       const msg=`أهلاً ${n}\nده حسابك على نظام جمعية دار الإكرام:\nالرابط: ${location.origin}\nرقم الدخول: ${u}\nالرقم السري: ${p}`;
       sheet("تم إنشاء الحساب ✓",`<textarea class="phones" readonly style="min-height:150px">${esc(msg)}</textarea>
@@ -1682,7 +1810,7 @@ function openUser(uid){
     q("#e_pin").onclick=async()=>{
       const p=u.role==="manager"?String(Math.floor(10000000+Math.random()*90000000)):String(Math.floor(100000+Math.random()*900000));
       if(!await ask("هيتعمل رقم سري جديد للحساب ده، والقديم مش هيشتغل تاني.",{title:"رقم سري جديد؟",ok:"اعمل رقم جديد"})) return;
-      const { data, error } = await sb.functions.invoke("manage-users",{ body:{action:"reset_password", user_id:uid, password:p} });
+      const { data, error } = await callFn("manage-users",{action:"reset_password", user_id:uid, password:p});
       if(error||data?.error){ toast(errMsg(error||data.error)); return; }
       const msg=`الرقم السري الجديد لحسابك على نظام دار الإكرام: ${p}`;
       sheet("تم ✓",`<p>الرقم السري الجديد: <b dir="ltr" style="font-size:22px">${p}</b></p><div class="bar"><a class="btn pri" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center" href="https://wa.me/${(u.username||"").startsWith("01")?"2"+u.username:""}?text=${encodeURIComponent(msg)}">${ic("chat")}ابعته واتساب</a></div>`);
@@ -2193,6 +2321,15 @@ const lowStock = memo(() => items().filter(i=>(stockOf().get(i.id)||0) < (+i.min
 const money = n => `${num(Math.round(n*100)/100)} ج`;
 const byDate = (a,b) => (b.date||"").localeCompare(a.date||"") || (b.created_at||"").localeCompare(a.created_at||"");
 async function ins(table, row){ const { data, error } = await sb.from(table).insert(row).select().single(); if(error) throw error; ROW_TABLES[table].set(data.id, data); return data; }
+/* Several money rows that belong together (a donation + its cash entry, a transfer's two sides…) are written in ONE
+   database transaction: all of them or none — never a donation without its entry, or money that left the cash box
+   but never reached the bank. "@name" in a row = the id of an earlier row in the same call. */
+async function writeMany(ops){
+  const { data, error } = await sb.rpc("write_many", { ops });
+  if(error) throw error;
+  for(const x of data.rows||[]) ROW_TABLES[x.t]?.set(x.row.id, x.row);
+  return data.named||{};
+}
 async function cancelRow(table, id){ const { data, error } = await sb.from(table).update({ cancelled_at:new Date().toISOString(), cancelled_by:me.id }).eq("id",id).select().single(); if(error) throw error; MONEY_TABLES[table].set(id, data); }
 
 function vMoney(){
@@ -2263,7 +2400,7 @@ function bindMoney(v){
   v.querySelectorAll("[data-donor]").forEach(el=>el.onclick=()=>donorView(el.dataset.donor));
   v.querySelectorAll("[data-cdon]").forEach(el=>el.onclick=async()=>{ const d=DO.get(el.dataset.cdon);
     if(!await ask(`إيصال ${d.receipt_no} (${d.donor_name||"فاعل خير"}) هيتلغي، ومعاه ${d.kind==="نقدي"?"الفلوس اللي دخلت الحسابات":"الكمية اللي دخلت المخزن"}. هيفضل في السجل مشطوب.`,{title:"إلغاء التبرع؟",ok:"إلغاء التبرع",danger:true})) return;
-    try{ await cancelRow("donations",d.id); for(const r of LG.values()) if(r.donation_id===d.id&&live(r)) await cancelRow("ledger",r.id); for(const r of SM.values()) if(r.donation_id===d.id&&live(r)) await cancelRow("stock_moves",r.id); changed(); toast("اتلغى ✓"); }catch(e){ toast(errMsg(e)); } });
+    try{ await writeMany([{ t:"donations", op:"cancel", id:d.id }, { t:"ledger", op:"cancel", donation_id:d.id }, { t:"stock_moves", op:"cancel", donation_id:d.id }]); changed(); toast("اتلغى ✓"); }catch(e){ toast(`ماتلغاش (ولا حاجة اتغيرت) — ${errMsg(e,"money","cancel_donation")}`); } });
   v.querySelectorAll("[data-clg]").forEach(el=>el.onclick=async()=>{ if(!await ask("الحركة دي هتتلغي وتفضل في السجل مشطوبة.",{title:"إلغاء الحركة؟",ok:"إلغاء",danger:true})) return; try{ await cancelRow("ledger",el.dataset.clg); changed(); }catch(e){ toast(errMsg(e)); } });
   on("#m_xDon",()=>{ const rows=[["إيصال","التاريخ","المتبرع","النوع","المبلغ","الصنف","الكمية","طريقة الدفع","الحساب","لـ","ملاحظات","ملغي"]];
     [...DO.values()].filter(d=>(d.date||"").startsWith(mv.month)).sort(byDate).forEach(d=>rows.push([d.receipt_no,d.date,d.donor_name,d.kind,d.kind==="نقدي"?+d.amount:"",IT.get(d.item_id)?.name||"",d.kind==="عيني"?+d.qty:"",d.method,d.account,d.purpose,d.notes,d.cancelled_at?"ملغي":""]));
@@ -2303,17 +2440,19 @@ function donationSheet(){
       if(kind==="نقدي"&&amount<=0){ toast("اكتب المبلغ"); return; } if(kind==="عيني"&&qty<=0){ toast("اكتب الكمية"); return; }
       q("#d_save").disabled=true;
       try{
-        let donor=name?donors().find(x=>norm(x.name)===norm(name)):null;
-        if(name&&!donor) donor=await ins("donors",{ name, kind:q("#d_dk").value, created_by:me.id });
+        const ops=[], donor=name?donors().find(x=>norm(x.name)===norm(name)):null;
+        if(name&&!donor) ops.push({ t:"donors", op:"insert", as:"dn", row:{ name, kind:q("#d_dk").value, created_by:me.id } });
         let itemId=null;
         if(kind==="عيني"){ itemId=q("#d_item").value;
-          if(itemId==="__new"){ const [nm,un]=q("#d_inm").value.split(/[—\-–]/).map(x=>x.trim()); if(!nm){ toast("اكتب اسم الصنف"); q("#d_save").disabled=false; return; } itemId=(await ins("items",{ name:nm, unit:un||"قطعة" })).id; } }
-        const d=await ins("donations",{ date:q("#d_date").value||today, donor_id:donor?.id||null, donor_name:name||"فاعل خير", kind, amount:kind==="نقدي"?amount:0, item_id:itemId, qty:kind==="عيني"?qty:0,
-          method:q("#d_meth").value, account:q("#d_acc").value, purpose:q("#d_purpose").value.trim(), notes:q("#d_notes").value.trim(), created_by:me.id });
-        if(kind==="نقدي") await ins("ledger",{ date:d.date, direction:"in", amount, account:d.account, category:"تبرعات", party:d.donor_name, donation_id:d.id, note:[d.purpose,d.method].filter(Boolean).join(" · "), created_by:me.id });
-        else await ins("stock_moves",{ item_id:itemId, date:d.date, qty, reason:"تبرع", donation_id:d.id, note:d.donor_name, created_by:me.id });
+          if(itemId==="__new"){ const [nm,un]=q("#d_inm").value.split(/[—\-–]/).map(x=>x.trim()); if(!nm){ toast("اكتب اسم الصنف"); q("#d_save").disabled=false; return; } ops.push({ t:"items", op:"insert", as:"it", row:{ name:nm, unit:un||"قطعة" } }); itemId="@it"; } }
+        const date=q("#d_date").value||today, dname=name||"فاعل خير", purpose=q("#d_purpose").value.trim(), method=q("#d_meth").value, account=q("#d_acc").value;
+        ops.push({ t:"donations", op:"insert", as:"d", row:{ date, donor_id:donor?donor.id:name?"@dn":null, donor_name:dname, kind, amount:kind==="نقدي"?amount:0, item_id:itemId, qty:kind==="عيني"?qty:0,
+          method, account, purpose, notes:q("#d_notes").value.trim(), created_by:me.id } });
+        if(kind==="نقدي") ops.push({ t:"ledger", op:"insert", row:{ date, direction:"in", amount, account, category:"تبرعات", party:dname, donation_id:"@d", note:[purpose,method].filter(Boolean).join(" · "), created_by:me.id } });
+        else ops.push({ t:"stock_moves", op:"insert", row:{ item_id:itemId, date, qty, reason:"تبرع", donation_id:"@d", note:dname, created_by:me.id } });
+        const { d } = await writeMany(ops);
         changed(); closeSheet(); toast(`اتسجل ✓ إيصال رقم ${d.receipt_no}`); if(q("#d_print").checked) doPrint(receiptHTML(d));
-      }catch(e){ q("#d_save").disabled=false; toast(errMsg(e)); }
+      }catch(e){ q("#d_save").disabled=false; toast(`التبرع ماتسجلش خالص (ومفيش إيصال اتعمل) — ${errMsg(e,"money","donation")}`); }
     };
   });
 }
@@ -2334,7 +2473,7 @@ function entrySheet(dir){
       if(dir==="out"&&amount>(balances()[q("#e_acc").value]||0)&&!await ask(`الرصيد في ${q("#e_acc").value} ${money(balances()[q("#e_acc").value]||0)} بس.`,{title:"الرصيد مش مكفي",ok:"سجّل برضو"})) return;
       q("#e_save").disabled=true;
       try{ await ins("ledger",{ date:q("#e_date").value||today, direction:dir, amount, account:q("#e_acc").value, category:q("#e_cat").value.trim()||"أخرى", party:q("#e_party").value.trim(), note:q("#e_note").value.trim(), created_by:me.id }); changed(); closeSheet(); toast("اتسجل ✓"); }
-      catch(e){ q("#e_save").disabled=false; toast(errMsg(e)); } };
+      catch(e){ q("#e_save").disabled=false; toast(`ماتسجلش — ${errMsg(e,"money","entry")}`); } };
   });
 }
 function transferSheet(){
@@ -2343,9 +2482,9 @@ function transferSheet(){
     const q=x=>s.querySelector(x);
     q("#t_go").onclick=async()=>{ const amount=+q("#t_amt").value||0, from=q("#t_from").value, to=ACCOUNTS.find(a=>a!==from); if(amount<=0){ toast("اكتب المبلغ"); return; }
       q("#t_go").disabled=true; const date=q("#t_date").value||today;
-      try{ await ins("ledger",{ date, direction:"out", amount, account:from, category:"تحويل", party:to, note:`تحويل لـ${to}`, created_by:me.id });
-        await ins("ledger",{ date, direction:"in", amount, account:to, category:"تحويل", party:from, note:`تحويل من ${from}`, created_by:me.id }); changed(); closeSheet(); toast("اتحول ✓"); }
-      catch(e){ q("#t_go").disabled=false; toast(errMsg(e)); } };
+      try{ await writeMany([{ t:"ledger", op:"insert", row:{ date, direction:"out", amount, account:from, category:"تحويل", party:to, note:`تحويل لـ${to}`, created_by:me.id } },
+          { t:"ledger", op:"insert", row:{ date, direction:"in", amount, account:to, category:"تحويل", party:from, note:`تحويل من ${from}`, created_by:me.id } }]); changed(); closeSheet(); toast("اتحول ✓"); }
+      catch(e){ q("#t_go").disabled=false; toast(`التحويل ماتسجلش (ولا جنيه اتحرك) — ${errMsg(e,"money","transfer")}`); } };
   });
 }
 function itemSheet(){
@@ -2354,9 +2493,10 @@ function itemSheet(){
     <div class="bar"><button class="btn pri" id="i_go">${ic("save")}حفظ</button></div>`, s=>{
     const q=x=>s.querySelector(x);
     q("#i_go").onclick=async()=>{ const name=q("#i_n").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; } q("#i_go").disabled=true;
-      try{ const it=await ins("items",{ name, unit:q("#i_u").value.trim()||"قطعة", min_qty:+q("#i_min").value||0 }); const q0=+q("#i_q").value||0;
-        if(q0) await ins("stock_moves",{ item_id:it.id, qty:q0, reason:"جرد", note:"رصيد أول مدة", created_by:me.id }); changed(); closeSheet(); toast("اتضاف ✓"); }
-      catch(e){ q("#i_go").disabled=false; toast(errMsg(e)); } };
+      try{ const q0=+q("#i_q").value||0, ops=[{ t:"items", op:"insert", as:"it", row:{ name, unit:q("#i_u").value.trim()||"قطعة", min_qty:+q("#i_min").value||0 } }];
+        if(q0) ops.push({ t:"stock_moves", op:"insert", row:{ item_id:"@it", qty:q0, reason:"جرد", note:"رصيد أول مدة", created_by:me.id } });
+        await writeMany(ops); changed(); closeSheet(); toast("اتضاف ✓"); }
+      catch(e){ q("#i_go").disabled=false; toast(`الصنف ماتضافش — ${errMsg(e,"money","item")}`); } };
   });
 }
 function moveSheet(itemId){
@@ -2375,9 +2515,9 @@ function moveSheet(itemId){
       const it=IT.get(q("#s_it").value), out=q("#s_dir").value==="out", have=stockOf().get(it.id)||0;
       if(out&&n>have&&!await ask(`الموجود ${num(have)} ${it.unit} بس.`,{title:"الكمية مش موجودة",ok:"سجّل برضو"})) return;
       q("#s_go").disabled=true; const date=q("#s_d").value||today, cost=+q("#s_cost").value||0;
-      try{ await ins("stock_moves",{ item_id:it.id, date, qty:out?-n:n, reason:q("#s_r").value, note:q("#s_note").value.trim(), created_by:me.id });
-        if(!out&&q("#s_r").value==="شراء"&&cost>0) await ins("ledger",{ date, direction:"out", amount:cost, account:"الخزينة", category:"شراء مواد", party:"", note:`${num(n)} ${it.unit} ${it.name}`, created_by:me.id });
-        changed(); closeSheet(); toast("اتسجل ✓"); }catch(e){ q("#s_go").disabled=false; toast(errMsg(e)); } };
+      try{ const ops=[{ t:"stock_moves", op:"insert", row:{ item_id:it.id, date, qty:out?-n:n, reason:q("#s_r").value, note:q("#s_note").value.trim(), created_by:me.id } }];
+        if(!out&&q("#s_r").value==="شراء"&&cost>0) ops.push({ t:"ledger", op:"insert", row:{ date, direction:"out", amount:cost, account:"الخزينة", category:"شراء مواد", party:"", note:`${num(n)} ${it.unit} ${it.name}`, created_by:me.id } });
+        await writeMany(ops); changed(); closeSheet(); toast("اتسجل ✓"); }catch(e){ q("#s_go").disabled=false; toast(`الحركة ماتسجلتش — ${errMsg(e,"money","stock_move")}`); } };
   });
 }
 function itemHistory(id){
@@ -2487,6 +2627,25 @@ function setRsvp(id, patch, wait){
       changed(); };
     const next=(rsvpChain.get(id)||Promise.resolve()).then(run,run); rsvpChain.set(id,next); next.then(res,res);
   }, wait?500:0)));
+}
+/* One tick on trip day («أخد» / حضر) changes only its own slot in the database, so two phones ticking the same family
+   never erase each other. Shows at once, then the row from the database (in order with this family's other saves). */
+function epTick(id, local, fn, args){
+  const cur=EP.get(id); if(!cur) return Promise.resolve(false);
+  EP.set(id,{ ...cur, ...local }); changed();
+  const go=async()=>{ const { data, error } = await sb.rpc(fn, { ep:id, ...args });
+    if(error){ toast(`العلامة ماتسجلتش — ${errMsg(error,"trip",fn)}`); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,{ ...fresh, ...(rsvpPending.get(id)||{}) }); changed(); return false; }
+    EP.set(id,{ ...data, ...(rsvpPending.get(id)||{}) }); changed(); return true; };
+  const next=(rsvpChain.get(id)||Promise.resolve()).then(go,go); rsvpChain.set(id,next); return next;
+}
+// A trip's supervisors / giveaway items are lists edited from several phones: apply this phone's change on top of the
+// newest copy in the database (matched by id) instead of writing the whole list over it.
+async function saveEventList(id, col, next, base){
+  const { data:cur, error:e1 } = await sb.from("events").select(col).eq("id",id).single();
+  if(e1){ toast(errMsg(e1,"trip",col)); return false; }
+  const list=mergeById(base||[], next, cur[col]||[]);
+  const { data, error } = await sb.from("events").update({ [col]:list }).eq("id",id).select().single();
+  if(error){ toast(errMsg(error,"trip",col)); return false; } EV.set(id,data); changed(); return true;
 }
 // "ولاد 5 · بنات 4 — من 4 لـ 6: 3 (2 ولد، 1 بنت) · …"
 function bandsText(bd, html){
@@ -2710,8 +2869,7 @@ function supPanel(id, editing){
     ${sups.length&&kids.length?`<div class="bar"><button class="btn" id="su_print">${ic("printer")}طباعة المجموعات</button><button class="btn sm" id="su_x">Excel المجموعات</button></div>`:""}`;
 }
 async function saveSups(id, list, msg, undoPrev){
-  const { data, error } = await sb.from("events").update({ supervisors:list }).eq("id",id).select().single();
-  if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed();
+  if(!await saveEventList(id, "supervisors", list, EV.get(id).supervisors)) return false;
   if(undoPrev) undoable(msg, ()=>saveSups(id, undoPrev)); else if(msg) toast(msg);
   return true;
 }
@@ -2791,7 +2949,8 @@ function bindDay(s, id, setF, setQ){
     const came=v==="reset"?{}:{ a:Array.from({length:+r.adults||0},()=>v==="1"), k:Array.from({length:+r.kids||0},()=>v==="1"), r:reserveOf(r).map(x=>x.coming===false?false:v==="1") };
     setRsvp(r.id,{ came }); undoable(`${b.name}: ${v==="1"?"حضروا":v==="0"?"ماجوش":"اترجعت"}`, ()=>setRsvp(r.id,{ came:prev })); });
   s.querySelectorAll("[data-dp]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.dp), g=el.dataset.g, i=+el.dataset.i, c=JSON.parse(JSON.stringify(r.came||{}));
-    const len=g==="a"?+r.adults||0:g==="k"?+r.kids||0:+r.reserve||0; c[g]=Array.from({length:len},(_,j)=>(c[g]||[])[j]??false); c[g][i]=el.checked; setRsvp(r.id,{ came:c }); });
+    const len=g==="a"?+r.adults||0:g==="k"?+r.kids||0:+r.reserve||0; c[g]=Array.from({length:len},(_,j)=>(c[g]||[])[j]??false); c[g][i]=el.checked;
+    epTick(r.id,{ came:c },"ep_came",{ grp:g, idx:i, len, val:el.checked }); });
   s.querySelectorAll("[data-dprint]").forEach(el=>el.onclick=()=>doPrint(eventHTML(id,"fam",true,false,+el.dataset.dprint,dayOrder(id)), `${EV.get(id).title} — باص ${el.dataset.dprint}`));
   const rp=s.querySelector("#d_rep"); if(rp) rp.onclick=()=>doPrint(attendanceHTML(id), `${EV.get(id).title} — الحضور`);
   const dx=s.querySelector("#d_x"); if(dx) dx.onclick=()=>attendanceXlsx(id);
@@ -2889,7 +3048,7 @@ function bindGift(s, id){
   if(gl&&gl.open&&!giftLogs.has(id)) loadGiftLog(id);
   if(q("#g_logr")) q("#g_logr").onclick=()=>loadGiftLog(id);
   const gn=gid=>(EV.get(id).gifts||[]).find(g=>g.id===gid)?.name||"";
-  const save=async gifts=>{ const { data, error } = await sb.from("events").update({ gifts }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return false; } EV.set(id,data); changed(); return true; };
+  const save=gifts=>saveEventList(id, "gifts", gifts, EV.get(id).gifts);
   const gq2=q("#g_qty"); if(gq2) gq2.onchange=()=>{ q("#g_qn").hidden=gq2.value!=="fixed"; q("#g_extra").hidden=gq2.value==="one"; };
   if(q("#g_add")) q("#g_add").onclick=async()=>{ const name=q("#g_new").value.trim(); if(!name){ toast("اكتب اسم الصنف"); return; }
     const k=q("#g_qty").value, xn=k!=="one"?q("#g_xn").value.trim():"";
@@ -2902,18 +3061,21 @@ function bindGift(s, id){
   const bindSel=(sel,k)=>{ const el=q(sel); if(el) el.onchange=()=>{ st[k]=el.value; refreshSheet(); }; };
   bindSel("#g_who","who"); bindSel("#g_ord","order"); bindSel("#g_per","per"); bindSel("#g_fam","fam"); bindSel("#g_crit","crit"); bindSel("#g_other","other"); bindSel("#g_min","min"); bindSel("#g_max","max");
   const gq=q("#g_q"); if(gq) gq.oninput=()=>{ st.q=gq.value; const pos=gq.selectionStart; refreshSheet(); const n=$("#g_q"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
-  s.querySelectorAll("[data-gift]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gift), k=el.dataset.k, item=st.item, got=JSON.parse(JSON.stringify(r.got||{}));
-    const cur=got[k]||[]; got[k]=el.checked?[...new Set([...cur,item])]:cur.filter(x=>x!==item); if(!got[k].length) delete got[k];
-    const prev=r.got||{}, b=B.get(r.beneficiary_id), pp=dayPeople(r,b).find(x=>`${x.g}:${x.i}`===k);
-    setRsvp(r.id,{ got }); logGift(id, `${el.checked?"✓":"✗ اتشالت علامة"} ${pp?.label||""} (${pp?.kind||""}، ${b.name} ${b.code}) — ${gn(item)}`);
-    if(el.checked) undoable("اتعلّم «أخد»", ()=>{ setRsvp(r.id,{ got:prev }); logGift(id, `↶ تراجع: ${pp?.label||""} (${b.code}) — ${gn(item)}`); }); });
+  // got after one tick (on/off) — what the database will do, shown right away
+  const gotWith=(got,k,item,on,fam)=>{ const g=JSON.parse(JSON.stringify(got||{}));
+    if(on) g[k]=[...new Set([...(g[k]||[]),item])]; else for(const x of Object.keys(g)) if(fam||x===k){ g[x]=g[x].filter(y=>y!==item); if(!g[x].length) delete g[x]; }
+    return g; };
+  const tick=(r,k,item,on,fam=false)=>epTick(r.id,{ got:gotWith(EP.get(r.id).got,k,item,on,fam) },"ep_got",{ item, slot:k, is_on:on, whole_family:fam });
+  s.querySelectorAll("[data-gift]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gift), k=el.dataset.k, item=st.item, on=el.checked;
+    const b=B.get(r.beneficiary_id), pp=dayPeople(r,b).find(x=>`${x.g}:${x.i}`===k);
+    tick(r,k,item,on); logGift(id, `${on?"✓":"✗ اتشالت علامة"} ${pp?.label||""} (${pp?.kind||""}، ${b.name} ${b.code}) — ${gn(item)}`);
+    // undo takes back this one tick only (not the whole family's ticks from before)
+    if(on) undoable("اتعلّم «أخد»", ()=>{ tick(EP.get(r.id),k,item,false); logGift(id, `↶ تراجع: ${pp?.label||""} (${b.code}) — ${gn(item)}`); }); });
   // once per family: tick = the first one listed (⭐) gets it; untick = nobody in the family has it
-  s.querySelectorAll("[data-gfam]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gfam), item=st.item, got=JSON.parse(JSON.stringify(r.got||{})), prev=r.got||{};
-    if(el.checked){ const k=el.dataset.k; got[k]=[...new Set([...(got[k]||[]),item])]; }
-    else for(const k of Object.keys(got)){ got[k]=got[k].filter(x=>x!==item); if(!got[k].length) delete got[k]; }
-    const b=B.get(r.beneficiary_id), pp=el.checked?dayPeople(r,b).find(x=>`${x.g}:${x.i}`===el.dataset.k):null;
-    setRsvp(r.id,{ got }); logGift(id, el.checked?`✓ أسرة ${b.name} (${b.code}) — ${gn(item)}${pp?` — أخدها ${pp.label}`:""}`:`✗ اتشالت علامة أسرة ${b.name} (${b.code}) — ${gn(item)}`);
-    if(el.checked) undoable("الأسرة اتعلّمت «أخدت»", ()=>{ setRsvp(r.id,{ got:prev }); logGift(id, `↶ تراجع: أسرة ${b.name} (${b.code}) — ${gn(item)}`); }); });
+  s.querySelectorAll("[data-gfam]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.gfam), item=st.item, k=el.dataset.k, on=el.checked;
+    const b=B.get(r.beneficiary_id), pp=on?dayPeople(r,b).find(x=>`${x.g}:${x.i}`===k):null;
+    tick(r,k,item,on,!on); logGift(id, on?`✓ أسرة ${b.name} (${b.code}) — ${gn(item)}${pp?` — أخدها ${pp.label}`:""}`:`✗ اتشالت علامة أسرة ${b.name} (${b.code}) — ${gn(item)}`);
+    if(on) undoable("الأسرة اتعلّمت «أخدت»", ()=>{ tick(EP.get(r.id),k,item,false); logGift(id, `↶ تراجع: أسرة ${b.name} (${b.code}) — ${gn(item)}`); }); });
   if(q("#g_print")) q("#g_print").onclick=()=>{ const html=giftPanel(id), tmp=document.createElement("div"); tmp.innerHTML=html;
     const e=EV.get(id), name=(e.gifts||[]).find(g=>g.id===st.item)?.name||"";
     tmp.querySelectorAll("details.taken").forEach(d=>d.remove()); const rows=[...tmp.querySelectorAll(".gp")].map(l=>[l.querySelector(".nm").textContent, l.querySelectorAll(".sub")[0].textContent, l.querySelectorAll(".sub")[1].textContent]);
@@ -3199,6 +3361,11 @@ async function saveFile(filename,blob){
 try{ if(localStorage.getItem("big")) document.body.classList.add("big"); }catch(e){}
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{ view=b.dataset.v; window.scrollTo(0,0); render(); });
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
-sb.auth.onAuthStateChange((ev)=>{ if(ev==="SIGNED_OUT"){ me=null; } });
+// Signed out by itself (session ended, password reset from another device…): say so plainly instead of letting every save
+// fail with «مش مسموحلك». Deliveries waiting on this device and form drafts stay; they go up after signing in again.
+sb.auth.onAuthStateChange((ev)=>{
+  if(ev==="SIGNED_OUT"){ const was=me; me=null; if(was&&!loggingOut){ authLost=true; closeSheet(); loginScreen(); toast(ERR_TEXT.auth_expired); } }
+  else if(ev==="SIGNED_IN"||ev==="TOKEN_REFRESHED"){ authLost=false; if(me) flushQueue(); }
+});
 netBanner();
 boot();

@@ -1,7 +1,7 @@
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, byName, age, mIdx, mLabel, toNumber, pickFromText } from "../core.js";
+import { parseNID, latinDigits, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, byName, mergeById, age, mIdx, mLabel, toNumber, pickFromText } from "../core.js";
 
 const today = new Date("2026-09-24T12:00:00");
 
@@ -336,4 +336,12 @@ test("byName sorts Arabic names alphabetically", () => {
 test("byName treats Persian ی as ي", () => {
   assert.deepEqual(["ناریمان","ناصر","ناهد"].sort(byName), ["ناريمان".replace("ي","ی"),"ناصر","ناهد"].sort(byName));
   assert.deepEqual(["شرین","شريف","سما"].sort(byName), ["سما","شريف","شرین"]);
+});
+
+test("mergeById keeps other phones' changes and applies mine", () => {
+  const base = [{ id: "a", n: 1 }, { id: "b", n: 1 }];
+  const theirs = [{ id: "a", n: 1 }, { id: "b", n: 2 }, { id: "c", n: 1 }];   // someone edited b and added c
+  const mine = [{ id: "a", n: 5 }, { id: "d", n: 1 }];                       // I edited a, removed b, added d
+  assert.deepEqual(mergeById(base, mine, theirs), [{ id: "a", n: 5 }, { id: "c", n: 1 }, { id: "d", n: 1 }]);
+  assert.deepEqual(mergeById(base, base, theirs), theirs);
 });
