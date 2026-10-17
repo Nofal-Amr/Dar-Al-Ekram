@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.80";
+export const VERSION = "1.3.81";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -423,7 +423,7 @@ function candidates(t, { month, week, dow = 6, cooldown, caseTypes, tag, fromBat
 }
 // Students only matter for a list that is about them (school meals, «لكل طالب», or a filter on students) — not for fish or oil.
 const stuType = (id, name) => id==="schoolmeals" || /مدرس|مدارس|طالب|طلاب|دراس/.test(name||"");
-const stuPlan = (st, t) => st.mode==="student" || st.need==="students" || +st.minStu>0 || stuType(t?.id, t?.name);
+const stuPlan = (st, t) => st.mode==="student" || (st.mode==="tiers"&&st.tierBy==="students") || st.need==="students" || +st.minStu>0 || stuType(t?.id, t?.name);
 const stuOn = k => !!(k.basis?.stu || k.basis?.mode==="student" || stuType(k.typeId, k.typeName));
 function whyLine(x, t, stu = true){
   const p=[x.missed?"ماجاتش تستلم المرة اللي فاتت":"", stu&&x.students!=null&&x.stuSrc!=="none"?`${x.students} طالب${x.stuSrc==="list"?" (من كشف المدارس)":""}`:"", x.b.score!=null?`الدرجة ${x.b.score}%`:x.b.grade?`تقدير ${x.b.grade}`:"", x.fam?`${x.fam} أفراد`:"عدد الأفراد مش متسجل", x.lm?`آخر ${t.name}: ${mLabel(x.lm)}`:`ماخدتش ${t.name} قبل كده`];
@@ -1838,7 +1838,7 @@ function newBatch(){
   const ts=types(); if(!ts.length){ toast("أضف نوع مساعدة الأول من الإعدادات"); return; }
   const t0=ts[0];
   const st={ typeId:t0.id, month:curMonth, week:"", dow:6, donor:"", cooldown:0, caseTypes:[...(t0.caseTypes||[])], tag:"",
-    mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, total:"", count:"", by:"score", missedFirst:true,
+    mode:t0.template==="kind"&&t0.unit==="وجبة"?"member":"fixed", per:t0.amount||1, cut:3, small:0.5, big:1, tierBy:"family", total:"", count:"", by:"score", missedFirst:true,
     fromBatch:"", onlyLeft:"no", need:"", minStu:"",
     removed:new Set(), added:[], values:{}, showRest:false, showOut:false };
   const srcLists=batches().filter(k=>counts(k)&&!k.single);
@@ -1869,7 +1869,7 @@ function newBatch(){
       <label class="rolec"><input type="radio" name="n_mode" value="fixed"><span><b>نفس الكمية لكل أسرة</b><small><input type="number" id="n_per_f" min="0" step="any" class="mini"> <span class="u"></span> لكل أسرة</small></span></label>
       <label class="rolec"><input type="radio" name="n_mode" value="member"><span><b>حسب عدد الأفراد</b><small><input type="number" id="n_per_m" min="0" step="any" class="mini"> <span class="u"></span> لكل فرد — مثال: وجبة لكل فرد</small></span></label>
       <label class="rolec"><input type="radio" name="n_mode" value="student"><span><b>حسب عدد الطلاب</b><small><input type="number" id="n_per_s" min="0" step="any" class="mini"> <span class="u"></span> لكل طالب — مثال: وجبة مدرسية لكل طالب</small></span></label>
-      <label class="rolec"><input type="radio" name="n_mode" value="tiers"><span><b>شرائح</b><small>لحد <input type="number" id="n_cut" min="1" class="mini"> أفراد = <input type="number" id="n_small" min="0" step="any" class="mini"> <span class="u"></span>، وأكتر = <input type="number" id="n_big" min="0" step="any" class="mini"> <span class="u"></span></small></span></label>
+      <label class="rolec"><input type="radio" name="n_mode" value="tiers"><span><b>شرائح</b><small>لحد <input type="number" id="n_cut" min="0" class="mini"> <select id="n_tby" class="mini" aria-label="على حسب"><option value="family">أفراد</option><option value="students">طلاب</option></select> = <input type="number" id="n_small" min="0" step="any" class="mini"> <span class="u"></span>، وأكتر = <input type="number" id="n_big" min="0" step="any" class="mini"> <span class="u"></span></small></span></label>
     </div>
     <div class="grid2">
       <label class="f">الكمية المتاحة (فاضي = يكفي الكل)<input type="number" id="n_total" min="0" step="any" placeholder="مثال: 300"></label>
@@ -1884,12 +1884,12 @@ function newBatch(){
     const fillDays=()=>{ const ds=weekdaysOf(st.month, st.dow); if(+st.week>ds.length) st.week="";
       q("#n_w").innerHTML=`<option value="">الشهر كله</option>${ds.map((d,i)=>`<option value="${i+1}">${dayLabel(d)}</option>`).join("")}`; q("#n_w").value=st.week; };
     const put=()=>{ q("#n_t").value=st.typeId; q("#n_m").value=st.month; q("#n_dow").value=st.dow; fillDays(); q("#n_d").value=st.donor; q("#n_cd").value=st.cooldown; q("#n_tag").value=st.tag;
-      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").value=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_small").value=st.small; q("#n_big").value=st.big;
+      s.querySelector(`input[name=n_mode][value=${st.mode}]`).checked=true; q("#n_per_f").value=st.per; q("#n_per_m").value=st.per; q("#n_per_s").value=st.per; q("#n_src").value=st.fromBatch; q("#n_left").value=st.onlyLeft; q("#n_left").disabled=!st.fromBatch; q("#n_need").value=st.need; q("#n_minstu").value=st.minStu; q("#n_cut").value=st.cut; q("#n_tby").value=st.tierBy; q("#n_small").value=st.small; q("#n_big").value=st.big;
       q("#n_total").value=st.total; q("#n_count").value=st.count; q("#n_by").value=st.by; q("#n_missed").checked=st.missedFirst; fillType(); };
     const read=()=>{ const prevType=st.typeId; st.typeId=q("#n_t").value; const pm=st.month, pd=st.dow; st.month=q("#n_m").value||curMonth; st.dow=+q("#n_dow").value; st.week=q("#n_w").value; if(pm!==st.month||pd!==st.dow) fillDays(); st.donor=q("#n_d").value.trim(); st.cooldown=+q("#n_cd").value||0; st.tag=q("#n_tag").value;
       st.mode=s.querySelector("input[name=n_mode]:checked")?.value||"fixed"; st.per=+(st.mode==="member"?q("#n_per_m"):st.mode==="student"?q("#n_per_s"):q("#n_per_f")).value||0; const pf=st.fromBatch; st.fromBatch=q("#n_src").value;
       // picking an old list starts with no case-type filter (the aid type's default would silently shrink it); tick types to narrow it
-      if(st.fromBatch&&st.fromBatch!==pf){ st.caseTypes=[]; s.querySelectorAll("#n_ct input").forEach(i=>i.checked=false); } st.onlyLeft=q("#n_left").value; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; st.cut=+q("#n_cut").value||3; st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
+      if(st.fromBatch&&st.fromBatch!==pf){ st.caseTypes=[]; s.querySelectorAll("#n_ct input").forEach(i=>i.checked=false); } st.onlyLeft=q("#n_left").value; q("#n_left").disabled=!st.fromBatch; st.need=q("#n_need").value; st.minStu=q("#n_minstu").value; const ptb=st.tierBy; st.tierBy=q("#n_tby").value; st.cut=q("#n_cut").value===""?(st.tierBy==="students"?2:3):+q("#n_cut").value; if(ptb!==st.tierBy&&(st.cut===3||st.cut===2)){ st.cut=st.tierBy==="students"?2:3; q("#n_cut").value=st.cut; } st.small=+q("#n_small").value||0; st.big=+q("#n_big").value||0;
       st.total=q("#n_total").value; st.count=q("#n_count").value; st.by=q("#n_by").value; st.missedFirst=q("#n_missed").checked;
       st.caseTypes=[...s.querySelectorAll("#n_ct input:checked")].map(i=>i.value);
       if(prevType!==st.typeId){ const t=T.get(st.typeId); st.per=t.amount||1; st.caseTypes=[...(t.caseTypes||[])]; st.removed.clear(); st.added=[]; st.values={}; put(); } };
@@ -1899,7 +1899,7 @@ function newBatch(){
     s.addEventListener("change",e=>{ if(e.target.closest("#n_res")||/^(text|number|search|month)$/.test(e.target.type)) return; read(); draw(); });
     let plan=null;
     function compute(){
-      const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big};
+      const t=T.get(st.typeId), basis={mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big, ...(st.mode==="tiers"&&st.tierBy==="students"?{ tierBy:"students" }:{})};
       const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag, fromBatch:st.fromBatch, onlyLeft:st.onlyLeft, need:st.need, minStu:+st.minStu||0});
       const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)&&!st.added.includes(x.b.id)), st.by, st.missedFirst);
       const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
