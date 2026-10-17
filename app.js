@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.69";
+export const VERSION = "1.3.70";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2133,8 +2133,9 @@ async function recalcList(id, basis, fromCases){
   for(const it of k.items){ if(it.received) continue; const b=it.bid&&B.get(it.bid), row={}, r=ruleOf(nk,it);
     let fam=it.familySize, stu=it.students;
     if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; } }
-    // «لكل طالب»: the count comes from the children on the case file, by the stages this rule counts
-    if(b&&(r?.mode==="student"||(fromCases&&stuOn(nk)))){ const st=studentsOf(b, r?.levels||null);
+    // «لكل طالب»: a family with no students count yet gets it from the children on her case file (by the stages this
+    // rule counts); a count someone typed is kept — unless «حدّث من ملفات الحالات» is ticked
+    if(b&&((r?.mode==="student"&&it.students==null)||fromCases)){ const st=studentsOf(b, r?.levels||null);
       if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(r?.mode==="student"&&it.students==null) noKids.push(it.name); }
     if(r){ const v=shareFor(r,fam,stu); if(+it.value!==v) row.value=v; }
     if(Object.keys(row).length) upd.push([it,row]); }
@@ -2202,7 +2203,7 @@ function openBatch(id, giveMode){
     const items=k.items; const total=items.reduce((s,i)=>s+(+i.value||0),0); const rec=items.filter(i=>i.received).length; const draft=k.status==="مسودة";
     const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq))
       .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
-    const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=stuOn(k)&&items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
+    const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis&&!(canEditList(k)&&k.status!=="مصروف")?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
@@ -2210,7 +2211,7 @@ function openBatch(id, giveMode){
       return `<details class="rulepanel" ${ruleOpen?"open":""}><summary>${ic("cash")} حساب الكمية: <b>${bt?esc(bt.split(" · ")[0]):"بالإيد — اختار قاعدة تحسب لوحدها"}</b></summary>
       ${mergedSources(k)?`<label class="chk"><input type="checkbox" id="rp_split" ${ruleSplit?"checked":""}> كل كشف من الكشوف المدموجة ليه قاعدة لوحده (مش قاعدة واحدة للكل)</label>`:""}
       ${groups.map(([t,r],i)=>ruleEditorHTML(k,i,t,r)).join("")}
-      <label class="chk"><input type="checkbox" id="rp_fam"> حدّث عدد الأفراد${stuOn(k)?" والطلاب":""} من ملفات الحالات الأول (أوتوماتيك)</label>
+      <label class="chk"><input type="checkbox" id="rp_fam"> هات عدد الأفراد والطلاب من ملفات الحالات (أوتوماتيك — هيكتب فوق الأعداد اللي اتكتبت في الكشف)</label>
       <div class="bar"><button class="btn pri" id="rp_go">${ic("refresh")}طبّق على كل اللي ما استلموش</button></div></details>`; })():""}
     ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
@@ -2233,8 +2234,8 @@ function openBatch(id, giveMode){
       ${canEditList(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
       ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
-    :(()=>{ const ed=canEditList(k), stu=stuOn(k), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
-      return `${ed?`<p class="sub" style="margin:0 0 6px">تقدر تعدّل الأفراد${stu?" والطلاب":""} والكمية لكل أسرة من هنا — بيتحفظ لوحده${k.basis?"، ولو غيّرت الأفراد الكمية بتتحسب تاني على قاعدة الكشف":"، ولو عايز الكمية تتحسب لوحدها افتح «حساب الكمية» فوق"}.</p>`:""}
+    :(()=>{ const ed=canEditList(k), stu=ed||stuOn(k)||items.some(i=>i.students!=null), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
+      return `${ed?`<p class="sub" style="margin:0 0 6px">اكتب عدد الأفراد والطلاب لكل أسرة — بيتحفظ لوحده، و<b>الكمية مابتتغيرش لوحدها</b>. لما تخلص (قبل أو بعد الاعتماد) افتح «حساب الكمية» فوق واختار القاعدة ودوس «طبّق»، أو اكتب الكمية بإيدك.</p>`:""}
       <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th>${fbOn(k)?`<th>${esc(k.feedback)}</th>`:""}<th></th></tr></thead><tbody>
       ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(it.code)}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td>${fbOn(k)?`<td>${canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:esc(it.feedback||"")}</td>`:""}<td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`; })()}
@@ -2268,23 +2269,18 @@ function openBatch(id, giveMode){
       await logIt("batch",id,`تعديل ${it.name}: ${Object.keys(prev).map(f=>`${lbl[f]} ${prev[f]??"—"} ← ${patch[f]??"—"}`).join("، ")}`); logs=await loadLog("batch",id); await refreshBatch(id);
       undoable(`${it.name}: اتعدلت الأعداد`, ()=>{ const cur=K.get(id)?.items.find(x=>x.id===it.id); if(!cur||cur.received) return false; return saveItem(cur,prev); });
       return true; };
-    // a new family size / students count gives the amount by the list's own rule (when it has one and no fixed total to split)
-    const autoValue=(k,it,patch)=>{ const r=ruleOf(k,it); if(!r||"value" in patch) return patch;
-      const fam=patch.familySize??it.familySize, stu=patch.students??it.students; return { ...patch, value:shareFor(r, fam, stu) }; };
+    // Typing a family size or students count changes only that number — never the amount by itself.
+    // The amounts are worked out when you choose, from «حساب الكمية» (before or after approval), or typed by hand.
     s.querySelectorAll("[data-ei]").forEach(el=>el.onchange=()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.ei); if(!it) return;
       const v=el.value===""?null:+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
-      saveItem(it, autoValue(k,it,{ [el.dataset.ef]:v })); });
+      saveItem(it, { [el.dataset.ef]:v }); });
     s.querySelectorAll("[data-eit]").forEach(el=>el.onclick=async()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.eit); if(!it) return;
-      const stu=stuOn(k), w=document.createElement("div"); w.className="ask-scrim";
+      const stu=true, w=document.createElement("div"); w.className="ask-scrim";
       w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="eiT"><h2 id="eiT">${esc(it.name)}</h2>
         <div class="grid2"><label class="f">عدد الأفراد<input type="number" min="0" id="ei_f" value="${esc(it.familySize??"")}"></label>${stu?`<label class="f">عدد الطلاب<input type="number" min="0" id="ei_s" value="${esc(it.students??"")}"></label>`:""}
         <label class="f">${k.template==="cash"?"المبلغ":"الكمية"} (${esc(k.unit)})<input type="number" min="0" step="any" id="ei_v" value="${esc(it.value)}"></label></div>
         <div class="bar"><button class="btn pri" data-a="1">${ic("save")}حفظ</button><button class="btn" data-a="0">رجوع</button></div></div>`;
       document.body.appendChild(w); const g=x=>w.querySelector(x); g("#ei_f").focus();
-      // changing the family size fills in the amount by the list's rule; typing the amount yourself wins
-      let vTouched=false; g("#ei_v").oninput=()=>{ vTouched=true; };
-      const re=()=>{ if(vTouched) return; const p=autoValue(k,it,{ familySize:g("#ei_f").value===""?null:+g("#ei_f").value, ...(stu?{ students:g("#ei_s").value===""?null:+g("#ei_s").value }:{}) }); if("value" in p) g("#ei_v").value=p.value; };
-      g("#ei_f").oninput=re; if(stu) g("#ei_s").oninput=re;
       w.onclick=async e=>{ const a=e.target.closest("[data-a]"); if(!a&&e.target!==w) return; if(!a||a.dataset.a==="0"){ w.remove(); return; }
         const n=x=>x.value===""?null:+x.value, patch={ familySize:n(g("#ei_f")), value:n(g("#ei_v"))??0, ...(stu?{ students:n(g("#ei_s")) }:{}) };
         if(Object.values(patch).some(v=>v!=null&&(isNaN(v)||v<0))){ toast("اكتب أرقام صحيحة (صفر أو أكتر)"); return; }
@@ -3478,7 +3474,7 @@ const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس �
 const signsHTML = () => `<div class="signs">${SIGNERS.map(x=>`<div>${x}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`;
 function batchHTML(k){
   const cash=k.template==="cash"; const total=k.items.reduce((s,i)=>s+(+i.value||0),0); const mem=k.items.reduce((s,i)=>s+(+i.familySize||0),0);
-  const stu=stuOn(k)&&k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0), merged=!!mergedSources(k);
+  const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0), merged=!!mergedSources(k);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th><th>الرقم القومي</th><th>عدد الأفراد</th>${stu?"<th>عدد الطلاب</th>":""}<th>${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th>التوقيع</th></tr></thead><tbody>
     ${k.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.code)}</td><td class="nm">${esc(it.name)}${merged?`<div class="tg">${esc((it.bid&&B.get(it.bid)?.caseType)||"غير محدد")} · من ${esc(srcTitles(it).map(shortTitle).join(" + "))}</div>`:""}</td><td>${esc(it.nationalId)}</td><td>${esc(it.familySize)}</td>${stu?`<td>${it.students??""}</td>`:""}<td>${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
@@ -3541,7 +3537,7 @@ async function doPrint(html){
 
 /* ================= excel / files ================= */
 function batchXlsx(k){
-  const cash=k.template==="cash", su=stuOn(k)&&k.items.some(i=>i.students!=null), S=a=>su?a:[];
+  const cash=k.template==="cash", su=k.items.some(i=>i.students!=null), S=a=>su?a:[];
   const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",...S(["عدد الطلاب"]),cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج",...(fbOn(k)?[k.feedback]:[]),"التوقيع"]];
   k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",...S([it.students??""]),+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",...(fbOn(k)?[it.feedback||""]:[]),""]));
   rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),...S([k.items.reduce((s,i)=>s+(+i.students||0),0)]),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
