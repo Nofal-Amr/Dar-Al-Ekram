@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.70";
+export const VERSION = "1.3.71";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2272,7 +2272,7 @@ function openBatch(id, giveMode){
     // Typing a family size or students count changes only that number — never the amount by itself.
     // The amounts are worked out when you choose, from «حساب الكمية» (before or after approval), or typed by hand.
     s.querySelectorAll("[data-ei]").forEach(el=>el.onchange=()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.ei); if(!it) return;
-      const v=el.value===""?null:+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
+      const v=el.value===""?(el.dataset.ef==="value"?0:null):+el.value; if(v!=null&&(isNaN(v)||v<0)){ toast("اكتب رقم صحيح (صفر أو أكتر)"); el.value=it[el.dataset.ef]??""; return; }
       saveItem(it, { [el.dataset.ef]:v }); });
     s.querySelectorAll("[data-eit]").forEach(el=>el.onclick=async()=>{ const k=K.get(id), it=k?.items.find(x=>x.id===el.dataset.eit); if(!it) return;
       const stu=true, w=document.createElement("div"); w.className="ask-scrim";
@@ -3467,7 +3467,8 @@ const PRINT_CSS=`
 .ps .kv td:nth-child(odd){background:#f3f3f3;font-weight:600;width:18%}
 @page{size:A4;margin:12mm}
 thead{display:table-header-group} tr{page-break-inside:avoid}`;
-(()=>{ const st=document.createElement("style"); st.textContent="@media print{"+PRINT_CSS+"}"; document.head.appendChild(st); })();
+// .ps only exists inside #print, so the same rules draw the on-screen preview and the paper
+(()=>{ const st=document.createElement("style"); st.textContent=PRINT_CSS; document.head.appendChild(st); })();
 const hdr=()=>{ const d=new Date(); return `<div class="hd"><div class="orgw"><img src="${$("#logoImg").src}" alt=""><div class="org">${ORG}<small>${ORG2}</small></div></div><div>التاريخ: ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}</div></div>`; };
 // Same layout as the office's Excel lists: م · الاسم · الرقم القومي · عدد · الكمية · التوقيع, then the committee's signatures.
 const SIGNERS = ["لجنة التوزيع","أمين الصندوق","مجلس الإدارة"];
@@ -3527,12 +3528,36 @@ function splitRows(root, n){
       rows.slice(i,i+n).forEach(r=>b.appendChild(r)); p.appendChild(b); p.style.pageBreakBefore="always"; (t._last||t).after(p); t._last=p; }
     if(foot) (t._last||t).appendChild(foot); delete t._last; });
 }
-async function doPrint(html){
+/* Printing opens a full-screen preview with «اطبع» and «رجوع» on top, then the print dialog. If the dialog doesn't open,
+   comes back blank, or the phone's app can't print, you still see the pages and «رجوع» (or the phone's back button)
+   always brings you back to where you were — never a white screen that needs a refresh.
+   On a computer the preview closes by itself after the print dialog. */
+let pvClose=null;
+async function doPrint(html, title){
+  if(pvClose) pvClose();
   const box=$("#print"); box.innerHTML=html;
   const rows=[...box.querySelectorAll("table")].reduce((s,t)=>s+(t.tBodies[0]?.rows.length||0),0);
   const o=await askRows(rows); if(o==null){ box.innerHTML=""; return; }
   if(o.h) box.querySelectorAll("table:not(.kv) tbody tr").forEach(tr=>tr.style.height=o.h+"mm");
-  splitRows(box,o.n); setTimeout(()=>window.print(),50);
+  splitRows(box,o.n);
+  const phone=/Android|iPhone|iPad/i.test(navigator.userAgent), oldTitle=document.title, scroll=window.scrollY;
+  const bar=document.createElement("div"); bar.id="pvbar";
+  bar.innerHTML=`<button class="btn pri" data-pv="print">${ic("printer")}اطبع</button><button class="btn" data-pv="back">${ic("undo")}رجوع</button>
+    <span class="sub">${phone?"لو الطباعة مافتحتش: من قايمة المتصفح ⋮ اختار «مشاركة» ← «طباعة» أو «حفظ PDF».":"اختار الطابعة أو «حفظ كـ PDF»."}</span>`;
+  const close=()=>{ if(pvClose!==close) return; pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
+    window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true);
+    if(history.state?.pv) history.back(); window.scrollTo(0,scroll); };
+  const after=()=>{ if(!phone) setTimeout(close,100); };
+  const onBack=()=>{ if(pvClose===close){ history.replaceState(null,""); pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
+    window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true); window.scrollTo(0,scroll); } };
+  const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); close(); } };
+  bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else close(); };
+  pvClose=close; document.body.appendChild(bar); document.body.classList.add("pv"); box.scrollTop=0;
+  // the page is drawn at paper width and shrunk to fit a phone screen; the pages start below the bar
+  box.style.setProperty("--pvz", String(Math.min(1, (innerWidth-28)/760))); box.style.paddingTop=(bar.offsetHeight+14)+"px";
+  if(title) document.title=title.replace(/[\\/:*?"<>|]/g,"-");   // the name a saved PDF gets
+  history.pushState({ pv:1 },""); window.addEventListener("popstate",onBack); window.addEventListener("afterprint",after); document.addEventListener("keydown",key,true);
+  setTimeout(()=>{ try{ window.print(); }catch(e){ report("print","dialog",e); } },300);
 }
 
 /* ================= excel / files ================= */

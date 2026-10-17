@@ -144,10 +144,20 @@ td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
 .log li{margin-bottom:6px}
 .phones{font-family:var(--font);direction:rtl;min-height:220px;font-size:14px}
 #print{display:none}
+#pvbar{display:none}
+/* print preview: the pages on a white screen, with «اطبع» / «رجوع» on top */
+body.pv{overflow:hidden}
+body.pv #print{display:block;position:fixed;inset:0;z-index:200;background:#fff;color:#000;overflow:auto;padding:70px 14px 30px}
+body.pv #print .ps{width:760px;margin:0 auto 30px;zoom:var(--pvz,1)}
+body.pv #pvbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;position:fixed;top:0;inset-inline:0;z-index:201;background:var(--card);border-bottom:1px solid var(--line);padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+body.pv #pvbar .sub{flex:1 1 220px;font-size:12px}
 @media print{
   body{background:#fff;color:#000}
-  .wrap,nav.tabs,.scrim,.toast{display:none!important}
+  .wrap,nav.tabs,.scrim,.toast,.ask-scrim,#net,#pvbar{display:none!important}
   #print{display:block}
+  body.pv{overflow:visible}
+  body.pv #print{position:static;inset:auto;overflow:visible;padding:0!important;z-index:auto}
+  body.pv #print .ps{width:auto;margin:0;zoom:1}
 }
 
 /* auth */
