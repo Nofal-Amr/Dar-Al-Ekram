@@ -1,10 +1,10 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, minPin } from "./core.js";
 import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.83";
+export const VERSION = "1.3.84";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -195,6 +195,13 @@ async function fetchAll(table, select="*"){
 /* Everything the app knows lives in B/T/K/P. `dataVer` bumps on any change so derived lists
    (receipts etc.) are computed once per change, not once per call — the office PC is slow. */
 let dataVer = 0, loadError = null, fromSnapshot = null;
+// shared settings (app_settings): family groups with their letters, in priority order
+let APPSET = {};
+const GROUPS = () => Array.isArray(APPSET.groups) && APPSET.groups.length ? APPSET.groups : DEFAULT_GROUPS;
+const fcode = b => famCode(b.code, b.caseType, GROUPS());
+const fcodeIt = it => famCode(it.code, (it.bid && B.get(it.bid)?.caseType) || "", GROUPS());
+async function loadSettings(){ const { data, error } = await sb.from("app_settings").select("*"); if(error||!data) return; APPSET=Object.fromEntries(data.map(r=>[r.key,r.value])); try{ localStorage.setItem("dar-set",JSON.stringify(APPSET)); }catch(e){} changed(); }
+try{ APPSET=JSON.parse(localStorage.getItem("dar-set")||"{}")||{}; }catch(e){}
 const changed = () => { dataVer++; scheduleRender(); saveSnapshotSoon(); };
 let renderTimer = null;
 function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(() => { render(); refreshSheet(); }, 60); }
@@ -224,7 +231,7 @@ async function reload(){
       const money = Object.fromEntries(Object.keys(MONEY_TABLES).map((t,i) => [t, mm[i]]));
       const events = Object.fromEntries(Object.keys(EVENT_TABLES).map((t,i) => [t, mm[nm+i]]));
       setAll(bs, ts, ks, is, ps, cs, tk); setMoney(money); setEvents(events); snapRaw = { bs, ts, ks, is, ps, cs, tk, money, events };
-      loaded = true; loadError = null; fromSnapshot = null; dataVer++; render(); refreshSheet(); saveSnapshotSoon();
+      loaded = true; loadError = null; fromSnapshot = null; dataVer++; render(); refreshSheet(); saveSnapshotSoon(); loadSettings();
     }catch(e){
       loadError = e;
       if(!loaded){ const snap = await readSnapshot(); if(snap && snap.uid === me?.id){ setAll(snap.bs, snap.ts, snap.ks, snap.is, snap.ps, snap.cs || [], snap.tk || []); setMoney(snap.money); setEvents(snap.events); snapRaw = snap; loaded = true; fromSnapshot = snap.at; dataVer++; } }
@@ -337,6 +344,8 @@ async function markReceived(it, v){
 // One case search everywhere (q already norm()'d): part of the name, the national ID, the case number,
 // or 4+ digits of any of her numbers (phone, second phone, WhatsApp).
 const findsCase = (b, q) => { if(!q) return true; const d=q.replace(/^0/,"");
+  const fc=/^[^\d\s]{1,3}\s*-?\s*\d+$/.test(q)?q.replace(/^[^\d]+/,""):null;   // «ك-121» / «ك121»: the family code with its letters
+  if(fc){ const want=q.replace(/[\d\s-]/g,""), has=norm(fcode(b).replace(/[\d\s-]/g,"")); return String(+b.code)===String(+fc) && has.includes(want); }
   return norm(b.name).includes(q) || (b.nationalId||"").includes(q) || String(b.code)===q.padStart(3,"0") || String(b.code)===q
     || (d.length>3 && /^\d+$/.test(d) && [b.phone,b.phone2,b.whatsapp].some(p=>cleanPhone(p).includes(d))); };
 // Helpers may undo only their own mark, within 5 minutes; office staff can always (from the full list).
@@ -735,7 +744,7 @@ function vPeople(){
   </tbody></table></div>`:""}
   <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,peopleLimit).map(b=>`
     <button class="item" data-open="${b.id}">
-      <span class="code">${esc(b.code)}</span>
+      <span class="code">${esc(fcode(b))}</span>
       <span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.nationalId||"بدون رقم قومي")}${famSize(b)?` · ${famSize(b)} أفراد`:""}${peopleSort==="score"&&b.score!=null?` · الدرجة ${b.score}%`:""}${peopleSort==="last"?` · آخر استلام ${lastAnyMap().get(b.id)?mLabel(lastAnyMap().get(b.id)):"—"}`:""}</span></span>
       ${reviewDue(b)?`<span class="chip red">مراجعة</span>`:""}
       ${fileState(b)!=="none"?FILE_CHIP[fileState(b)]:""}
@@ -842,6 +851,38 @@ function vReports(){
   ${Object.entries(yT).map(([n,v])=>`<tr><td>${esc(n)}</td><td class="n">${num(v.n)}</td><td class="n">${num(v.p.size)}</td><td class="n">${num(v.total)} ${esc(v.unit)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">لا يوجد صرف معتمد هذه السنة بعد</td></tr>`}
   </tbody></table></div>`;
 }
+/* Family groups: name, letter and the case types in each, in priority order (first = gets first when there isn't enough).
+   Saved for everyone in app_settings. */
+function groupsSheet(){
+  let gs=GROUPS().map(g=>({ ...g, types:[...(g.types||[])] }));
+  const draw=()=>`<p class="sub" style="margin-top:0">رتّبهم بالأولوية بالأسهم. الأسرة اللي نوعها في أكتر من مجموعة (زي «أيتام ومرضي») بتاخد الحرفين، وبتترتب مع أعلى مجموعة.</p>
+    ${gs.map((g,i)=>`<div class="rulebox"><div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <label class="f" style="flex:0 0 70px">الحرف<input type="text" maxlength="2" data-gl="${i}" value="${esc(g.letter)}"></label>
+      <label class="f" style="flex:1 1 140px">اسم المجموعة<input type="text" data-gn="${i}" value="${esc(g.name)}"></label>
+      <span class="row" style="gap:4px"><button class="btn sm" data-gu="${i}" ${i?"":"disabled"} aria-label="أولوية أعلى">↑</button><button class="btn sm" data-gd="${i}" ${i<gs.length-1?"":"disabled"} aria-label="أولوية أقل">↓</button><button class="btn sm danger" data-gx="${i}" aria-label="شيل">×</button></span></div>
+      <div class="checks">${CASE_TYPES.map(t=>`<label><input type="checkbox" data-gt="${i}" value="${esc(t)}" ${g.types.includes(t)?"checked":""}> ${esc(t)}</label>`).join("")}</div>
+      <div class="sub">${i+1}. مثال: ${esc(famCode("121",g.types[0]||"",gs))}</div></div>`).join("")}
+    <div class="bar"><button class="btn sm" id="g_add">${ic("plus")}مجموعة جديدة</button><button class="btn sm" id="g_def">${ic("undo")}الافتراضي</button></div>
+    <div class="bar"><button class="btn pri" id="g_save">${ic("save")}حفظ</button></div>`;
+  const mount=s=>{ const q=x=>s.querySelector(x), re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
+    s.querySelectorAll("[data-gl]").forEach(el=>el.oninput=()=>{ gs[+el.dataset.gl].letter=el.value.trim(); });
+    s.querySelectorAll("[data-gn]").forEach(el=>el.oninput=()=>{ gs[+el.dataset.gn].name=el.value.trim(); });
+    s.querySelectorAll("[data-gt]").forEach(el=>el.onchange=()=>{ const g=gs[+el.dataset.gt]; g.types=el.checked?[...new Set([...g.types,el.value])]:g.types.filter(x=>x!==el.value); re(); });
+    s.querySelectorAll("[data-gu]").forEach(el=>el.onclick=()=>{ const i=+el.dataset.gu; [gs[i-1],gs[i]]=[gs[i],gs[i-1]]; re(); });
+    s.querySelectorAll("[data-gd]").forEach(el=>el.onclick=()=>{ const i=+el.dataset.gd; [gs[i+1],gs[i]]=[gs[i],gs[i+1]]; re(); });
+    s.querySelectorAll("[data-gx]").forEach(el=>el.onclick=()=>{ gs.splice(+el.dataset.gx,1); re(); });
+    q("#g_add").onclick=()=>{ gs.push({ name:"", letter:"", types:[] }); re(); };
+    q("#g_def").onclick=()=>{ gs=DEFAULT_GROUPS.map(g=>({ ...g, types:[...g.types] })); re(); };
+    q("#g_save").onclick=async()=>{ const clean=gs.filter(g=>g.letter&&g.types.length).map(g=>({ name:g.name||g.letter, letter:g.letter, types:g.types }));
+      const dup=clean.map(g=>g.letter).find((l,i,a)=>a.indexOf(l)!==i); if(dup){ toast(`الحرف «${dup}» متكرر — كل مجموعة ليها حرف مختلف`); return; }
+      if(!clean.length){ toast("لازم مجموعة واحدة على الأقل ليها حرف ونوع"); return; }
+      q("#g_save").disabled=true;
+      const { error } = await sb.from("app_settings").upsert({ key:"groups", value:clean, updated_at:new Date().toISOString(), updated_by:me.id });
+      if(error){ q("#g_save").disabled=false; toast(errMsg(error,"settings","groups")); return; }
+      APPSET.groups=clean; try{ localStorage.setItem("dar-set",JSON.stringify(APPSET)); }catch(e){} changed(); closeSheet(); toast("اتحفظ ✓ — الأكواد والأولوية اتحدّثت عند الكل"); };
+  };
+  sheet("كود الأسرة والأولوية", draw(), mount);
+}
 // The manager's view of what went wrong on any device: the ref users quote (#K7Q2M), when, who, where and the raw message.
 async function errLogSheet(){
   sheet("سجل الأخطاء",`<div id="el_b"><p class="sub">بيحمّل…</p></div>`, async s=>{
@@ -858,6 +899,10 @@ function vSettings(){
   const users=[...P.values()].sort((a,b)=>(a.role==="pending"?-1:0)-(b.role==="pending"?-1:0));
   return `
   <h2>الإعدادات</h2>
+  ${canWrite()?`<h3>كود الأسرة والأولوية</h3>
+  <p class="sub" style="margin-top:0">كل أسرة ليها حرف حسب مجموعتها قبل رقم الحالة (مثلاً <b>${esc(famCode("121","أيتام",GROUPS()))}</b>)، والمجموعات مترتبة بالأولوية: لما الكمية ماتكفيش، الأول بياخد.</p>
+  <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${GROUPS().map((g,i)=>`<span class="chip ${i===0?"red":i===1?"plum":"blue"}"><b>${esc(g.letter)}</b> ${esc(g.name)}</span>${i<GROUPS().length-1?"<span>←</span>":""}`).join("")}</div>
+  <div class="bar"><button class="btn" id="grpEdit">${ic("edit")}عدّل الحروف والأولوية</button></div>`:""}
   ${isMgr()?`
   <h3>المستخدمين</h3>
   <p class="sub" style="margin-top:0">كل موظف بيدخل برقم تليفونه ورقم سري. إنت اللي بتعمله الحساب من هنا.</p>
@@ -881,7 +926,7 @@ function vSettings(){
   return `<h3 id="archive">الأرشيف</h3>
   <p class="sub" style="margin-top:0">أي حاجة بتتأرشف بتيجي هنا: مش بتظهر في القوايم، بس كلها محفوظة وترجع بضغطة.</p>
   <h4>الحالات (${num(arch.length)})</h4>
-  ${arch.length?`<div class="list">${arch.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">اتأرشفت ${dLabel(b.archivedAt)}</span></span><button class="btn sm" data-restore="${b.id}">${ic("restore")}رجّعها</button></div>`).join("")}</div>`:`<div class="empty">مفيش</div>`}
+  ${arch.length?`<div class="list">${arch.map(b=>`<div class="item"><span class="code">${esc(fcode(b))}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">اتأرشفت ${dLabel(b.archivedAt)}</span></span><button class="btn sm" data-restore="${b.id}">${ic("restore")}رجّعها</button></div>`).join("")}</div>`:`<div class="empty">مفيش</div>`}
   <h4>الكشوف (${num(ak.length)})</h4>
   ${ak.length?`<div class="list">${ak.map(k=>row(k.title,`${k.status} · ${num(k.items.length)} أسرة · اتأرشف ${dLabel(k.archivedAt)}`,`data-restorek="${k.id}"`)).join("")}</div>`:`<div class="empty">مفيش</div>`}
   <h4>أنواع المساعدات (${num(at.length)})</h4>
@@ -918,7 +963,7 @@ function bindView(){
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
   on("#newK","onclick",()=>newBatch()); on("#mergeK","onclick",()=>copyBatch(null));
   on("#newT","onclick",()=>openType(null));
-  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet());
+  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet()); on("#grpEdit","onclick",()=>groupsSheet());
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
@@ -1070,7 +1115,7 @@ function vSimple(){
       <h2 class="s-title">${esc(k.typeName)} <small>${mLabel(k.month)}</small></h2>
       <div class="s-count"><span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span>استلم <b>${num(rec)}</b> من <b>${num(k.items.length)}</b></div>
       <input type="search" class="s-search" id="s_q" placeholder="اكتب الاسم" value="${esc(sq)}">
-      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(it.code)} · ${num(it.value)} ${esc(k.unit)}</small></span>
+      <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(fcodeIt(it))} · ${num(it.value)} ${esc(k.unit)}</small></span>
         ${it.received?`<span class="s-ok">✓ استلم${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}</span>${canUngive(it)?`<button class="s-ungive" data-ungive="${it.id}">رجّع</button>`:""}`:`<button class="s-give" data-give="${it.id}">استلم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
   }
   if(scr==="cb"){
@@ -1687,7 +1732,7 @@ function taskSheet(id, forBid){
     const q=x=>s.querySelector(x); let bid=t.bid;
     const bq=q("#k_bq"); bq.oninput=()=>{ bid=null; const qq=norm(bq.value); if(!qq){ q("#k_bs").innerHTML=""; return; }
       const res=people().filter(b=>findsCase(b,qq)).slice(0,5);
-      q("#k_bs").innerHTML=`<div class="list" style="margin:-4px 0 10px">${res.map(b=>`<button class="item" data-pick="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">مفيش</div>`}</div>`;
+      q("#k_bs").innerHTML=`<div class="list" style="margin:-4px 0 10px">${res.map(b=>`<button class="item" data-pick="${b.id}"><span class="code">${esc(fcode(b))}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">مفيش</div>`}</div>`;
       q("#k_bs").querySelectorAll("[data-pick]").forEach(el=>el.onclick=()=>{ bid=el.dataset.pick; bq.value=B.get(bid).name; q("#k_bs").innerHTML=""; }); };
     if(q("#k_s")) q("#k_s").onclick=async()=>{
       const rec={title:q("#k_t").value.trim(), due:q("#k_d").value||null, assignee:q("#k_a").value||null, beneficiary_id:bid||null, notes:q("#k_n").value.trim()};
@@ -1717,7 +1762,7 @@ function certsSheet(){
       <div class="note">${num(list.length)} طفل في ${num(fams.length)} أسرة لسه</div>
       <div class="bar"><button class="btn" id="c_ph">${ic("phone")}أرقام الأسر دي</button></div>
       <div class="list">${fams.map(id=>{ const b=B.get(id); const kids=list.filter(x=>x.b.id===id);
-        return `<div class="item col"><div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><button class="grow nm linkish" data-open="${b.id}">${esc(b.name)}</button>${callCell(b.id,b.phone,null)}</div>
+        return `<div class="item col"><div class="row" style="width:100%"><span class="code">${esc(fcode(b))}</span><button class="grow nm linkish" data-open="${b.id}">${esc(b.name)}</button>${callCell(b.id,b.phone,null)}</div>
           ${kids.map(x=>`<div class="row kidrow"><span class="grow">${esc(x.k.name||"بدون اسم")} <span class="sub">· ${esc(stageOf(x.k))}</span></span>${canWrite()?`<button class="btn sm" data-cert="${b.id}:${x.i}">${ic("check")}وصلت</button>`:""}</div>`).join("")}</div>`; }).join("")||`<div class="empty">كل الشهادات وصلت ✓</div>`}</div>`; };
   const mount=s=>{
     s.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>viewPerson(el.dataset.open));
@@ -1902,7 +1947,7 @@ function newBatch(){
     function compute(){
       const t=T.get(st.typeId), basis=st.mode==="group"?{ mode:"group", per:st.per, every:st.every, round:st.round, ...(st.gby==="students"?{ tierBy:"students" }:{}) }:{mode:st.mode, per:st.per, cut:st.cut, small:st.small, big:st.big, ...(st.mode==="tiers"&&st.tierBy==="students"?{ tierBy:"students" }:{})};
       const c=candidates(t,{month:st.month, week:+st.week||null, dow:st.dow, cooldown:st.cooldown, caseTypes:st.caseTypes, tag:st.tag, fromBatch:st.fromBatch, onlyLeft:st.onlyLeft, need:st.need, minStu:+st.minStu||0});
-      const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)&&!st.added.includes(x.b.id)), st.by, st.missedFirst);
+      const sorted=sortPool(c.pool.filter(x=>!st.removed.has(x.b.id)&&!st.added.includes(x.b.id)), st.by, st.missedFirst, GROUPS());
       const r=planShares(sorted, basis, { total:st.total===""?null:+st.total, count:st.count===""?null:+st.count });
       const added=st.added.map(id=>B.get(id)).filter(Boolean).map(b=>{ const stu=studentsOf(b); return {b, lm:lastByType(t.id).get(b.id), fam:famSize(b), students:stu.n, stuSrc:stu.src, value:shareFor(basis,famSize(b),stu.n), manual:true}; });
       const seen=new Set(), picked=[...r.picked, ...added].filter(x=>!seen.has(x.b.id)&&seen.add(x.b.id)).map(x=>({...x, value:st.values[x.b.id]??x.value}));
@@ -1941,7 +1986,7 @@ function newBatch(){
         const qq=norm(add.value); if(!qq){ q("#n_sugg").innerHTML=""; return; }
         const inIds=new Set(plan.picked.map(x=>x.b.id));
         const res=people().filter(b=>!inIds.has(b.id)&&findsCase(b,qq)).slice(0,6);
-        q("#n_sugg").innerHTML=`<div class="list" style="margin-bottom:10px">${res.map(b=>`<button class="item" data-addr="${b.id}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span>${b.status!=="نشط"?`<span class="chip red">${esc(b.status)}</span>`:""}</button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
+        q("#n_sugg").innerHTML=`<div class="list" style="margin-bottom:10px">${res.map(b=>`<button class="item" data-addr="${b.id}"><span class="code">${esc(fcode(b))}</span><span class="grow nm">${esc(b.name)}</span>${b.status!=="نشط"?`<span class="chip red">${esc(b.status)}</span>`:""}</button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
         q("#n_sugg").querySelectorAll("[data-addr]").forEach(el=>el.onclick=()=>{ const id=el.dataset.addr; st.removed.delete(id); if(!st.added.includes(id)) st.added.push(id); draw(); });
       };
       q("#n_save").onclick=async()=>{
@@ -2211,19 +2256,22 @@ async function feedbackFromExcel(id, files){
   });
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null;
+  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null, enough=0;
   // Families taken off this list (from its log), so they can be put back with one tap.
   const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
     for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
   const draw=()=>{
     const k=K.get(id); if(!k) return "";
     const items=k.items; const total=items.reduce((s,i)=>s+(+i.value||0),0); const rec=items.filter(i=>i.received).length; const draft=k.status==="مسودة";
+    // «عندك كام؟»: walking the list in its order, who the available quantity reaches
+    let reach=items.length, acc=0; if(enough>0){ reach=0; for(const it of items){ if(acc+(+it.value||0)>enough+1e-9) break; acc+=+it.value||0; reach++; } }
     const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq))
       .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
     const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis&&!canAdjust(k)?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
+    ${enough>0?`<div class="note ${reach<items.length?"":"green"}">${ic("info")} <span class="grow">عندك <b>${num(enough)}</b> ${esc(k.unit)}: ${reach>=items.length?`بيكفّوا الكشف كله (${num(acc)}) وفاضل ${num(enough-acc)}`:`بيكفّوا أول <b>${num(reach)}</b> أسرة من ${num(items.length)} — آخر واحدة: ${reach?`${esc(items[reach-1].name)} (${esc(fcodeIt(items[reach-1]))})`:"—"}. الباقي ${num(items.length-reach)} أسرة باهتين تحت.`}</span> <button class="btn sm" id="b_enoughx">شيل</button></div>`:""}
     ${canAdjust(k)?(()=>{ const groups=ruleGroups(k,ruleSplit), bt=k.basis?basisText(k).replace(/^النصيب: /,""):"";
       return `<details class="rulepanel" ${ruleOpen?"open":""}><summary>${ic("cash")} حساب الكمية: <b>${bt?esc(bt.split(" · ")[0]):"بالإيد — اختار قاعدة تحسب لوحدها"}</b></summary>
       ${mergedSources(k)?`<label class="chk"><input type="checkbox" id="rp_split" ${ruleSplit?"checked":""}> كل كشف من الكشوف المدموجة ليه قاعدة لوحده (مش قاعدة واحدة للكل)</label>`:""}
@@ -2235,17 +2283,17 @@ function openBatch(id, giveMode){
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
       ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة التعليقات</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canAdjust(k)?`<button class="btn" id="b_sort">${ic("list")}ترتيب الكشف</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة التعليقات</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
     </div>
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
     ${canEditList(k)&&k.status!=="مصروف"?`<details class="addbox" ${addOpen?"open":""}><summary>${ic("plus")} ضيف حالة للكشف (أو رجّع حد اتشال)</summary>
       <input type="search" id="b_add" placeholder="اكتب الاسم أو الرقم القومي أو رقم الحالة" value="${esc(addQ)}" autocomplete="off">
-      ${removedNames(k).length?`<div class="sub" style="margin:6px 0">اتشالوا من الكشف ده قبل كده:</div><div class="list">${removedNames(k).map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm" data-addb="${b.id}">${ic("undo")}رجّعها</button></div>`).join("")}</div>`:""}
+      ${removedNames(k).length?`<div class="sub" style="margin:6px 0">اتشالوا من الكشف ده قبل كده:</div><div class="list">${removedNames(k).map(b=>`<div class="item"><span class="code">${esc(fcode(b))}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm" data-addb="${b.id}">${ic("undo")}رجّعها</button></div>`).join("")}</div>`:""}
       <div id="b_addRes"></div></details>`:""}
     ${!draft?`<div class="seg" role="group" aria-label="عرض">${[["all","الكل"],["left",`ماستلموش (${num(items.length-rec)})`],["nocall","ماحدش كلّمهم"]].map(([v,l])=>`<button class="${only===v?"on":""}" data-only="${v}">${l}</button>`).join("")}</div>`:""}
     ${!draft?`<div class="list">${shown.map(({it,i})=>`
-      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span>${itemTags(k,it)}<br><span class="sub">${esc(it.code)} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
+      <div class="give ${it.received?"done":rowCallCls(it.bid,k.id)} ${i>=reach?"over":""}"><span class="code">${i+1}</span><span class="grow"><span class="nm">${esc(it.name)}</span>${itemTags(k,it)}<br><span class="sub">${esc(fcodeIt(it))} · ${esc(k.template==="cash"?it.nationalId:(it.familySize?it.familySize+" أفراد":""))}${hasStu&&it.students!=null?` · ${it.students} طالب`:""} · ${num(it.value)} ${esc(k.unit)}</span></span>
       ${!it.received&&it.bid?callCell(it.bid,it.phone||B.get(it.bid)?.phone,k.id):""}
       ${fbOn(k)?(canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" placeholder="${esc(k.feedback)}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:it.feedback?`<span class="why">${esc(k.feedback)}: ${esc(it.feedback)}</span>`:""):""}
       ${canAdjust(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
@@ -2254,7 +2302,7 @@ function openBatch(id, giveMode){
     :(()=>{ const ed=canEditList(k), stu=ed||stuOn(k)||items.some(i=>i.students!=null), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
       return `${ed?`<p class="sub" style="margin:0 0 6px">اكتب عدد الأفراد والطلاب لكل أسرة — بيتحفظ لوحده، و<b>الكمية مابتتغيرش لوحدها</b>. لما تخلص (قبل أو بعد الاعتماد) افتح «حساب الكمية» فوق واختار القاعدة ودوس «طبّق»، أو اكتب الكمية بإيدك.</p>`:""}
       <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th>${fbOn(k)?`<th>${esc(k.feedback)}</th>`:""}<th></th></tr></thead><tbody>
-      ${shown.map(({it,i})=>`<tr><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(it.code)}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td>${fbOn(k)?`<td>${canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:esc(it.feedback||"")}</td>`:""}<td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
+      ${shown.map(({it,i})=>`<tr class="${i>=reach?"over":""}"><td class="n">${i+1}</td><td>${esc(it.name)}${itemTags(k,it)}<div class="why">${esc(fcodeIt(it))}${mergedSources(k)?"":` · ${esc(it.reason||"")}`}</div></td>${k.template==="cash"?`<td class="n">${esc(it.nationalId)}</td>`:""}<td class="n">${cell(it,"familySize",it.familySize,"عدد الأفراد")}</td>${stu?`<td class="n">${cell(it,"students",it.students,"عدد الطلاب")}</td>`:""}<td class="n">${cell(it,"value",it.value,"الكمية")}</td>${fbOn(k)?`<td>${canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:esc(it.feedback||"")}</td>`:""}<td>${ed?`<button class="btn sm danger" data-rm="${it.id}" aria-label="استبعاد">×</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`; })()}
     ${logs&&logs.length?`<h3>سجل الكشف</h3><ul class="log">${logs.slice(0,20).map(l=>`<li><b>${dLabel(l.at)}</b> — ${esc(l.text)}${l.by?` (${esc(who(l.by))})`:""}</li>`).join("")}</ul>`:""}`;
   };
@@ -2336,6 +2384,27 @@ function openBatch(id, giveMode){
         undoable(`خانة «${label}» اتضافت`, async()=>{ const r=await sb.rpc("set_batch_extras", { batch:id, patch:{ feedback:"" } }); if(r.error){ toast(errMsg(r.error)); return false; } await refreshBatch(id); }); };
       w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(a) done(a.dataset.a==="1"); else if(e.target===w) done(false); };
       n.onkeydown=e=>{ if(e.key==="Enter") done(true); }; };
+    if(q("#b_enoughx")) q("#b_enoughx").onclick=()=>{ enough=0; refreshSheet(); };
+    // order the list (who comes first when there isn't enough): alphabetical, by group priority then alphabetical, or by case number
+    if(q("#b_sort")) q("#b_sort").onclick=()=>{ const k=K.get(id), w=document.createElement("div"); w.className="ask-scrim";
+      const gtxt=GROUPS().map(g=>`${g.name} (${g.letter})`).join(" ← ");
+      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="soT"><h2 id="soT">ترتيب الكشف</h2>
+        <label class="chk"><input type="radio" name="so" value="group" checked> بالأولوية: ${esc(gtxt)} — وجوه كل مجموعة أبجدي</label>
+        <label class="chk"><input type="radio" name="so" value="name"> أبجدي (أ ← ي)</label>
+        <label class="chk"><input type="radio" name="so" value="code"> برقم الحالة</label>
+        <label class="f">عندك كام ${esc(k.unit)}؟ (اختياري — يوريك لحد مين بيكفّوا)<input type="number" min="0" step="any" id="so_n" value="${enough||""}" placeholder="مثال: 90"></label>
+        <p class="sub" style="margin:0">الترتيب بيتحفظ في الكشف، والطباعة والإكسيل بيطلعوا بيه. الأولوية والحروف بتتعدل من «الإعدادات».</p>
+        <div class="bar"><button class="btn pri" data-a="1">${ic("check")}رتّب</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+      document.body.appendChild(w);
+      w.onclick=async e=>{ const a=e.target.closest("[data-a]"); if(!a&&e.target!==w) return; if(!a||a.dataset.a==="0"){ w.remove(); return; }
+        const mode=w.querySelector("input[name=so]:checked").value, ct=it=>(it.bid&&B.get(it.bid)?.caseType)||"", G=GROUPS();
+        const cmp={ name:(x,y)=>byName(x.name,y.name)||byCode(x,y), code:(x,y)=>byCode(x,y), group:(x,y)=>groupRank(ct(x),G)-groupRank(ct(y),G)||byName(x.name,y.name)||byCode(x,y) }[mode];
+        const order=[...k.items].sort(cmp), rows=order.map((it,p)=>({ id:it.id, p })).filter(r=>k.items.find(x=>x.id===r.id).position!==r.p);
+        a.disabled=true;
+        if(rows.length){ const { error } = await sb.rpc("set_positions", { rows }); if(error){ a.disabled=false; toast(errMsg(error,"batch","sort")); return; }
+          await logIt("batch",id,`ترتيب الكشف: ${mode==="group"?"بالأولوية ("+gtxt+") وأبجدي":mode==="name"?"أبجدي":"برقم الحالة"}`); logs=await loadLog("batch",id); }
+        enough=+w.querySelector("#so_n").value||0; w.remove(); await refreshBatch(id); refreshSheet(); toast(rows.length?"اترتب ✓":"الكشف مترتب كده أصلاً ✓"); };
+    };
     const fbu=q("#b_fb"); if(fbu) fbu.onchange=()=>{ const fs=[...fbu.files]; if(fs.length) feedbackFromExcel(id, fs); };
     s.querySelectorAll("[data-rc]").forEach(el=>el.onclick=async()=>{
       const it=K.get(id).items.find(x=>x.id===el.dataset.rc); const v=!it.received;
@@ -2358,7 +2427,7 @@ function openBatch(id, giveMode){
     s.querySelectorAll("[data-addb]").forEach(el=>el.onclick=()=>{ el.disabled=true; addTo(el.dataset.addb); });
     const ab=q("#b_add"); if(ab){ const res=()=>{ const qq=norm(addQ); const k=K.get(id), inIt=new Set(k.items.map(i=>i.bid));
         const r=qq.length<2?[]:people().filter(b=>!inIt.has(b.id)&&findsCase(b,qq)).slice(0,8);
-        q("#b_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${r.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span>${b.status!=="نشط"?` <span class="chip red">${esc(b.status)}</span>`:""}</span><button class="btn sm pri" data-addb="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة في الكشف أصلاً</div>`}</div>`;
+        q("#b_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${r.map(b=>`<div class="item"><span class="code">${esc(fcode(b))}</span><span class="grow"><span class="nm">${esc(b.name)}</span>${b.status!=="نشط"?` <span class="chip red">${esc(b.status)}</span>`:""}</span><button class="btn sm pri" data-addb="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة في الكشف أصلاً</div>`}</div>`;
         q("#b_addRes").querySelectorAll("[data-addb]").forEach(el=>el.onclick=()=>{ el.disabled=true; addTo(el.dataset.addb); }); };
       ab.oninput=()=>{ addQ=ab.value; res(); }; if(addQ) res(); }
     // e.g. a list given over two Saturdays: the second week's paper has only the families that haven't collected yet
@@ -2429,7 +2498,7 @@ function paperSheet({ title, inList, inListText = () => "موجودة أصلاً
     bindV();
     let tm=null; q("#pp_t").oninput=e=>{ text=e.target.value; clearTimeout(tm); tm=setTimeout(drawRes,250); };
     q("#pp_s").oninput=e=>{ const qq=norm(e.target.value), out=q("#pp_sr"); if(qq.length<2){ out.innerHTML=""; return; }
-      out.innerHTML=`<div class="list" style="margin:6px 0">${people().filter(b=>findsCase(b,qq)).slice(0,6).map(b=>`<button class="item" data-pk="${esc(b.code)}"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
+      out.innerHTML=`<div class="list" style="margin:6px 0">${people().filter(b=>findsCase(b,qq)).slice(0,6).map(b=>`<button class="item" data-pk="${esc(b.code)}"><span class="code">${esc(fcode(b))}</span><span class="grow nm">${esc(b.name)}</span></button>`).join("")||`<div class="empty">لا نتائج</div>`}</div>`;
       out.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>{ text=(text.trim()?text.trim()+"\n":"")+b.dataset.pk; q("#pp_t").value=text; q("#pp_s").value=""; out.innerHTML=""; drawRes(); }); };
     if(q("#pp_back")) q("#pp_back").onclick=back;
     drawRes(); };
@@ -2994,7 +3063,7 @@ function openEvent(id){
     <datalist id="rsv_why">${RSV_WHY.map(w=>`<option value="${w}">`).join("")}</datalist>
     <div class="list evlist">${rows.map(({r,b})=>{ const a=ANSWERS[r.answer], showN=r.answer==="جاية"||r.answer==="مش متأكدة", g=guessCounts(b);
       return `<div class="item col evrow ${a?"a-"+a.cls:rowCallCls(b.id,ctx)}${r.answer==="جاية"&&r.sure?" a-sure":""}">
-        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أبناء متسجلين`:"مفيش أبناء متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
+        <div class="row" style="width:100%"><span class="code">${esc(fcode(b))}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${kidsOf(b)?`${num(kidsOf(b))} أبناء متسجلين`:"مفيش أبناء متسجلين"}${famSize(b)?` · ${num(famSize(b))} أفراد`:""}</span></span>${callCell(b.id,b.phone,ctx)}${cw?`<button class="evrm" data-evrm="${r.id}" aria-label="شيل ${esc(b.name)} من الكشف">${ic("x")}شيل</button>`:""}</div>
         <div class="row evctl"><span class="seg ans" role="group" aria-label="ردها">${Object.entries(ANSWERS).map(([k,v])=>`<button class="${r.answer===k?"on "+v.cls:""}" data-ans="${k}" data-ep="${r.id}" ${edit?"":"disabled"}>${v.label}</button>`).join("")}</span>
           ${r.answer==="جاية"?`<button class="sure ${r.sure?"on":""}" data-sure="${r.id}" aria-pressed="${!!r.sure}" ${edit?"":"disabled"}>${r.sure?"أكيد ✓✓":"أكّدت؟ دوس هنا"}</button>${r.sure&&r.sure_at&&evSort.get(id)==="sure"?`<span class="sub">${esc(new Date(r.sure_at).toLocaleString("ar-EG",{day:"numeric",month:"numeric",hour:"numeric",minute:"2-digit"}))}</span>`:""}`:""}
           ${showN?`${stp(r,"adults","المسؤول",edit)}${stp(r,"kids","الأبناء",edit)}<span class="evsum">= <b>${num((+r.adults||0)+(+r.kids||0))}</b></span>${stp(r,"reserve","احتياطي",edit)}${+r.reserve?`<span class="ages rsvl"><small>الاحتياطي</small>${reserveOf(r).slice(0,20).map((x,i)=>`<span class="kid rsvp"><input type="text" class="kname" data-rv="${r.id}" data-i="${i}" data-k="who" value="${esc(x.who)}" placeholder="مين؟ (أختها)" ${edit?"":"disabled"} aria-label="الاحتياطي ${i+1} مين"><input type="text" class="kage" data-rv="${r.id}" data-i="${i}" data-k="age" value="${esc(x.stage||(x.age??""))}" placeholder="السن" ${edit?"":"disabled"} aria-label="سن الاحتياطي ${i+1}"><input type="text" class="rwhy" list="rsv_why" data-rv="${r.id}" data-i="${i}" data-k="why" value="${esc(x.why)}" placeholder="ليه احتياطي؟" ${edit?"":"disabled"} aria-label="سبب إنه احتياطي">${[["1","جاي ✓","boy"],["0","مش جاي","girl"]].map(([v,l,c])=>`<button class="sx ${String(x.coming===true?1:x.coming===false?0:"")===v?c:""}" data-rvc="${r.id}" data-i="${i}" data-v="${v}" aria-pressed="${String(x.coming===true?1:x.coming===false?0:"")===v}" ${edit?"":"disabled"}>${l}</button>`).join("")}</span>`).join("")}</span>`:""}`:""}
@@ -3050,7 +3119,7 @@ function openEvent(id){
     q("#e_x").onclick=()=>eventXlsx(id);
     const ab=q("#e_add"); if(ab){ const res=()=>{ const qq=norm(addQ), inIt=new Set(rsvps(id).map(r=>r.beneficiary_id));
         const found=qq.length<2?[]:people().filter(b=>!inIt.has(b.id)&&findsCase(b,qq)).slice(0,8);
-        q("#e_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${found.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm pri" data-evadd="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة أصلاً</div>`}</div>`;
+        q("#e_addRes").innerHTML=qq.length<2?"":`<div class="list" style="margin-top:6px">${found.map(b=>`<div class="item"><span class="code">${esc(fcode(b))}</span><span class="grow nm">${esc(b.name)}</span><button class="btn sm pri" data-evadd="${b.id}">${ic("plus")}ضيف</button></div>`).join("")||`<div class="empty">مفيش — أو موجودة أصلاً</div>`}</div>`;
         q("#e_addRes").querySelectorAll("[data-evadd]").forEach(el=>el.onclick=async()=>{ el.disabled=true; const { data, error } = await sb.from("event_people").insert({ event_id:id, beneficiary_id:el.dataset.evadd }).select().single();
           if(error){ el.disabled=false; toast(errMsg(error)); return; } EP.set(data.id,data); addQ=""; changed(); toast(`${B.get(data.beneficiary_id)?.name} اتضافت ✓`); }); };
       ab.oninput=()=>{ addQ=ab.value; res(); }; if(addQ) res(); }
@@ -3170,7 +3239,7 @@ function dayPanel(id, f, q_){
     <label class="sortl">مترتبة حسب <select id="d_sort"><option value="name">الاسم (أ ← ي)</option><option value="code" ${dayOrd.get(id)==="code"?"selected":""}>رقم الحالة</option></select></label>
     <div class="list evlist">${list.map(({r,b})=>{ const ps=dayPeople(r,b), m=marked(r), came=ps.filter(p=>p.came===true).length;
       return `<div class="item col evrow ${m?(came?"a-ok":"a-no"):""}">
-        <div class="row" style="width:100%"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${num(ps.length)} فرد${m?` · حضر ${num(came)}${came<ps.length?` · ماجاش ${num(ps.length-came)}`:""}`:""}</span></span>
+        <div class="row" style="width:100%"><span class="code">${esc(fcode(b))}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${num(ps.length)} فرد${m?` · حضر ${num(came)}${came<ps.length?` · ماجاش ${num(ps.length-came)}`:""}`:""}</span></span>
           <span class="seg ans">${Array.from({length:N},(_,i)=>`<button class="${r.bus===i+1?"on ok":""}" data-dbus="${r.id}" data-v="${i+1}" ${edit?"":"disabled"}>باص ${i+1}</button>`).join("")}</span></div>
         ${m?`<div class="dpeople">${ps.map(p=>`<label class="dp ${p.came?"on":"off"}"><input type="checkbox" data-dp="${r.id}" data-g="${p.g}" data-i="${p.i}" ${p.came?"checked":""} ${edit?"":"disabled"}> ${esc(p.label)} <small>${p.kind}${p.age!=null?` · ${num(p.age)}`:""}</small></label>`).join("")}</div>
           <div class="bar" style="margin:4px 0 0"><button class="btn sm" data-dmark="${r.id}" data-v="reset" ${edit?"":"disabled"}>رجّعها مش متعلّمة</button></div>`
@@ -3481,7 +3550,7 @@ const PRINT_CSS=`
 .ps h1{text-align:center;font-size:17px;margin:6px 0 2px}.ps .mo{text-align:center;margin-bottom:10px}
 .ps table{width:100%;border-collapse:collapse;margin-bottom:10px}
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
-.ps td.nm,.ps td.l{text-align:right}.ps table.bt{table-layout:fixed}.ps .bt .cn{width:4%}.ps .bt .cc{width:6%;font-size:11px}.ps .bt .cid{width:15%;font-size:11.5px}.ps .bt .cf{width:6%}.ps .bt .cv{width:8%}.ps .bt .fbc{width:15%}.ps .bt .sig{width:12%}.ps .bt th{font-size:10.5px;padding:3px 2px;white-space:normal;overflow-wrap:anywhere;line-height:1.25}.ps .bt td.nm{overflow-wrap:anywhere}.ps .sig{height:26px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{text-align:right}
+.ps td.nm,.ps td.l{text-align:right}.ps table.bt{table-layout:fixed}.ps .bt .cn{width:4%}.ps .bt .cc{width:8%;font-size:11px}.ps .bt .cid{width:15%;font-size:11.5px}.ps .bt .cf{width:6%}.ps .bt .cv{width:8%}.ps .bt .fbc{width:15%}.ps .bt .sig{width:12%}.ps .bt th{font-size:10.5px;padding:3px 2px;white-space:normal;overflow-wrap:anywhere;line-height:1.25}.ps .bt td.nm{overflow-wrap:anywhere}.ps .sig{height:26px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{text-align:right}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
 .ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
 .ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
@@ -3502,7 +3571,7 @@ function batchHTML(k){
   const stu=k.items.some(i=>i.students!=null), stuT=k.items.reduce((s,i)=>s+(+i.students||0),0);
   return `<div class="ps">${hdr()}<h1>${k.single?"إيصال صرف":"كشف صرف"} ${esc(k.typeName)}${k.donor?` <small>(${esc(k.donor)})</small>`:""}</h1>${k.left?`<div class="mo"><b>اللي لسه ماستلموش — ${dLabel(today)}</b></div>`:""}<div class="mo">${k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`}</div>
     <table class="bt"><thead><tr><th class="cn">م</th><th class="cc">رقم الحالة</th><th class="nm">الاسم</th><th class="cid">الرقم القومي</th><th class="cf">عدد الأفراد</th>${stu?`<th class="cf">عدد الطلاب</th>`:""}<th class="cv">${cash?"المبلغ بالجنيه":"الكمية ("+esc(k.unit)+")"}</th>${fbOn(k)?`<th class="fbc">${esc(k.feedback)}</th>`:""}<th class="sig">التوقيع</th></tr></thead><tbody>
-    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(it.code)}</td><td class="nm">${esc(it.name)}</td><td class="cid">${esc(it.nationalId)}</td><td class="cf">${esc(it.familySize)}</td>${stu?`<td class="cf">${it.students??""}</td>`:""}<td class="cv">${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
+    ${k.items.map((it,i)=>`<tr><td class="cn">${i+1}</td><td class="cc">${esc(fcodeIt(it))}</td><td class="nm">${esc(it.name)}</td><td class="cid">${esc(it.nationalId)}</td><td class="cf">${esc(it.familySize)}</td>${stu?`<td class="cf">${it.students??""}</td>`:""}<td class="cv">${num(it.value)}</td>${fbOn(k)?`<td class="fbc">${esc(it.feedback||"")}</td>`:""}<td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="4">الإجمالي: ${num(k.items.length)} أسرة</td><td>${num(mem)}</td>${stu?`<td>${num(stuT)}</td>`:""}<td>${num(total)}</td>${fbOn(k)?"<td></td>":""}<td></td></tr></tfoot></table>
     ${signsHTML()}</div>`;
 }
@@ -3664,7 +3733,7 @@ function htmlToSheet(root, name, { rowMM=EXCEL_ROW_MM }={}){
         for(let i=0;i<rs;i++){ const g=(grid[rows.length+i]||=[]); for(let j=0;j<cs;j++) if(i||j) g[c+j]=1; }
         for(let j=1;j<cs;j++) cells[c+j]={ v:"", s:st };
         if(cs>1||rs>1) merges.push(`${colName(c)}${r}:${colName(c+cs-1)}${r+rs-1}`);
-        const cl=td.classList, len=cl.contains("fbc")?26:cl.contains("sig")?14:cl.contains("cn")?2:cl.contains("cc")?4:cl.contains("nm")?Math.max(30,txt.length):sec==="THEAD"?txt.length/2:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
+        const cl=td.classList, len=cl.contains("fbc")?26:cl.contains("sig")?14:cl.contains("cn")?2:cl.contains("cc")?6:cl.contains("nm")?Math.max(30,txt.length):sec==="THEAD"?txt.length/2:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
         c+=cs; }
       for(let j=0;j<ncol;j++) if(!cells[j]&&(grid[rows.length]||[])[j]) cells[j]={ v:"", s:sec==="TFOOT"?"foot":"td" };
       const mm=Math.max(parseFloat(tr.style.height)||0, sec==="TBODY"?rowMM:0), h=mm?Math.round(mm*2.835):tr.querySelector(".tg")?30:undefined;

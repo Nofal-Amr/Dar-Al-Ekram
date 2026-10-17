@@ -143,10 +143,27 @@ const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);
 const byCodeNum = (a,b) => String(a.b.code).localeCompare(String(b.b.code),"en",{numeric:true});
 /* Priority order of the pool. Entries: { b, lm (last month got this type, or undefined), missed (didn't collect last time) }.
    "score": highest الدرجة first · "family": biggest family first · "wait": longest without this aid first · "code": by case number */
-export const PRIORITY = { score:"الدرجة الأعلى الأول", family:"الأسرة الأكبر الأول", wait:"اللي بقاله أكتر من غير ما ياخد", code:"برقم الحالة" };
-export function sortPool(pool, by = "score", missedFirst = true){
+export const PRIORITY = { score:"الدرجة الأعلى الأول", family:"الأسرة الأكبر الأول", wait:"اللي بقاله أكتر من غير ما ياخد", group:"المجموعات بالأولوية (مرضي ← كفالات ← مساعدات)، وجوه كل مجموعة أبجدي", name:"أبجدي (أ ← ي)", code:"برقم الحالة" };
+
+/* ---------- family groups & codes ----------
+   Each group (in priority order) has a letter and the case types in it. A family's code is the letters of her groups
+   + her case number: «ك-121», «رك-045» for an orphan family that is also sick. Editable in «الإعدادات». */
+export const DEFAULT_GROUPS = [
+  { name:"مرضي", letter:"ر", types:["مرضي","أيتام ومرضي"] },
+  { name:"كفالات", letter:"ك", types:["كفالات","أيتام","أيتام ومرضي"] },
+  { name:"مساعدات", letter:"م", types:["مساعدات"] },
+  { name:"موسمي", letter:"و", types:["موسمي"] },
+];
+const ctOf = t => t || "غير محدد";
+export const groupsOf = (caseType, groups = DEFAULT_GROUPS) => groups.filter(g => (g.types || []).includes(ctOf(caseType)));
+export const groupRank = (caseType, groups = DEFAULT_GROUPS) => { const i = groups.findIndex(g => (g.types || []).includes(ctOf(caseType))); return i < 0 ? groups.length : i; };
+export const famLetters = (caseType, groups = DEFAULT_GROUPS) => groupsOf(caseType, groups).map(g => g.letter || "").join("");
+export const famCode = (code, caseType, groups = DEFAULT_GROUPS) => { const l = famLetters(caseType, groups); return l ? `${l}-${code}` : String(code ?? ""); };
+export function sortPool(pool, by = "score", missedFirst = true, groups = DEFAULT_GROUPS){
   const sc = x => x.b.score ?? -1, fm = x => famSize(x.b);
   const keys = {
+    group: (x,y) => groupRank(x.b.caseType, groups) - groupRank(y.b.caseType, groups) || byName(x.b.name, y.b.name),
+    name: (x,y) => byName(x.b.name, y.b.name),
     score: (x,y) => sc(y) - sc(x) || gradeRank(x.b.grade) - gradeRank(y.b.grade) || fm(y) - fm(x),
     family: (x,y) => fm(y) - fm(x) || sc(y) - sc(x),
     wait: (x,y) => (!x.lm !== !y.lm ? (x.lm ? 1 : -1) : x.lm && y.lm && x.lm !== y.lm ? x.lm.localeCompare(y.lm) : 0) || sc(y) - sc(x),

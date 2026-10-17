@@ -93,7 +93,7 @@ function makeData(){
     { id: uuid(), item_id: items[1].id, date: "2026-09-01", qty: 40, reason: "جرد", note: "رصيد أول مدة", cancelled_at: null, created_at: "2026-09-01T09:00:00Z" },
   ];
   return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks,
-    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], client_errors: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
+    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], client_errors: [], app_settings: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
 }
 
 export function createDemoClient(){
@@ -115,7 +115,7 @@ export function createDemoClient(){
         const list = (Array.isArray(st.payload) ? st.payload : [st.payload]).map(r => ({ ...r }));
         const out = list.map(r => {
           if(table === "beneficiaries" && r.national_id && rows().some(x => x.national_id === r.national_id && x.id !== r.id)) throw { message: "duplicate key value violates unique constraint national_id" };
-          const i = r.id ? rows().findIndex(x => x.id === r.id) : -1;
+          const i = r.id ? rows().findIndex(x => x.id === r.id) : table === "app_settings" ? rows().findIndex(x => x.key === r.key) : -1;
           if(i >= 0){ Object.assign(rows()[i], r); return rows()[i]; }
           const row = { id: r.id || (table === "activity_log" ? rows().length + 1 : uuid()), created_at: now, ...(table === "activity_log" || table === "calls" ? { at: now, by: session.user.id } : {}), ...(table === "beneficiaries" ? { archived_at: null, tags: [], photos: {} } : {}), ...(["donations","ledger","stock_moves"].includes(table) ? { date: now.slice(0, 10), cancelled_at: null } : {}), ...(table === "donations" ? { receipt_no: rows().length + 1 } : {}), ...(table === "events" ? { place: "", notes: "", capacity: null, archived_at: null, supervisors: [], buses: 2, gifts: [] } : {}), ...(table === "event_people" ? { answer: "", adults: 0, kids: 0, kid_ages: [], kid_sexes: [], kid_names: [], kid_stages: [], mother_age: null, sure: false, sure_at: null, reserve: 0, reserve_who: "", reserve_list: [], bus: null, came: {}, got: {}, note: "", updated_at: now } : {}), ...r };
           rows().push(row); return row;
@@ -177,6 +177,7 @@ export function createDemoClient(){
           return { data: { named, rows }, error: null };
         }catch(e){ const back = JSON.parse(keep); ["donors","items","donations","ledger","stock_moves"].forEach((t, i) => db[t] = back[i]); return { data: null, error: e }; }
       }
+      if(fn === "set_positions"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id); if(it){ it.position = r.p; n++; } } return { data: n, error: null }; }
       if(fn === "set_item_counts"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id), k = it && db.batches.find(x => x.id === it.batch_id);
           if(!it || it.received || !k || k.archived_at || !["مسودة","معتمد"].includes(k.status)) continue;
           for(const c of ["family_size","students","value"]) if(c in r) it[c] = c === "value" ? (+r[c] || 0) : r[c]; n++; } return { data: n, error: null }; }
