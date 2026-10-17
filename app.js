@@ -3,7 +3,7 @@ import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKid
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.67";
+export const VERSION = "1.3.68";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -1977,7 +1977,8 @@ const copyable=it=>{ const b=it.bid&&B.get(it.bid); return !it.bid||(!!b&&!b.arc
 /* Where each family on a merged list came from: the reason line «منسوخ من: A + B» (written when the list is made),
    shown as small tags next to the name with her case type — only on lists made from two or more lists. */
 const SRC_PREFIX="منسوخ من: ";
-const shortTitle=t=>String(t||"").replace(/^كشف\s+/,"").replace(/\s+—\s+.*$/,"").replace(/\s*\(نسخة\)$/,"").trim();
+// «كشف صرف وجبات مدرسية — اكتوبر 2026 مساعدات (نسخة)» → «وجبات مدرسية مساعدات»: only the month part goes, the words after it stay
+const shortTitle=t=>{ const x=String(t||"").replace(/\s*\(نسخة\)/g,"").replace(/^\s*كشف\s+(صرف\s+)?/,"").replace(/\s*—\s*(\d{4}-\d{2}|[^\s\d—]+\s+\d{4}|\d{4})/,"").replace(/\s+/g," ").trim(); return x||String(t||""); };
 const srcTitles=it=>String(it.reason||"").startsWith(SRC_PREFIX)?it.reason.slice(SRC_PREFIX.length).split(" + ").map(x=>x.trim()).filter(Boolean):[];
 const mergedSources=k=>{ const m=new Map(); for(const it of k.items) for(const t of srcTitles(it)) m.set(t,(m.get(t)||0)+1); return m.size>1?m:null; };
 const itemTags=(k,it)=>{ if(!mergedSources(k)) return ""; const ty=(it.bid&&B.get(it.bid)?.caseType)||"غير محدد", from=srcTitles(it);
@@ -2100,7 +2101,8 @@ function editBatch(id){
 /* ---------- quantity rule editor (used on top of the list and in «تعديل») ---------- */
 const RULE_MODES=[["","بالإيد (كل أسرة تكتب كميتها)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["tiers","على حسب حجم الأسرة (صغيرة / كبيرة)"],["student","لكل طالب"]];
 // one rule for the list, or one per source list on a merged list: [[source title or "", rule]]
-const ruleGroups=k=>{ const titles=mergedSources(k)?[...mergedSources(k).keys()]:[];
+const ruleGroups=(k,split=true)=>{ const titles=mergedSources(k)?[...mergedSources(k).keys()]:[];
+  if(titles.length>1&&!split) return [["",ruleOnly(k.basis)||Object.values(k.basis?.src||{})[0]||null]];
   return titles.length>1?titles.map(t=>[t,k.basis?.src?.[t]||(!k.basis?.src&&k.basis?.mode?ruleOnly(k.basis):null)]):[["",ruleOnly(k.basis)]]; };
 const ruleEditorHTML=(k,i,t,r)=>{ r=r||{}; const m=r.mode||"";
   return `<div class="rulebox" data-rg="${i}">${t?`<div class="sub"><b>من «${esc(shortTitle(t))}»</b></div>`:""}
@@ -2183,7 +2185,7 @@ async function feedbackFromExcel(id, files){
   });
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false;
+  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src;
   // Families taken off this list (from its log), so they can be put back with one tap.
   const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
     for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
@@ -2196,9 +2198,9 @@ function openBatch(id, giveMode){
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis&&!(canEditList(k)&&k.status!=="مصروف")?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
-    ${canEditList(k)&&k.status!=="مصروف"?(()=>{ const groups=ruleGroups(k), bt=k.basis?basisText(k).replace(/^النصيب: /,""):"";
+    ${canEditList(k)&&k.status!=="مصروف"?(()=>{ const groups=ruleGroups(k,ruleSplit), bt=k.basis?basisText(k).replace(/^النصيب: /,""):"";
       return `<details class="rulepanel" ${ruleOpen?"open":""}><summary>${ic("cash")} حساب الكمية: <b>${bt?esc(bt.split(" · ")[0]):"بالإيد — اختار قاعدة تحسب لوحدها"}</b></summary>
-      ${groups.length>1?`<p class="sub" style="margin-top:0">الكشف مدموج: كل كشف ليه قاعدته.</p>`:""}
+      ${mergedSources(k)?`<label class="chk"><input type="checkbox" id="rp_split" ${ruleSplit?"checked":""}> كل كشف من الكشوف المدموجة ليه قاعدة لوحده (مش قاعدة واحدة للكل)</label>`:""}
       ${groups.map(([t,r],i)=>ruleEditorHTML(k,i,t,r)).join("")}
       <label class="chk"><input type="checkbox" id="rp_fam"> حدّث عدد الأفراد${stuOn(k)?" والطلاب":""} من ملفات الحالات الأول (أوتوماتيك)</label>
       <div class="bar"><button class="btn pri" id="rp_go">${ic("refresh")}طبّق على كل اللي ما استلموش</button></div></details>`; })():""}
@@ -2281,7 +2283,8 @@ function openBatch(id, giveMode){
         a.disabled=true; if(await saveItem(it,patch)){ w.remove(); toast("اتحفظ ✓"); } else a.disabled=false; };
     });
     const rpn=q(".rulepanel"); if(rpn){ rpn.ontoggle=()=>{ ruleOpen=rpn.open; }; bindRuleBoxes(rpn);
-      q("#rp_go").onclick=async()=>{ const k=K.get(id), groups=ruleGroups(k), basis=basisFrom(k,rpn,groups), fromCases=q("#rp_fam").checked, go=q("#rp_go");
+      const rps=q("#rp_split"); if(rps) rps.onchange=()=>{ ruleSplit=rps.checked; refreshSheet(); };
+      q("#rp_go").onclick=async()=>{ const k=K.get(id), groups=ruleGroups(k,ruleSplit), basis=basisFrom(k,rpn,groups), fromCases=q("#rp_fam").checked, go=q("#rp_go");
         if(!ruleOf({ ...k, basis },k.items[0]||{})&&!fromCases&&!(basis&&basis.src)){ toast("اختار القاعدة الأول (لكل فرد، ثابتة، …) أو علّم «حدّث عدد الأفراد»"); return; }
         go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
         if(!same(basis,k.basis)){ const { error } = await sb.from("batches").update({ basis }).eq("id",id); if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","rule")); return; }
