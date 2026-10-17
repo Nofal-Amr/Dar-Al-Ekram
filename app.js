@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.79";
+export const VERSION = "1.3.80";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -2102,7 +2102,7 @@ function editBatch(id){
   });
 }
 /* ---------- quantity rule editor (used on top of the list and in «تعديل») ---------- */
-const RULE_MODES=[["","بالإيد (كل أسرة تكتب كميتها)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["tiers","على حسب حجم الأسرة (صغيرة / كبيرة)"],["student","لكل طالب"]];
+const RULE_MODES=[["","بالإيد (كل أسرة تكتب كميتها)"],["fixed","كمية ثابتة لكل أسرة"],["member","لكل فرد"],["student","لكل طالب"],["tiers","شرايح: لحد عدد معيّن كمية، وأكتر كمية تانية"]];
 // one rule for the list, or one per source list on a merged list: [[source title or "", rule]]
 const ruleGroups=(k,split=true)=>{ const titles=mergedSources(k)?[...mergedSources(k).keys()]:[];
   if(titles.length>1&&!split) return [["",ruleOnly(k.basis)||Object.values(k.basis?.src||{})[0]||null]];
@@ -2111,19 +2111,27 @@ const ruleEditorHTML=(k,i,t,r)=>{ r=r||{}; const m=r.mode||"";
   return `<div class="rulebox" data-rg="${i}">${t?`<div class="sub"><b>من «${esc(shortTitle(t))}»</b></div>`:""}
     <div class="grid2"><label class="f">الكمية بتتحسب إزاي<select data-rm2="${i}">${RULE_MODES.map(([v,l])=>`<option value="${v}" ${m===v?"selected":""}>${l}</option>`).join("")}</select></label>
     <label class="f" data-show="fixed member student" ${["fixed","member","student"].includes(m)?"":"hidden"}><span data-perl>${m==="member"?"لكل فرد":m==="student"?"لكل طالب":"لكل أسرة"}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="per" value="${r.per??""}"></label>
-    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>الأسرة الصغيرة لحد كام فرد<input type="number" min="1" data-rp="cut" value="${r.cut??3}"></label>
-    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الصغيرة<input type="number" min="0" step="any" data-rp="small" value="${r.small??""}"></label>
-    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الكبيرة<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div>
-    <div data-show="student" ${m==="student"?"":"hidden"}><div class="sub">مين يتحسب طالب (من المراحل المكتوبة في ملف كل حالة):</div>
+    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>على حسب<select data-tby><option value="family" ${r.tierBy!=="students"?"selected":""}>عدد أفراد الأسرة</option><option value="students" ${r.tierBy==="students"?"selected":""}>عدد الطلاب</option></select></label>
+    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw>${tierWords(r.tierBy).upTo}</span><input type="number" min="0" data-rp="cut" value="${r.cut??(r.tierBy==="students"?2:3)}"></label>
+    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw2>${tierWords(r.tierBy).small}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="small" value="${r.small??""}"></label>
+    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}><span data-tw3>${tierWords(r.tierBy).big}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div>
+    <div data-lvbox ${m==="student"||(m==="tiers"&&r.tierBy==="students")?"":"hidden"}><div class="sub">مين يتحسب طالب (من المراحل المكتوبة في ملف كل حالة):</div>
       <div class="checks">${STU_LEVELS.map(l=>`<label><input type="checkbox" data-lv="${l}" ${(r.levels||(m==="student"?STU_LEVELS:DEF_LEVELS(k))).includes(l)?"checked":""}> ${l}</label>`).join("")}</div></div></div>`; };
+// words for the two tiers: «لحد كام فرد» / «لحد كام طالب»
+const tierWords=by=>by==="students"?{ upTo:"لحد كام طالب (العدد ده أو أقل)", small:"الكمية لو الطلاب العدد ده أو أقل", big:"الكمية لو أكتر" }:{ upTo:"الأسرة الصغيرة لحد كام فرد", small:"كمية الأسرة الصغيرة", big:"كمية الأسرة الكبيرة" };
 // school meals: school children only; anything else: every stage
 const DEF_LEVELS=k=>stuType(k.typeId,k.typeName)?["ابتدائي","إعدادي","ثانوي"]:STU_LEVELS;
-const bindRuleBoxes=root=>root.querySelectorAll("[data-rm2]").forEach(el=>el.onchange=()=>{ const box=el.closest(".rulebox");
-  box.querySelectorAll("[data-show]").forEach(f=>f.hidden=!f.dataset.show.split(" ").includes(el.value));
-  const pl=box.querySelector("[data-perl]"); if(pl) pl.textContent=el.value==="member"?"لكل فرد":el.value==="student"?"لكل طالب":"لكل أسرة"; });
+const bindRuleBoxes=root=>root.querySelectorAll(".rulebox").forEach(box=>{ const sel=box.querySelector("[data-rm2]"), tby=box.querySelector("[data-tby]");
+  const sync=()=>{ const m=sel.value, st=tby?.value==="students";
+    box.querySelectorAll("[data-show]").forEach(f=>f.hidden=!f.dataset.show.split(" ").includes(m));
+    const pl=box.querySelector("[data-perl]"); if(pl) pl.textContent=m==="member"?"لكل فرد":m==="student"?"لكل طالب":"لكل أسرة";
+    const lv=box.querySelector("[data-lvbox]"); if(lv) lv.hidden=!(m==="student"||(m==="tiers"&&st));
+    const w=tierWords(st?"students":"family"); box.querySelector("[data-tw]").textContent=w.upTo; box.querySelector("[data-tw2]").textContent=w.small; box.querySelector("[data-tw3]").textContent=w.big; };
+  sel.onchange=sync; if(tby) tby.onchange=()=>{ const c=box.querySelector('[data-rp="cut"]'); if(c&&(c.value==="3"||c.value==="2")) c.value=tby.value==="students"?"2":"3"; sync(); }; });
 const readRuleBox=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""?null:+v; };
   const lv=[...box.querySelectorAll("[data-lv]:checked")].map(x=>x.dataset.lv);
-  return m==="tiers"?{ mode:m, cut:g("cut")||3, small:g("small")||0, big:g("big")||0 }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true, ...(lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}) }:{}) }; };
+  const lvs=lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}, tst=m==="tiers"&&box.querySelector("[data-tby]")?.value==="students";
+  return m==="tiers"?{ mode:m, cut:g("cut")??(tst?2:3), small:g("small")||0, big:g("big")||0, ...(tst?{ tierBy:"students", stu:true, ...lvs }:{}) }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true, ...lvs }:{}) }; };
 // the new basis from the boxes; budget / priority settings of the list stay as they were
 const basisFrom=(k,root,groups)=>{ const read=[...root.querySelectorAll(".rulebox")].map((box,i)=>[groups[i][0],readRuleBox(box)]);
   const keep=Object.fromEntries(Object.entries(k.basis||{}).filter(([x])=>!RULE_KEYS.includes(x)&&x!=="src")), first=read.map(([,r])=>r).find(Boolean);
@@ -2138,8 +2146,9 @@ async function recalcList(id, basis, fromCases){
     if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; } }
     // «لكل طالب»: a family with no students count yet gets it from the children on her case file (by the stages this
     // rule counts); a count someone typed is kept — unless «حدّث من ملفات الحالات» is ticked
-    if(b&&((r?.mode==="student"&&it.students==null)||fromCases)){ const st=studentsOf(b, r?.levels||null);
-      if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(r?.mode==="student"&&it.students==null) noKids.push(it.name); }
+    const byStu=r&&(r.mode==="student"||(r.mode==="tiers"&&r.tierBy==="students"));
+    if(b&&((byStu&&it.students==null)||fromCases)){ const st=studentsOf(b, r?.levels||null);
+      if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(byStu&&it.students==null) noKids.push(it.name); }
     if(r){ const v=shareFor(r,fam,stu); if(+it.value!==v) row.value=v; }
     if(Object.keys(row).length) upd.push([it,row]); }
   let done=0, failed=null;
@@ -2149,10 +2158,10 @@ async function recalcList(id, basis, fromCases){
 }
 /* A list's quantity rule (basis): mode + numbers. A list made from several lists keeps each source's own rule in
    basis.src {source title → rule}, so a family's amount is always worked out by the rule of the list she came from. */
-const RULE_KEYS=["mode","per","cut","small","big","stu","levels"];
+const RULE_KEYS=["mode","per","cut","small","big","stu","levels","tierBy"];
 const ruleOnly=b=>b&&b.mode?Object.fromEntries(RULE_KEYS.filter(x=>b[x]!=null&&b[x]!=="").map(x=>[x,b[x]])):null;
 const ruleOf=(k,it)=>{ const b=k.basis; if(!b) return null; if(b.src){ const t=srcTitles(it)[0]; if(t&&b.src[t]) return b.src[t]; } return b.mode?b:null; };
-const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب${b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
+const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب${b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?(b.tierBy==="students"?`لحد ${b.cut} طالب ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}${b.levels?` (${b.levels.join("، ")})`:""}`:`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`):b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
 function basisText(k){
   const b=k.basis||{}, u=k.unit;
   const how=b.src?Object.entries(b.src).map(([t,r])=>`من «${shortTitle(t)}» ${ruleHow(r,u)}`).join("، "):ruleHow(b,u);

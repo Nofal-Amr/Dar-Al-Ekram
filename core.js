@@ -133,7 +133,8 @@ export function shareFor(basis, fam, students = 0){
   const f = +fam || 1, per = +basis?.per || 0;
   if(basis?.mode === "student") return per * (+students || 0);   // no students → nothing (unlike family size, 0 is a real count)
   if(basis?.mode === "member") return per * f;
-  if(basis?.mode === "tiers") return f <= (+basis.cut || 3) ? +basis.small || 0 : +basis.big || 0;
+  // tiers: «up to cut → small, more → big», counted by family members, or by students (tierBy: "students")
+  if(basis?.mode === "tiers"){ const n = basis.tierBy === "students" ? (+students || 0) : f; return n <= (+basis.cut || (basis.tierBy === "students" ? 2 : 3)) ? +basis.small || 0 : +basis.big || 0; }
   return per;
 }
 const gradeRank = g => ({A:0,B:1,C:2}[g] ?? 3);

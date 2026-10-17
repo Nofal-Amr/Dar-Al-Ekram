@@ -360,3 +360,9 @@ test("xlsx writer makes a zip with the sheet parts", () => {
   const txt = new TextDecoder().decode(z);
   for(const part of ["[Content_Types].xml", "xl/workbook.xml", "xl/styles.xml", "xl/worksheets/sheet1.xml", "_xlnm.Print_Titles", 'rightToLeft="1"', '<mergeCell ref="A1:B1"/>']) assert.ok(txt.includes(part), part);
 });
+
+test("tiers by students: 1 bag for up to 2 students, 2 bags for more", () => {
+  const r = { mode:"tiers", tierBy:"students", cut:2, small:1, big:2 };
+  assert.deepEqual([0,1,2,3,5].map(n => shareFor(r, 6, n)), [1,1,1,2,2]);
+  assert.equal(shareFor({ mode:"tiers", cut:3, small:1, big:2 }, 5, 0), 2);   // by family size, as before
+});
