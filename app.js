@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.76";
+export const VERSION = "1.3.77";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -310,7 +310,7 @@ function findItem(id){ for(const k of K.values()){ const it = k.items.find(x => 
 const inflight = new Set();   // items being sent right now — a second tap waits for the first answer
 const tLabel = iso => { try{ return new Date(iso).toLocaleTimeString("ar-EG", { hour:"numeric", minute:"2-digit" }); }catch(e){ return ""; } };
 /* Returns "ok" | "queued" (no internet / signed out: kept on the device) | "already" (someone marked it first) | "busy" | "error".
-   The database decides: a second «سلّم» on a family that already got it changes nothing and says who gave it and when. */
+   The database decides: a second «استلم» on a family that already got it changes nothing and says who gave it and when. */
 async function markReceived(it, v){
   if(inflight.has(it.id)) return "busy";
   inflight.add(it.id);
@@ -1071,7 +1071,7 @@ function vSimple(){
       <div class="s-count"><span class="prog big"><i style="width:${k.items.length?Math.round(rec/k.items.length*100):0}%"></i></span>استلم <b>${num(rec)}</b> من <b>${num(k.items.length)}</b></div>
       <input type="search" class="s-search" id="s_q" placeholder="اكتب الاسم" value="${esc(sq)}">
       <div class="s-list">${items.map(it=>`<div class="s-row ${it.received?"done":""}"><span class="grow"><b>${esc(it.name)}</b>${itemTags(k,it)}<small>رقم ${esc(it.code)} · ${num(it.value)} ${esc(k.unit)}</small></span>
-        ${it.received?`<span class="s-ok">✓ استلم${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}</span>${canUngive(it)?`<button class="s-ungive" data-ungive="${it.id}">رجّع</button>`:""}`:`<button class="s-give" data-give="${it.id}">سلّم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
+        ${it.received?`<span class="s-ok">✓ استلم${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}</span>${canUngive(it)?`<button class="s-ungive" data-ungive="${it.id}">رجّع</button>`:""}`:`<button class="s-give" data-give="${it.id}">استلم</button>`}</div>`).join("")||`<div class="s-empty">مفيش الاسم ده في الكشف</div>`}</div>`;
   }
   if(scr==="cb"){
     const k=K.get(id); if(!k) return back+noBatches;
@@ -1119,7 +1119,7 @@ function bindSimple(){
     const bid=sv.screen.split(":")[1]; const k=K.get(bid); const it=k?.items.find(x=>x.id===el.dataset.give); if(!it) return;
     el.disabled=true; el.innerHTML=`<span class="spin" aria-hidden="true"></span>`;
     const r=await markReceived(it,true);
-    if(r==="error"||r==="busy"){ el.disabled=false; el.textContent="سلّم"; return; }
+    if(r==="error"||r==="busy"){ el.disabled=false; el.textContent="استلم"; return; }
     if(r==="already") return;
     if(navigator.vibrate) navigator.vibrate(40);
     if(r==="queued") toast(`${it.name} — اتسجل، وهيترفع لما النت يرجع`); else undoable(`✓ ${it.name} استلم`, ()=>undoReceive(it.id,false,bid));
@@ -2216,7 +2216,7 @@ function openBatch(id, giveMode){
       ${groups.map(([t,r],i)=>ruleEditorHTML(k,i,t,r)).join("")}
       <label class="chk"><input type="checkbox" id="rp_fam"> هات عدد الأفراد والطلاب من ملفات الحالات (أوتوماتيك — هيكتب فوق الأعداد اللي اتكتبت في الكشف)</label>
       <div class="bar"><button class="btn pri" id="rp_go">${ic("refresh")}طبّق على كل اللي ما استلموش</button></div></details>`; })():""}
-    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «سلّم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
+    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
       ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
       ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
@@ -2236,7 +2236,7 @@ function openBatch(id, giveMode){
       ${fbOn(k)?(canRsvp()?`<input type="text" class="fbin" data-fb="${it.id}" value="${esc(it.feedback||"")}" placeholder="${esc(k.feedback)}" aria-label="${esc(k.feedback)} — ${esc(it.name)}">`:it.feedback?`<span class="why">${esc(k.feedback)}: ${esc(it.feedback)}</span>`:""):""}
       ${canAdjust(k)&&!it.received?`<button class="btn sm" data-eit="${it.id}" aria-label="عدّل الأعداد — ${esc(it.name)}" title="عدّل الأفراد والكمية">${ic("edit")}</button>`:""}
       ${isMgr()&&!it.received?`<button class="btn sm danger" data-rm="${it.id}" aria-label="شيل ${esc(it.name)} من الكشف" title="شيل من الكشف">×</button>`:""}
-      ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"سلّم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
+      ${canWrite()?`${it.pending?`<small class="pend">${ic("refresh")}مستني النت</small>`:""}<button class="gb" data-rc="${it.id}" aria-pressed="${it.received}">${it.received?"استلم ✓":"استلم"}</button>`:it.received?`<span class="chip">استلم</span>`:""}</div>`).join("")||`<div class="empty">مفيش نتيجة</div>`}</div>`
     :(()=>{ const ed=canEditList(k), stu=ed||stuOn(k)||items.some(i=>i.students!=null), cell=(it,f,v,lbl)=>ed?`<input type="number" min="0" step="any" class="numin" data-ei="${it.id}" data-ef="${f}" value="${v??""}" aria-label="${lbl} — ${esc(it.name)}">`:esc(v??"");
       return `${ed?`<p class="sub" style="margin:0 0 6px">اكتب عدد الأفراد والطلاب لكل أسرة — بيتحفظ لوحده، و<b>الكمية مابتتغيرش لوحدها</b>. لما تخلص (قبل أو بعد الاعتماد) افتح «حساب الكمية» فوق واختار القاعدة ودوس «طبّق»، أو اكتب الكمية بإيدك.</p>`:""}
       <div class="tbl"><table><thead><tr><th>م</th><th>الاسم</th>${k.template==="cash"?"<th>الرقم القومي</th>":""}<th>أفراد</th>${stu?"<th>طلاب</th>":""}<th>${k.template==="cash"?"المبلغ":"الكمية"}</th>${fbOn(k)?`<th>${esc(k.feedback)}</th>`:""}<th></th></tr></thead><tbody>
