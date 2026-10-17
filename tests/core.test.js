@@ -373,3 +373,13 @@ test("per every N: 2 for every 2 members, part-group up or down", () => {
   assert.deepEqual([1,2,3,4,5].map(f => shareFor({ ...r, round:"down" }, f)), [0,2,2,4,4]);
   assert.deepEqual([0,1,2,3].map(n => shareFor({ mode:"group", every:2, per:1, tierBy:"students" }, 6, n)), [0,1,1,2]);
 });
+
+import { scoreEval, gradeOf, suggestEval, EVAL_MAX } from "../core.js";
+test("evaluation form: 53 points, grade bands", () => {
+  assert.equal(EVAL_MAX, 53);
+  const all = { age:"gt51", marital:"abandoned", job:"none", debt:"gt1501", housing:"rent", illness:"family", education:"secondary", kids:"4" };
+  assert.deepEqual(scoreEval(all), { total:53, pct:100, grade:"A", missing:[] });
+  assert.deepEqual([81,80,61,60,50,49].map(gradeOf), ["A","B","B","C","C",""]);
+  assert.equal(scoreEval({ age:"lt30" }).missing.length, 7);
+  assert.deepEqual(suggestEval({ age:45, marital:"أرملة", housing:"إيجار", kids:3, stages:["رابعة ابتدائي","تانية إعدادي"] }), { age:"31_50", marital:"widow", housing:"rent", kids:"2_3", education:"prep" });
+});

@@ -1,10 +1,10 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, suggestCode, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, suggestCode, EVAL_FORM, EVAL_MAX, EVAL_REV, scoreEval, gradeOf, suggestEval, minPin } from "./core.js";
 import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.85";
+export const VERSION = "1.3.86";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -175,10 +175,10 @@ async function logIt(entity, id, text){ if(!canWrite() || !text) return; const {
 const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", whatsapp:r.whatsapp||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
   familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{}, docs:r.docs||[],
-  fcode:r.fcode||"", fcodeGroup:r.fcode_group||"", fcodeNo:r.fcode_no??null, fcodeOkBy:r.fcode_ok_by||null, fcodeOkAt:r.fcode_ok_at||null, fcodeReq:r.fcode_req||null });
+  evaluation:r.evaluation||null, fcode:r.fcode||"", fcodeGroup:r.fcode_group||"", fcodeNo:r.fcode_no??null, fcodeOkBy:r.fcode_ok_by||null, fcodeOkAt:r.fcode_ok_at||null, fcodeReq:r.fcode_req||null });
 const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
-  family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
+  family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[], evaluation:b.evaluation??null });
 const fromT = r => ({ id:r.id, name:r.name, unit:r.unit, amount:+r.amount, itemId:r.item_id||null, caseTypes:r.case_types||[], cooldown:r.cooldown, template:r.template, order:r.sort, archivedAt:r.archived_at||null });
 const fromK = (r, items) => ({ id:r.id, title:r.title, typeId:r.type_id, typeName:r.type_name, unit:r.unit, template:r.template, month:r.month, status:r.status, single:r.single, cooldown:r.cooldown,
   createdAt:r.created_at, createdBy:r.created_by, approvedAt:r.approved_at, approvedBy:r.approved_by, archivedAt:r.archived_at||null, settledAt:r.settled_at||null, week:r.week||null, distDate:r.dist_date||"", days:(r.dist_days&&r.dist_days.length?r.dist_days:r.dist_date?[r.dist_date]:[]).slice().sort(), donor:r.donor||"", basis:r.basis||null, feedback:r.feedback||null, items:(items||[]).sort((a,b)=>a.position-b.position).map(fromI) });
@@ -252,7 +252,7 @@ async function refreshPerson(id){ const { data } = await sb.from("beneficiaries"
 /* Save a case without erasing what someone else changed meanwhile: only the fields this form changed are sent,
    and if another person changed one of those same fields since the form opened, we ask before writing over it.
    Returns { ok } | { none } (nothing changed) | { cancelled } | { error }. */
-const B_LABEL = { code:"رقم الحالة", name:"الاسم", national_id:"الرقم القومي", phone:"التليفون", phone2:"التليفون التاني", phone2_owner:"صاحب التليفون التاني", whatsapp:"الواتساب", birth:"تاريخ الميلاد", case_type:"نوع الحالة", grade:"التقدير", project:"المشروع", area:"المنطقة", address:"العنوان", marital:"الحالة الاجتماعية", job:"العمل", income:"الدخل", pension:"المعاش", housing:"السكن", family_size:"عدد الأفراد", status:"الحالة", last_review:"آخر مراجعة", next_review:"المراجعة الجاية", notes:"الملاحظات", children:"الأبناء", tags:"قوايم المتبرعين" };
+const B_LABEL = { evaluation:"استمارة التقييم", score:"الدرجة", code:"رقم الحالة", name:"الاسم", national_id:"الرقم القومي", phone:"التليفون", phone2:"التليفون التاني", phone2_owner:"صاحب التليفون التاني", whatsapp:"الواتساب", birth:"تاريخ الميلاد", case_type:"نوع الحالة", grade:"التقدير", project:"المشروع", area:"المنطقة", address:"العنوان", marital:"الحالة الاجتماعية", job:"العمل", income:"الدخل", pension:"المعاش", housing:"السكن", family_size:"عدد الأفراد", status:"الحالة", last_review:"آخر مراجعة", next_review:"المراجعة الجاية", notes:"الملاحظات", children:"الأبناء", tags:"قوايم المتبرعين" };
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 async function patchPerson(id, orig, next){
   const a = toB(orig), b = toB(next), keys = Object.keys(b).filter(k => !same(a[k], b[k]));
@@ -856,11 +856,56 @@ function vReports(){
   ${Object.entries(yT).map(([n,v])=>`<tr><td>${esc(n)}</td><td class="n">${num(v.n)}</td><td class="n">${num(v.p.size)}</td><td class="n">${num(v.total)} ${esc(v.unit)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">لا يوجد صرف معتمد هذه السنة بعد</td></tr>`}
   </tbody></table></div>`;
 }
+/* ---------- case evaluation form (استمارة تقييم الحالات) ----------
+   The paper form on screen: 8 items, pick one option each, the score (out of 53), the percentage and the grade are worked
+   out as you go. It starts from what's on the case file; saving writes the score and grade (the grade goes into the family
+   code) and keeps the answers to print the filled form. */
+function evalSheet(bid){
+  const b=B.get(bid); if(!b) return;
+  const ev=b.evaluation||null, kids=(b.children||[]).filter(k=>{ const a=age(k.birth); return a===""||a<26; }).length;
+  const ans={ ...suggestEval({ age:age(b.birth||parseNID(b.nationalId||"",now).birth||""), marital:b.marital, housing:b.housing, job:b.job, kids, stages:(b.children||[]).map(stageOf) }), ...(ev?.answers||{}) };
+  const draw=()=>{ const r=scoreEval(ans);
+    return `<p class="sub" style="margin-top:0">${esc(EVAL_REV)} — ${ev?`آخر تقييم ${dLabel(ev.at)} (${esc(who(ev.by))}): ${ev.total} من ${EVAL_MAX} = ${ev.pct}%${ev.grade?` (${ev.grade})`:""}`:"أول تقييم للأسرة دي. الاختيارات المعلّمة جاية من ملفها — راجعها."}</p>
+    <div class="evtot ${r.missing.length?"":"done"}"><b>${r.total}</b> من ${EVAL_MAX} = <b>${r.pct}%</b> ← ${r.grade?`تقدير <b>${r.grade}</b>`:r.missing.length?"":"<b>غير مقبول</b> (أقل من 50%)"}${r.missing.length?` <span class="sub">— فاضل: ${esc(r.missing.join("، "))}</span>`:""}</div>
+    <p class="sub">A: 81% فأكتر · B: من 61% لـ 80% · C: من 50% لـ 60%</p>
+    ${EVAL_FORM.map((it,i)=>`<fieldset class="evit"><legend>${i+1}. ${esc(it.name)} <small>(${it.max})</small></legend>
+      ${it.opts.map(([v,l,sc,note])=>`<label class="chk"><input type="radio" name="ev_${it.key}" value="${v}" ${ans[it.key]===v?"checked":""}> ${esc(l)} <b class="evsc">${sc}</b>${note?` <small class="sub">— ${esc(note)}</small>`:""}</label>`).join("")}</fieldset>`).join("")}
+    <label class="f">القائم بالبحث<input type="text" id="ev_by" value="${esc(ev?.researcher||me?.full_name||"")}"></label>
+    <div class="bar"><button class="btn pri" id="ev_save">${ic("save")}حفظ التقييم</button><button class="btn" id="ev_print">${ic("printer")}اطبع الاستمارة</button></div>`; };
+  const mount=s=>{ const q=x=>s.querySelector(x);
+    s.querySelectorAll("input[type=radio]").forEach(el=>el.onchange=()=>{ ans[el.name.slice(3)]=el.value; const by=q("#ev_by").value, sc=s.querySelector(".sh-body").scrollTop; s.querySelector(".sh-body").innerHTML=draw(); mount(s); q("#ev_by").value=by; s.querySelector(".sh-body").scrollTop=sc; });
+    q("#ev_print").onclick=()=>{ const r=scoreEval(ans); doPrint(evalHTML(b,{ answers:ans, ...r, researcher:q("#ev_by").value.trim(), at:new Date().toISOString() }), `تقييم ${b.code} ${b.name}`); };
+    q("#ev_save").onclick=async()=>{ const r=scoreEval(ans);
+      if(r.missing.length&&!await ask(`فاضل: ${r.missing.join("، ")}.\nالبنود الفاضية بتتحسب صفر. تحفظ كده؟`,{title:"التقييم مش كامل",ok:"احفظ",cancel:"أكمّله"})) return;
+      const cur=B.get(bid), evaluation={ rev:EVAL_REV, at:new Date().toISOString(), by:me.id, researcher:q("#ev_by").value.trim(), answers:{ ...ans }, total:r.total, pct:r.pct, grade:r.grade };
+      q("#ev_save").disabled=true;
+      const res=await patchPerson(bid, cur, { ...cur, score:r.pct, grade:r.grade, evaluation });
+      if(res.cancelled||res.error){ q("#ev_save").disabled=false; if(res.error) toast(errMsg(res.error,"case","evaluation")); return; }
+      await logIt("beneficiary",bid,`تقييم الحالة (${EVAL_REV}): ${r.total} من ${EVAL_MAX} = ${r.pct}%${r.grade?` — تقدير ${r.grade}`:" — غير مقبول"}${cur.grade&&cur.grade!==r.grade?` (كان ${cur.grade})`:""}`);
+      await refreshPerson(bid); toast(`اتحفظ ✓ ${r.pct}%${r.grade?` — تقدير ${r.grade}`:""}${cur.fcode&&cur.grade!==r.grade?" · التقدير اتغير: لو عايز الكود يتغير اقترح كود جديد":""}`); viewPerson(bid); };
+  };
+  const s=sheet(`استمارة تقييم — ${b.name}`, draw(), mount);
+}
+// the filled form, laid out like the paper
+function evalHTML(b, ev){
+  const tick=v=>v?"✔":"";
+  return `<div class="ps">${hdr()}<h1>استمارة تقييم الحالات</h1><div class="mo">${esc(EVAL_REV)}</div>
+    <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:10px">
+      <table class="kv" style="flex:2"><tbody>
+        <tr><td>نوع الكفالة</td><td>${esc(b.caseType||"")}</td></tr><tr><td>اسم الحالة</td><td>${esc(b.name)} (${esc(b.fcode||b.code)})</td></tr>
+        <tr><td>رقم الموبايل</td><td>${esc(cleanPhone(b.phone)||"")}</td></tr><tr><td>الدرجة ونسبة القبول</td><td>${ev.total} من ${EVAL_MAX} — ${ev.pct}%${ev.grade?` (${ev.grade})`:" (غير مقبول)"}</td></tr></tbody></table>
+      <table style="flex:1"><thead><tr><th>التقدير</th><th>النسبة</th></tr></thead><tbody><tr><td>A</td><td>&gt;= 81%</td></tr><tr><td>B</td><td>61% — 80%</td></tr><tr><td>C</td><td>50% — 60%</td></tr></tbody></table></div>
+    <table><thead><tr><th>م</th><th>البند</th><th>${EVAL_MAX}</th><th>التفصيل</th><th>Sc</th><th>الدرجة</th><th>ملاحظات</th></tr></thead><tbody>
+    ${EVAL_FORM.map((it,i)=>it.opts.filter(o=>o[0]!=="0"||o[0]===ev.answers[it.key]).map((o,j,arr)=>`<tr>${j?"":`<td rowspan="${arr.length}">${i+1}</td><td rowspan="${arr.length}" class="l"><b>${esc(it.name)}</b></td><td rowspan="${arr.length}">${it.max}</td>`}
+      <td class="l">${tick(ev.answers[it.key]===o[0])} ${esc(o[1])}</td><td>${o[2]}</td><td><b>${ev.answers[it.key]===o[0]?o[2]:""}</b></td><td class="l" style="font-size:10px">${esc(o[3]||"")}</td></tr>`).join("")).join("")}
+    </tbody><tfoot><tr><td colspan="5">الإجمالي</td><td>${ev.total}</td><td>${ev.pct}%${ev.grade?` — ${ev.grade}`:""}</td></tr></tfoot></table>
+    <div class="signs"><div>القائم بالبحث<span></span><em>الاسم: <i>${esc(ev.researcher||"")}</i></em><em>التوقيع: <i></i></em></div><div>مدير الجمعية<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div></div></div>`;
+}
 /* ---------- family codes (propose → approve) ---------- */
 // one family: see her code, propose one (office), approve / reject a proposal (manager or a designated approver)
 function codeDialog(bid){
   const b=B.get(bid); if(!b) return; const g=groupOfB(b), req=b.fcodeReq;
-  const sug=g?suggestCode(b.code,b.grade,g.letter,nextGroupNo(g.letter)):"";
+  const sug=g?suggestCode(b.code,b.grade||gradeOf(b.score),g.letter,nextGroupNo(g.letter)):"";
   const w=document.createElement("div"); w.className="ask-scrim";
   w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="cdT"><h2 id="cdT">كود الأسرة — ${esc(b.name)}</h2>
     <p class="sub" style="margin-top:0">الكود المعتمد: <b dir="ltr">${esc(b.fcode||"لسه مفيش")}</b>${b.fcodeOkBy?` — اعتمده ${esc(who(b.fcodeOkBy))} ${dLabel(b.fcodeOkAt)}`:""}</p>
@@ -902,7 +947,7 @@ function codesSheet(){
       // by case number; each group continues from its last number
       const taken={}, rows=[];
       for(const b of people().filter(b=>!b.fcode&&!b.fcodeReq).sort(byCode)){ const g=groupOfB(b); if(!g) continue;
-        const no=nextGroupNo(g.letter, taken[g.letter]||[]); (taken[g.letter]||=[]).push(no); rows.push({ id:b.id, code:suggestCode(b.code,b.grade,g.letter,no), group:g.letter, no }); }
+        const no=nextGroupNo(g.letter, taken[g.letter]||[]); (taken[g.letter]||=[]).push(no); rows.push({ id:b.id, code:suggestCode(b.code,b.grade||gradeOf(b.score),g.letter,no), group:g.letter, no }); }
       const used=new Set([...B.values()].flatMap(x=>[x.fcode,x.fcodeReq?.code]).filter(Boolean)), clash=rows.filter(r=>used.has(r.code));
       if(clash.length){ toast(`فيه ${num(clash.length)} كود متكرر (${clash[0].code}) — راجع الأرقام`); return; }
       if(!await ask(`هيتقترح ${num(rows.length)} كود (زي ${rows[0]?.code||""})، وبيستنوا الاعتماد.`,{title:"اقتراح الأكواد؟",ok:"اقترح"})) return;
@@ -1388,7 +1433,7 @@ function viewPerson(id){
     </div>
     <div class="callbar">${callCell(b.id,validPhone(b.phone)?b.phone:b.phone2,null,true)}${waBtn(b,"cdial wa big")}</div>
     <div class="bar">
-      ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button><button class="btn" id="v_code">${ic("key")}${B.get(id)?.fcodeReq&&canApproveCodes()?"اعتماد الكود":B.get(id)?.fcode?"الكود":"اقترح كود"}</button>`:""}
+      ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button><button class="btn" id="v_eval">${ic("list")}استمارة التقييم</button><button class="btn" id="v_code">${ic("key")}${B.get(id)?.fcodeReq&&canApproveCodes()?"اعتماد الكود":B.get(id)?.fcode?"الكود":"اقترح كود"}</button>`:""}
       ${isMgr()?`<button class="btn gold" id="v_single">${ic("cash")}صرف فردي</button>`:""}
       <button class="btn" id="v_print">${ic("printer")}طباعة الملف</button>
       ${canWrite()?`<button class="btn" id="v_task">${ic("check")}مهمة للحالة دي</button>`:""}
@@ -1398,7 +1443,7 @@ function viewPerson(id){
       ${f("رقم الحالة",b.code)}${f("الرقم القومي",b.nationalId)}${f("السن",age(b.birth))}${f("التليفون",cleanPhone(b.phone)||b.phone)}${f(b.phone2Owner?`تليفون تاني (${b.phone2Owner})`:"تليفون تاني",b.phone2)}${waNum(b)&&waNum(b)!==cleanPhone(b.phone)?f("واتساب",waNum(b)):""}
       ${f("الحالة الاجتماعية",b.marital)}${f("أفراد الأسرة",b.familySize||(famSize(b)?famSize(b)+" (من عدد الأبناء)":""))}${f("عدد الأبناء",(b.children||[]).length||"")}
       ${f("المشروع",b.project)}${f("المنطقة",b.area)}${f("العمل",b.job)}${f("الدخل",b.income)}${f("المعاش",b.pension)}${f("السكن",b.housing)}
-      ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?b.score+"%":"")}
+      ${f("آخر مراجعة",b.lastReview&&dLabel(b.lastReview))}${f("المراجعة الجاية",b.nextReview&&dLabel(b.nextReview))}${f("الدرجة",b.score!=null?`${b.score}%${b.evaluation?` (${b.evaluation.total} من ${EVAL_MAX})`:""}`:"")}
     </div>
     ${b.address?`<p><span class="sub">العنوان:</span> ${esc(b.address)}</p>`:""}
     ${b.notes?`<div class="note">${esc(b.notes)}</div>`:""}
@@ -1426,6 +1471,7 @@ function viewPerson(id){
     if(q("#v_edit")) q("#v_edit").onclick=()=>editPerson(id);
     if(q("#v_code")) q("#v_code").onclick=()=>codeDialog(id);
     if(q("#v_rev")) q("#v_rev").onclick=()=>reviewSheet(id);
+    if(q("#v_eval")) q("#v_eval").onclick=()=>evalSheet(id);
     if(q("#v_single")) q("#v_single").onclick=()=>singleGive(id);
     q("#v_print").onclick=()=>doPrint(caseHTML(B.get(id),logs||[]), `ملف ${B.get(id).code} ${B.get(id).name}`);
     if(q("#v_task")) q("#v_task").onclick=()=>taskSheet(null,id);

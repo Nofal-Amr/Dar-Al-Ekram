@@ -410,3 +410,42 @@ export function mergeById(base, mine, theirs){
   for(const x of mine || []) if(!have.has(x.id) && !b.has(x.id)) out.push(x);                     // added here
   return out;
 }
+
+/* ---------- case evaluation form (استمارة تقييم الحالات — REV 7, 27/07/2024) ----------
+   8 items, 53 points in all. The result is a percentage and a grade: A ≥ 81%, B 61–80%, C 50–60%, below 50% not accepted.
+   Each item has its options with their points; «none» (0) is there for items that may not apply. */
+export const EVAL_REV = "REV 7 — 27/07/2024";
+export const EVAL_FORM = [
+  { key:"age", name:"السن", max:4, opts:[["lt30","أقل من 30",3],["31_50","من 31 لـ 50",1.5],["gt51","أكبر من 51",4]] },
+  { key:"marital", name:"الحالة الاجتماعية", max:5, opts:[["married","متزوجة",2],["divorced","مطلقة",3],["abandoned","هجر",5],["widow","أرملة",4]] },
+  { key:"job", name:"نوع الوظيفة", max:7, opts:[["works","العائل يعمل",3,"متوسط أكثر من 1500 شهري"],["casual","يعمل عامل / غير دائم",5,"متوسط أقل من 1500 شهري"],["none","لا يعمل",7,"مريض مزمن حرج لا يقدر على العمل"]] },
+  { key:"debt", name:"إجمالي الدين", max:7, opts:[["0","مفيش دين",0],["lt500","أقل من 500",1],["501_800","501 – 800",2],["801_1100","801 – 1100",3],["1101_1500","1101 – 1500",5],["gt1501","أكتر من 1501",7]] },
+  { key:"housing", name:"نوع السكن", max:6, opts:[["own","ملك",0,"بيت دور واحد شقة واحدة بحد أقصى 100 م²"],["family","مشاركة الأسرة",3,"استضافة"],["rent","إيجار",6,"إيجار جديد"]] },
+  { key:"illness", name:"المرض / إعاقة مرضية", max:9, opts:[["0","مفيش",0],["dependents","التابعين",3],["provider_critical","العائل مزمن حرج",7,"أورام - شلل - ذوي همم - معاق - قلب مفتوح - تليف كبدي"],["provider_works","العائل مزمن ويعمل",5],["family","الأسرة",9,"العائل وأحد الأبناء على الأقل"]] },
+  { key:"education", name:"مراحل التعليم", max:8, opts:[["0","مفيش أبناء في التعليم",0],["primary","ابتدائي",2],["prep","إعدادي - فني",4],["secondary","ثانوي",8],["university","جامعي",7]] },
+  { key:"kids", name:"عدد الأبناء", max:7, opts:[["0","مفيش",0],["1","ابن واحد",2],["2_3","من 2 لـ 3",5],["4","4 فأكتر",7,"البنات حتى الزواج والأولاد حتى إتمام التعليم"]] },
+];
+export const EVAL_MAX = EVAL_FORM.reduce((s, it) => s + it.max, 0);   // 53
+export const gradeOf = pct => pct == null || pct === "" ? "" : pct >= 81 ? "A" : pct >= 61 ? "B" : pct >= 50 ? "C" : "";
+export function scoreEval(answers = {}){
+  let total = 0, missing = [];
+  for(const it of EVAL_FORM){ const o = it.opts.find(x => x[0] === answers[it.key]); if(o) total += o[2]; else missing.push(it.name); }
+  const pct = Math.round(total / EVAL_MAX * 100);
+  return { total, pct, grade: gradeOf(pct), missing };
+}
+// A starting point from what's on the case file (everything stays editable): age, marital status, housing, children, school stages.
+export function suggestEval({ age: a = "", marital = "", housing = "", job = "", kids = 0, stages = [] } = {}){
+  const s = {};
+  if(a !== "" && a != null) s.age = a <= 30 ? "lt30" : a <= 50 ? "31_50" : "gt51";
+  const m = String(marital || "");
+  s.marital = /أرمل/.test(m) ? "widow" : /مطلق/.test(m) ? "divorced" : /مهجور|هجر/.test(m) ? "abandoned" : /متزوج/.test(m) ? "married" : undefined;
+  const h = String(housing || "");
+  s.housing = /إيجار|ايجار/.test(h) ? "rent" : /أهل|اهل|مشارك|استضاف/.test(h) ? "family" : /ملك|تمليك/.test(h) ? "own" : undefined;
+  const j = String(job || "");
+  s.job = !j.trim() ? undefined : /لا يعمل|لاتعمل|لا تعمل|بدون|مفيش|ربة منزل|ربه منزل/.test(j) ? "none" : /عامل|يومي|اليومية|غير دائم|أرزقي|ارزقي/.test(j) ? "casual" : "works";
+  s.kids = kids >= 4 ? "4" : kids >= 2 ? "2_3" : kids === 1 ? "1" : "0";
+  const g = stages.map(x => String(x || ""));
+  s.education = g.some(x => /ثانوي/.test(x)) ? "secondary" : g.some(x => /جامعة|معهد/.test(x)) ? "university" : g.some(x => /إعدادي|اعدادي|فني/.test(x)) ? "prep" : g.some(x => /ابتدائي/.test(x)) ? "primary" : "0";
+  for(const k of Object.keys(s)) if(s[k] === undefined) delete s[k];
+  return s;
+}
