@@ -1,9 +1,10 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
   STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
+import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.71";
+export const VERSION = "1.3.72";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -3542,7 +3543,7 @@ async function doPrint(html, title){
   splitRows(box,o.n);
   const phone=/Android|iPhone|iPad/i.test(navigator.userAgent), oldTitle=document.title, scroll=window.scrollY;
   const bar=document.createElement("div"); bar.id="pvbar";
-  bar.innerHTML=`<button class="btn pri" data-pv="print">${ic("printer")}اطبع</button><button class="btn" data-pv="back">${ic("undo")}رجوع</button>
+  bar.innerHTML=`<button class="btn pri" data-pv="print">${ic("printer")}اطبع</button><button class="btn" data-pv="xlsx">${ic("sheet")}Excel زي الورقة</button><button class="btn" data-pv="back">${ic("undo")}رجوع</button>
     <span class="sub">${phone?"لو الطباعة مافتحتش: من قايمة المتصفح ⋮ اختار «مشاركة» ← «طباعة» أو «حفظ PDF».":"اختار الطابعة أو «حفظ كـ PDF»."}</span>`;
   const close=()=>{ if(pvClose!==close) return; pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
     window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true);
@@ -3551,7 +3552,7 @@ async function doPrint(html, title){
   const onBack=()=>{ if(pvClose===close){ history.replaceState(null,""); pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
     window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true); window.scrollTo(0,scroll); } };
   const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); close(); } };
-  bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else close(); };
+  bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else if(b.dataset.pv==="xlsx") printXlsx(box, title||"طباعة"); else close(); };
   pvClose=close; document.body.appendChild(bar); document.body.classList.add("pv"); box.scrollTop=0;
   // the page is drawn at paper width and shrunk to fit a phone screen; the pages start below the bar
   box.style.setProperty("--pvz", String(Math.min(1, (innerWidth-28)/760))); box.style.paddingTop=(bar.offsetHeight+14)+"px";
@@ -3566,7 +3567,12 @@ function batchXlsx(k){
   const rows=[[ORG],[ORG2],[`${k.single?"إيصال صرف":"كشف صرف"} ${k.typeName}${k.donor?` (${k.donor})`:""}`],[k.days?.length?`يوم ${daysText(k.days)} ${k.days[k.days.length-1].slice(0,4)}`:`عن شهر ${mLabel(k.month)}${k.week?` — الأسبوع ${k.week}`:""}`],[],["م","رقم الحالة","الاسم","الرقم القومي","عدد الأفراد",...S(["عدد الطلاب"]),cash?"المبلغ بالجنيه":"الكمية","التليفون","استلم","سبب الإدراج",...(fbOn(k)?[k.feedback]:[]),"التوقيع"]];
   k.items.forEach((it,i)=>rows.push([i+1,it.code,it.name,it.nationalId,+it.familySize||"",...S([it.students??""]),+it.value||0,cleanPhone(it.phone),it.received?"✓":"",it.reason||"",...(fbOn(k)?[it.feedback||""]:[]),""]));
   rows.push(["الإجمالي","",`${k.items.length} أسرة`,"",k.items.reduce((s,i)=>s+(+i.familySize||0),0),...S([k.items.reduce((s,i)=>s+(+i.students||0),0)]),k.items.reduce((s,i)=>s+(+i.value||0),0)],[],SIGNERS.flatMap(x=>[x,"",""]),SIGNERS.flatMap(()=>["التوقيع: ..........","",""]));
-  xlsx({"كشف":rows},`${k.title||k.typeName}.xlsx`,[5,10,30,18,10,...S([10]),12,14,7,30,...(fbOn(k)?[34]:[]),16]);
+  // first sheet: exactly like the printed page; second: the data (phone, received, reason…) for working on
+  const box=document.createElement("div"); box.innerHTML=batchHTML(k); const rh=printRowH();
+  if(rh) box.querySelectorAll("table:not(.kv) tbody tr").forEach(tr=>tr.style.height=rh+"mm"); splitRows(box, printRows());
+  (async()=>{ try{ const sh=htmlToSheet(box,"زي الورقة"), lg=await logoPNG(); if(lg.png) sh.image=lg;
+      saveFile(`${k.title||k.typeName}.xlsx`, new Blob([buildXlsx([sh, plainSheet("بيانات", rows, [5,10,30,18,10,...S([10]),12,14,7,30,...(fbOn(k)?[34]:[]),16])])],{ type:XLSX_TYPE })); }
+    catch(e){ toast(`ماقدرناش نعمل الـExcel — ${errMsg(e,"batch","xlsx")}`); } })();
 }
 function peopleRows(list){
   const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","واتساب","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
@@ -3588,6 +3594,71 @@ async function xlsx(sheets,filename,widths){
   const wb=XLSX.utils.book_new(); wb.Workbook={Views:[{RTL:true}]};
   for(const [name,rows] of Object.entries(sheets)){ const ws=XLSX.utils.aoa_to_sheet(rows); ws["!cols"]=(widths||rows[0].map(()=>16)).map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb,ws,name); }
   saveFile(filename, new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+}
+/* ---------- «Excel زي الورقة» ----------
+   Turns a print page (the same HTML the printer gets) into a styled Excel sheet: logo, the association's name, the
+   title, the table with borders and grey header, totals, signatures, page breaks and repeated table header.
+   Works without internet, so it's the way out when the print dialog hangs, or to keep a copy for later. */
+let logoPng=null;
+async function logoPNG(){
+  if(logoPng) return logoPng;
+  try{ const img=$("#logoImg"); if(img.decode) await img.decode().catch(()=>{}); const w=124, h=Math.round(w*(img.naturalHeight||210)/(img.naturalWidth||250));
+    const c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").drawImage(img,0,0,w,h);
+    const blob=await new Promise(r=>c.toBlob(r,"image/png")); logoPng={ png:new Uint8Array(await blob.arrayBuffer()), w:62, h:Math.round(62*h/w) }; }
+  catch(e){ logoPng={}; }
+  return logoPng;
+}
+const isNum=t=>/^-?\d{1,9}(\.\d+)?$/.test(t)&&!/^0\d/.test(t);
+function htmlToSheet(root, name){
+  const rows=[], merges=[], breaks=[]; let ncol=1, titles=null; const widths=[];
+  root.querySelectorAll("table").forEach(t=>{ for(const tr of t.rows){ let n=0; for(const td of tr.cells) n+=td.colSpan||1; ncol=Math.max(ncol,n); } });
+  const L=colName(ncol-1), add=(cells,h)=>{ rows.push({ cells, h }); return rows.length; };
+  const full=(v,st,h)=>{ const t=String(v||"").replace(/\s+/g," ").trim(); if(!t) return; const r=add([{ v:t, s:st }],h); if(ncol>1) merges.push(`A${r}:${L}${r}`); };
+  const seg=(r,a,b)=>{ if(b>a) merges.push(`${colName(a)}${r}:${colName(b)}${r}`); };
+  const tableRows=t=>{ if(t.style.pageBreakBefore==="always"&&rows.length) breaks.push(rows.length);
+    const grid=[]; let first=true;
+    for(const tr of t.rows){ const sec=tr.parentElement.tagName, cells=[], r=rows.length+1, taken=grid[rows.length]||[]; let c=0;
+      for(const td of tr.cells){ while(taken[c]) c++;
+        const tg=td.querySelector(".tg"), txt=(tg?[...td.childNodes].filter(n=>n!==tg).map(n=>n.textContent).join(""):td.textContent).replace(/\s+/g," ").trim();
+        const st=sec==="THEAD"||td.tagName==="TH"?"th":sec==="TFOOT"?"foot":td.classList.contains("nm")||td.classList.contains("l")||td.classList.contains("fbc")?"tdr":"td";
+        const n=latinDigits(txt).replace(/,/g,"");
+        cells[c]=tg?{ s:st, rich:[{ t:txt },{ t:"\n"+tg.textContent.trim(), small:true }] }:{ v:(st==="td"||st==="foot")&&isNum(n)?+n:txt, s:st };
+        const cs=td.colSpan||1, rs=td.rowSpan||1;
+        for(let i=0;i<rs;i++){ const g=(grid[rows.length+i]||=[]); for(let j=0;j<cs;j++) if(i||j) g[c+j]=1; }
+        for(let j=1;j<cs;j++) cells[c+j]={ v:"", s:st };
+        if(cs>1||rs>1) merges.push(`${colName(c)}${r}:${colName(c+cs-1)}${r+rs-1}`);
+        const len=td.classList.contains("fbc")?26:td.classList.contains("sig")?14:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
+        c+=cs; }
+      for(let j=0;j<ncol;j++) if(!cells[j]&&(grid[rows.length]||[])[j]) cells[j]={ v:"", s:sec==="TFOOT"?"foot":"td" };
+      const mm=parseFloat(tr.style.height)||0, h=mm?Math.round(mm*2.835):tr.querySelector(".tg")?30:undefined;
+      add(cells,h); if(sec==="THEAD"&&first&&!titles){ titles=[r,r]; } }
+    first=false; add([]); };
+  const walk=el=>{
+    if(el.matches(".hd")){ const org=el.querySelector(".org"), small=org?.querySelector("small")?.textContent||"", orgT=org?[...org.childNodes].filter(n=>n.nodeName!=="SMALL").map(n=>n.textContent).join("").trim():"", date=el.lastElementChild?.textContent?.trim()||"";
+      if(ncol>=3){ const r1=add([{ v:"" },{ v:orgT, s:"org" },...Array(ncol-3).fill(null),{ v:date, s:"date" }],30); seg(r1,1,ncol-2); const r2=add([{ v:"" },{ v:small, s:"small" }],18); seg(r2,1,ncol-2); }
+      else { full(orgT,"org",30); full(small,"small"); full(date,"date"); }
+      add(Array.from({ length:ncol },()=>({ v:"", s:"hdline" })),6); add([],8); return; }
+    if(el.matches("table")) return tableRows(el);
+    if(el.matches("h1")) return full(el.textContent,"title",26);
+    if(el.matches(".mo")) return full(el.textContent,"sub");
+    if(el.matches("h2,h3")) return full(el.textContent,"h2",22);
+    if(el.matches(".signs")){ const ds=[...el.children], k=ds.length||1, per=Math.max(1,Math.floor(ncol/k)); add([],14);
+      for(const line of [null,"الاسم: ................................","التوقيع: ..............................."]){ const cells=[], r=rows.length+1;
+        ds.forEach((d,i)=>{ const a=i*per, b=i===k-1?ncol-1:a+per-1; cells[a]={ v:line||d.firstChild?.textContent?.trim()||d.textContent.trim(), s:line?"line":"sign" }; seg(r,a,b); });
+        add(cells,line?30:22); } return; }
+    if(el.querySelector("table,.signs,.hd,h1,h2")) { [...el.children].forEach(walk); return; }
+    full(el.textContent,"def");
+  };
+  const blocks=root.querySelectorAll(".ps"); (blocks.length?[...blocks]:[root]).forEach((ps,i)=>{ if(i&&rows.length) breaks.push(rows.length); [...ps.children].forEach(walk); });
+  const cols=Array.from({ length:ncol },(_,i)=>Math.round(Math.max(6, Math.min(48, (widths[i]||8)*1.1+3))));
+  return { name:name||"زي الورقة", rtl:true, cols, rows, merges, breaks, titles, landscape:ncol>8 };
+}
+const XLSX_TYPE="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const plainSheet=(name,rows,widths)=>({ name, rtl:true, cols:widths||(rows[0]||[]).map(()=>16), rows:rows.map((r,i)=>({ cells:(r||[]).map(v=>({ v:typeof v==="number"?v:String(v??"") })) })) });
+async function printXlsx(root, filename){
+  try{ const sh=htmlToSheet(root,"زي الورقة"); sh.image=(await logoPNG()).png?await logoPNG():null;
+    saveFile(filename.replace(/\.xlsx$/i,"")+".xlsx", new Blob([buildXlsx([sh])],{ type:XLSX_TYPE })); }
+  catch(e){ toast(`ماقدرناش نعمل الـExcel — ${errMsg(e,"print","xlsx")}`); }
 }
 async function saveFile(filename,blob){
   filename=filename.replace(/[\\/:*?"<>|]/g,"-");

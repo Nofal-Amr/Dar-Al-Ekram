@@ -351,3 +351,12 @@ test("countStudents can leave out university and institute", () => {
   assert.equal(countStudents(kids), 4);
   assert.equal(countStudents(kids, new Date(), ["ابتدائي","إعدادي","ثانوي"]), 2);
 });
+
+import { buildXlsx, colName } from "../xlsxw.js";
+test("xlsx writer makes a zip with the sheet parts", () => {
+  assert.equal(colName(0), "A"); assert.equal(colName(25), "Z"); assert.equal(colName(26), "AA");
+  const z = buildXlsx([{ name:"ورقة", cols:[10], rows:[{ cells:[{ v:"اسم", s:"th" }, { v:5 }] }], merges:["A1:B1"], titles:[1,1] }]);
+  assert.equal(z[0], 0x50); assert.equal(z[1], 0x4b);
+  const txt = new TextDecoder().decode(z);
+  for(const part of ["[Content_Types].xml", "xl/workbook.xml", "xl/styles.xml", "xl/worksheets/sheet1.xml", "_xlnm.Print_Titles", 'rightToLeft="1"', '<mergeCell ref="A1:B1"/>']) assert.ok(txt.includes(part), part);
+});
