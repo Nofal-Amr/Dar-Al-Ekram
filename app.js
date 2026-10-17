@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.73";
+export const VERSION = "1.3.74";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -3531,7 +3531,7 @@ function splitRows(root, n){
       rows.slice(i,i+n).forEach(r=>b.appendChild(r)); p.appendChild(b); p.style.pageBreakBefore="always"; (t._last||t).after(p); t._last=p; }
     if(foot) (t._last||t).appendChild(foot); delete t._last; });
 }
-/* Printing opens a full-screen preview with «اطبع» and «رجوع» on top, then the print dialog. If the dialog doesn't open,
+/* Printing opens a full-screen preview with «اطبع», «اطبع في صفحة لوحدها», «Excel زي الورقة» and «رجوع». If the dialog doesn't open,
    comes back blank, or the phone's app can't print, you still see the pages and «رجوع» (or the phone's back button)
    always brings you back to where you were — never a white screen that needs a refresh.
    On a computer the preview closes by itself after the print dialog. */
@@ -3545,7 +3545,7 @@ async function doPrint(html, title){
   splitRows(box,o.n);
   const phone=/Android|iPhone|iPad/i.test(navigator.userAgent), oldTitle=document.title, scroll=window.scrollY;
   const bar=document.createElement("div"); bar.id="pvbar";
-  bar.innerHTML=`<button class="btn pri" data-pv="print">${ic("printer")}اطبع</button><button class="btn" data-pv="xlsx">${ic("sheet")}Excel زي الورقة</button><button class="btn" data-pv="back">${ic("undo")}رجوع</button>
+  bar.innerHTML=`<button class="btn pri" data-pv="print">${ic("printer")}اطبع</button><button class="btn" data-pv="alone">${ic("printer")}اطبع في صفحة لوحدها</button><button class="btn" data-pv="xlsx">${ic("sheet")}Excel زي الورقة</button><button class="btn" data-pv="back">${ic("undo")}رجوع</button>
     <span class="sub">${phone?"لو الطباعة مافتحتش: من قايمة المتصفح ⋮ اختار «مشاركة» ← «طباعة» أو «حفظ PDF».":"اختار الطابعة أو «حفظ كـ PDF»."}</span>`;
   const close=()=>{ if(pvClose!==close) return; pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
     window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true);
@@ -3554,13 +3554,13 @@ async function doPrint(html, title){
   const onBack=()=>{ if(pvClose===close){ history.replaceState(null,""); pvClose=null; document.body.classList.remove("pv"); bar.remove(); box.innerHTML=""; box.removeAttribute("style"); document.title=oldTitle;
     window.removeEventListener("afterprint",after); window.removeEventListener("popstate",onBack); document.removeEventListener("keydown",key,true); window.scrollTo(0,scroll); } };
   const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); close(); } };
-  bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else if(b.dataset.pv==="xlsx") printXlsx(box, title||"طباعة"); else close(); };
+  bar.onclick=e=>{ const b=e.target.closest("[data-pv]"); if(!b) return; if(b.dataset.pv==="print") window.print(); else if(b.dataset.pv==="xlsx") printXlsx(box, title||"طباعة"); else if(b.dataset.pv==="alone") printAlone(box.innerHTML, title||"طباعة"); else close(); };
   pvClose=close; document.body.appendChild(bar); document.body.classList.add("pv"); box.scrollTop=0;
   // the page is drawn at paper width and shrunk to fit a phone screen; the pages start below the bar
   box.style.setProperty("--pvz", String(Math.min(1, (innerWidth-28)/760))); box.style.paddingTop=(bar.offsetHeight+14)+"px";
   if(title) document.title=title.replace(/[\\/:*?"<>|]/g,"-");   // the name a saved PDF gets
   history.pushState({ pv:1 },""); window.addEventListener("popstate",onBack); window.addEventListener("afterprint",after); document.addEventListener("keydown",key,true);
-  setTimeout(()=>{ try{ window.print(); }catch(e){ report("print","dialog",e); } },300);
+  // the print window opens only when «اطبع» is tapped: on some computers it comes up white, so the choice stays with you
 }
 
 /* ================= excel / files ================= */
@@ -3611,7 +3611,9 @@ async function logoPNG(){
   return logoPng;
 }
 const isNum=t=>/^-?\d{1,9}(\.\d+)?$/.test(t)&&!/^0\d/.test(t);
-function htmlToSheet(root, name){
+// rowMM: height of each family's row in the Excel (1.5 cm by default — room to sign or stamp)
+const EXCEL_ROW_MM=15;
+function htmlToSheet(root, name, { rowMM=EXCEL_ROW_MM }={}){
   const rows=[], merges=[], breaks=[]; let ncol=1, titles=null; const widths=[];
   root.querySelectorAll("table").forEach(t=>{ for(const tr of t.rows){ let n=0; for(const td of tr.cells) n+=td.colSpan||1; ncol=Math.max(ncol,n); } });
   const L=colName(ncol-1), add=(cells,h)=>{ rows.push({ cells, h }); return rows.length; };
@@ -3632,7 +3634,7 @@ function htmlToSheet(root, name){
         const len=td.classList.contains("fbc")?26:td.classList.contains("sig")?14:txt.length/cs; widths[c]=Math.max(widths[c]||0, Math.min(46, len));
         c+=cs; }
       for(let j=0;j<ncol;j++) if(!cells[j]&&(grid[rows.length]||[])[j]) cells[j]={ v:"", s:sec==="TFOOT"?"foot":"td" };
-      const mm=parseFloat(tr.style.height)||0, h=mm?Math.round(mm*2.835):tr.querySelector(".tg")?30:undefined;
+      const mm=Math.max(parseFloat(tr.style.height)||0, sec==="TBODY"?rowMM:0), h=mm?Math.round(mm*2.835):tr.querySelector(".tg")?30:undefined;
       add(cells,h); if(sec==="THEAD"&&first&&!titles){ titles=[r,r]; } }
     first=false; add([]); };
   const walk=el=>{
@@ -3657,6 +3659,17 @@ function htmlToSheet(root, name){
 }
 const XLSX_TYPE="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const plainSheet=(name,rows,widths)=>({ name, rtl:true, cols:widths||(rows[0]||[]).map(()=>16), rows:rows.map((r,i)=>({ cells:(r||[]).map(v=>({ v:typeof v==="number"?v:String(v??"") })) })) });
+/* If the browser's print window comes up white (it happens on some computers when the page behind is big),
+   print from a new tab that holds only the pages — nothing else from the site. */
+function printAlone(html, title){
+  const base=location.href.replace(/[^/]*$/,"");
+  const doc=`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><base href="${esc(base)}">
+<link rel="stylesheet" href="vendor/fonts/fonts.css"><style>body{margin:0;background:#fff}${PRINT_CSS}</style></head>
+<body>${html}<script>addEventListener("load",function(){ setTimeout(function(){ window.print(); },400); });<\/script></body></html>`;
+  const url=URL.createObjectURL(new Blob([doc],{ type:"text/html" })), w=window.open(url,"_blank");
+  if(!w){ toast("المتصفح منع فتح صفحة جديدة — اسمح بالنوافذ المنبثقة للموقع، أو استخدم «Excel زي الورقة»"); }
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 async function printXlsx(root, filename){
   try{ const sh=htmlToSheet(root,"زي الورقة"); sh.image=(await logoPNG()).png?await logoPNG():null;
     saveFile(filename.replace(/\.xlsx$/i,"")+".xlsx", new Blob([buildXlsx([sh])],{ type:XLSX_TYPE })); }
