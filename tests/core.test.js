@@ -345,3 +345,9 @@ test("mergeById keeps other phones' changes and applies mine", () => {
   assert.deepEqual(mergeById(base, mine, theirs), [{ id: "a", n: 5 }, { id: "c", n: 1 }, { id: "d", n: 1 }]);
   assert.deepEqual(mergeById(base, base, theirs), theirs);
 });
+
+test("countStudents can leave out university and institute", () => {
+  const kids = [{ school:"أولى إعدادي" }, { school:"تانية ثانوي تجاري" }, { school:"تانية جامعة" }, { school:"اولى معهد تمريض" }, { school:"حضانة" }];
+  assert.equal(countStudents(kids), 4);
+  assert.equal(countStudents(kids, new Date(), ["ابتدائي","إعدادي","ثانوي"]), 2);
+});

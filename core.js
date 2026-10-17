@@ -190,12 +190,17 @@ export function daysText(days){
 
 /* ---------- students ----------
    A child counts as a student when their stage is a school stage, or when no stage is written but they're of school age (6–17). */
-export function countStudents(children, today = new Date()){
+// levels (optional): which stages count, e.g. ["ابتدائي","إعدادي","ثانوي"] for school meals (no university / institute).
+// A child with no stage written counts by age 6–17, which is school age (ابتدائي / إعدادي / ثانوي).
+export const STU_LEVELS = ["ابتدائي","إعدادي","ثانوي","معهد","جامعة"];
+export const levelOf = s => { const g = groupOf(s)?.g || ""; return STU_LEVELS.find(l => g.startsWith(l)) || ""; };
+export function countStudents(children, today = new Date(), levels = null){
+  const want = l => !levels || !levels.length || levels.includes(l);
   return (children || []).filter(k => {
     const st = normalizeStage(k.school);
-    if(st) return inSchool(st);
+    if(st) return inSchool(st) && want(levelOf(st));
     if(String(k.school || "").trim() && !/^[-\s]*$/.test(k.school)) return false;   // written but unclear (e.g. «تأجيل») → not counted
-    const a = age(k.birth, today); return a !== "" && a >= 6 && a <= 17;
+    const a = age(k.birth, today); return a !== "" && a >= 6 && a <= 17 && (want("ابتدائي") || want("إعدادي") || want("ثانوي"));
   }).length;
 }
 

@@ -1,9 +1,9 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, minPin } from "./core.js";
 import { ic } from "./icons.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.68";
+export const VERSION = "1.3.69";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -381,8 +381,8 @@ const itemFor = (b,value,reason,students) => ({bid:b.id,code:b.code,name:b.name,
 /* Students in a family: counted from the children on file (school stage, or school age with no stage).
    A family with no children on file falls back to its latest school-meals list («من الكشف»). */
 const lastSchoolCount = memo(() => { const m=new Map(); for(const k of [...K.values()].filter(k=>!k.archivedAt&&k.typeId==="schoolmeals").sort((a,b)=>(a.month||"").localeCompare(b.month||""))) for(const i of k.items) if(i.bid) m.set(i.bid, +(i.students??i.value)||0); return m; });
-function studentsOf(b){
-  if((b.children||[]).length) return { n:countStudents(b.children, now), src:"file" };
+function studentsOf(b, levels=null){
+  if((b.children||[]).length) return { n:countStudents(b.children, now, levels), src:"file" };
   const n=lastSchoolCount().get(b.id); return n!=null ? { n, src:"list" } : { n:0, src:"none" };
 }
 /* ---------- the planner ----------
@@ -2110,12 +2110,17 @@ const ruleEditorHTML=(k,i,t,r)=>{ r=r||{}; const m=r.mode||"";
     <label class="f" data-show="fixed member student" ${["fixed","member","student"].includes(m)?"":"hidden"}><span data-perl>${m==="member"?"لكل فرد":m==="student"?"لكل طالب":"لكل أسرة"}</span> (${esc(k.unit)})<input type="number" min="0" step="any" data-rp="per" value="${r.per??""}"></label>
     <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>الأسرة الصغيرة لحد كام فرد<input type="number" min="1" data-rp="cut" value="${r.cut??3}"></label>
     <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الصغيرة<input type="number" min="0" step="any" data-rp="small" value="${r.small??""}"></label>
-    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الكبيرة<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div></div>`; };
+    <label class="f" data-show="tiers" ${m==="tiers"?"":"hidden"}>كمية الأسرة الكبيرة<input type="number" min="0" step="any" data-rp="big" value="${r.big??""}"></label></div>
+    <div data-show="student" ${m==="student"?"":"hidden"}><div class="sub">مين يتحسب طالب (من المراحل المكتوبة في ملف كل حالة):</div>
+      <div class="checks">${STU_LEVELS.map(l=>`<label><input type="checkbox" data-lv="${l}" ${(r.levels||(m==="student"?STU_LEVELS:DEF_LEVELS(k))).includes(l)?"checked":""}> ${l}</label>`).join("")}</div></div></div>`; };
+// school meals: school children only; anything else: every stage
+const DEF_LEVELS=k=>stuType(k.typeId,k.typeName)?["ابتدائي","إعدادي","ثانوي"]:STU_LEVELS;
 const bindRuleBoxes=root=>root.querySelectorAll("[data-rm2]").forEach(el=>el.onchange=()=>{ const box=el.closest(".rulebox");
   box.querySelectorAll("[data-show]").forEach(f=>f.hidden=!f.dataset.show.split(" ").includes(el.value));
   const pl=box.querySelector("[data-perl]"); if(pl) pl.textContent=el.value==="member"?"لكل فرد":el.value==="student"?"لكل طالب":"لكل أسرة"; });
 const readRuleBox=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""?null:+v; };
-  return m==="tiers"?{ mode:m, cut:g("cut")||3, small:g("small")||0, big:g("big")||0 }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true }:{}) }; };
+  const lv=[...box.querySelectorAll("[data-lv]:checked")].map(x=>x.dataset.lv);
+  return m==="tiers"?{ mode:m, cut:g("cut")||3, small:g("small")||0, big:g("big")||0 }:{ mode:m, per:g("per")||0, ...(m==="student"?{ stu:true, ...(lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}) }:{}) }; };
 // the new basis from the boxes; budget / priority settings of the list stay as they were
 const basisFrom=(k,root,groups)=>{ const read=[...root.querySelectorAll(".rulebox")].map((box,i)=>[groups[i][0],readRuleBox(box)]);
   const keep=Object.fromEntries(Object.entries(k.basis||{}).filter(([x])=>!RULE_KEYS.includes(x)&&x!=="src")), first=read.map(([,r])=>r).find(Boolean);
@@ -2124,23 +2129,26 @@ const basisFrom=(k,root,groups)=>{ const read=[...root.querySelectorAll(".rulebo
    students) fresh from each case file first. Only rows that change are written. Returns { done, total, failed }. */
 async function recalcList(id, basis, fromCases){
   const k=K.get(id), nk={ ...k, basis }, upd=[];
-  for(const it of k.items){ if(it.received) continue; const b=it.bid&&B.get(it.bid), row={};
+  const noKids=[];
+  for(const it of k.items){ if(it.received) continue; const b=it.bid&&B.get(it.bid), row={}, r=ruleOf(nk,it);
     let fam=it.familySize, stu=it.students;
-    if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; }
-      if(stuOn(nk)){ const st=studentsOf(b); if(st.src!=="none"&&st.n!==it.students){ row.students=st.n; stu=st.n; } } }
-    const r=ruleOf(nk,it); if(r){ const v=shareFor(r,fam,stu); if(+it.value!==v) row.value=v; }
+    if(fromCases&&b){ const f=famSize(b)||null; if(f!==(+it.familySize||null)){ row.family_size=f; fam=f; } }
+    // «لكل طالب»: the count comes from the children on the case file, by the stages this rule counts
+    if(b&&(r?.mode==="student"||(fromCases&&stuOn(nk)))){ const st=studentsOf(b, r?.levels||null);
+      if(st.src==="file"){ if(st.n!==it.students){ row.students=st.n; stu=st.n; } } else if(r?.mode==="student"&&it.students==null) noKids.push(it.name); }
+    if(r){ const v=shareFor(r,fam,stu); if(+it.value!==v) row.value=v; }
     if(Object.keys(row).length) upd.push([it,row]); }
   let done=0, failed=null;
   for(let i=0;i<upd.length;i+=10){ const res=await Promise.all(upd.slice(i,i+10).map(([it,row])=>sb.from("batch_items").update(row).eq("id",it.id).eq("received",false))); const bad=res.find(r=>r.error); if(bad){ failed=bad.error; break; } done+=res.length; }
   if(done) await logIt("batch",id,`إعادة حساب ${fromCases?"الأعداد والكميات":"الكميات"}: ${done} أسرة`);
-  return { done, total:upd.length, failed };
+  return { done, total:upd.length, failed, noKids };
 }
 /* A list's quantity rule (basis): mode + numbers. A list made from several lists keeps each source's own rule in
    basis.src {source title → rule}, so a family's amount is always worked out by the rule of the list she came from. */
-const RULE_KEYS=["mode","per","cut","small","big","stu"];
+const RULE_KEYS=["mode","per","cut","small","big","stu","levels"];
 const ruleOnly=b=>b&&b.mode?Object.fromEntries(RULE_KEYS.filter(x=>b[x]!=null&&b[x]!=="").map(x=>[x,b[x]])):null;
 const ruleOf=(k,it)=>{ const b=k.basis; if(!b) return null; if(b.src){ const t=srcTitles(it)[0]; if(t&&b.src[t]) return b.src[t]; } return b.mode?b:null; };
-const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
+const ruleHow=(b,u)=>b.mode==="student"?`${num(b.per)} ${u} لكل طالب${b.levels?` (${b.levels.join("، ")})`:""}`:b.mode==="member"?`${num(b.per)} ${u} لكل فرد`:b.mode==="tiers"?`لحد ${b.cut} أفراد ${num(b.small)} ${u}، وأكتر ${num(b.big)} ${u}`:b.mode==="fixed"?`${num(b.per)} ${u} لكل أسرة`:"";
 function basisText(k){
   const b=k.basis||{}, u=k.unit;
   const how=b.src?Object.entries(b.src).map(([t,r])=>`من «${shortTitle(t)}» ${ruleHow(r,u)}`).join("، "):ruleHow(b,u);
@@ -2290,7 +2298,8 @@ function openBatch(id, giveMode){
         if(!same(basis,k.basis)){ const { error } = await sb.from("batches").update({ basis }).eq("id",id); if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","rule")); return; }
           await logIt("batch",id,`القاعدة: ${basis?basisText({ ...k, basis })||"بالإيد":"بالإيد"}`); await refreshBatch(id); }
         const r=await recalcList(id, basis, fromCases); logs=await loadLog("batch",id); await refreshBatch(id); ruleOpen=false; refreshSheet();
-        toast(r.failed?`اتعدّل ${num(r.done)} بس من ${num(r.total)} — ${errMsg(r.failed,"batch","recalc")}`:r.total?`اتحسب ✓ — اتغيّر ${num(r.done)} أسرة`:"كل الكميات مظبوطة على القاعدة دي ✓"); }; }
+        const nk=r.noKids.length?` · ${num(r.noKids.length)} أسرة مالهاش أبناء متسجلين في ملفها (${r.noKids.slice(0,3).join("، ")}${r.noKids.length>3?"…":""}) — اكتب عدد الطلاب بإيدك`:"";
+        toast(r.failed?`اتعدّل ${num(r.done)} بس من ${num(r.total)} — ${errMsg(r.failed,"batch","recalc")}`:(r.total?`اتحسب ✓ — اتغيّر ${num(r.done)} أسرة`:"كل الكميات مظبوطة على القاعدة دي ✓")+nk); }; }
     s.querySelectorAll("[data-fb]").forEach(el=>el.onchange=async()=>{ const it=K.get(id)?.items.find(x=>x.id===el.dataset.fb); if(!it) return; const text=el.value.trim(); if(text===(it.feedback||"")) return;
       const prev=it.feedback||""; it.feedback=text; if(await saveFeedback(id,[{ id:it.id, text }])) undoable(`${it.name}: اتسجل «${K.get(id).feedback}»`, async()=>{ if(!await saveFeedback(id,[{ id:it.id, text:prev }])) return false; }); else it.feedback=prev; });
     // one tap: name the column (Feedback, رأي الأسرة…) and it's on the list, the print and the Excel
