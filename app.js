@@ -1,10 +1,10 @@
 import { MONTHS, norm, cleanPhone, validPhone, phoneIssue, jpegsToPdf, assignKids, parseKidAge, stageAge, byName, mergeById, latinDigits, parseNID, isoDay, mIdx, mLabel, dLabel, addDays, addMonths, parseDate, age as ageAt, num, toNumber,
-  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, minPin } from "./core.js";
+  STAGE_GROUPS, STAGES, countStudents, STU_LEVELS, rowsFromSheet, matchPerson, pickFromText, matchFileName, crossCheck, DAYS, weekdaysOf, dayLabel, daysText, normalizeStage, nextStage, inSchool, schoolYear, syLabel, famSize, shareFor, sortPool, planShares, PRIORITY, DEFAULT_GROUPS, groupRank, famCode, suggestCode, minPin } from "./core.js";
 import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.84";
+export const VERSION = "1.3.85";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -174,7 +174,8 @@ async function logIt(entity, id, text){ if(!canWrite() || !text) return; const {
 /* ================= mapping ================= */
 const fromB = r => ({ id:r.id, code:r.code, name:r.name, nationalId:r.national_id||"", phone:r.phone||"", phone2:r.phone2||"", phone2Owner:r.phone2_owner||"", whatsapp:r.whatsapp||"", birth:r.birth||"", caseType:r.case_type||"", grade:r.grade||"", score:r.score,
   project:r.project||"", area:r.area||"", address:r.address||"", marital:r.marital||"", job:r.job||"", income:r.income||"", pension:r.pension||"", housing:r.housing||"",
-  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{}, docs:r.docs||[] });
+  familySize:r.family_size, status:r.status, lastReview:r.last_review||"", nextReview:r.next_review||"", notes:r.notes||"", children:r.children||[], source:r.source, createdAt:r.created_at, updatedAt:r.updated_at, archivedAt:r.archived_at||null, tags:r.tags||[], photos:r.photos||{}, docs:r.docs||[],
+  fcode:r.fcode||"", fcodeGroup:r.fcode_group||"", fcodeNo:r.fcode_no??null, fcodeOkBy:r.fcode_ok_by||null, fcodeOkAt:r.fcode_ok_at||null, fcodeReq:r.fcode_req||null });
 const toB = b => ({ code:b.code, name:b.name, national_id:b.nationalId||null, phone:b.phone||null, phone2:b.phone2||null, phone2_owner:b.phone2Owner||"", whatsapp:b.whatsapp||null, birth:b.birth||null, case_type:b.caseType||"", grade:b.grade||"", score:b.score ?? null,
   project:b.project||"", area:b.area||"", address:b.address||"", marital:b.marital||"", job:b.job||"", income:b.income||"", pension:b.pension||"", housing:b.housing||"",
   family_size:b.familySize ?? null, status:b.status, last_review:b.lastReview||null, next_review:b.nextReview||null, notes:b.notes||"", children:b.children||[], tags:b.tags||[] });
@@ -198,8 +199,13 @@ let dataVer = 0, loadError = null, fromSnapshot = null;
 // shared settings (app_settings): family groups with their letters, in priority order
 let APPSET = {};
 const GROUPS = () => Array.isArray(APPSET.groups) && APPSET.groups.length ? APPSET.groups : DEFAULT_GROUPS;
-const fcode = b => famCode(b.code, b.caseType, GROUPS());
-const fcodeIt = it => famCode(it.code, (it.bid && B.get(it.bid)?.caseType) || "", GROUPS());
+// what's shown as a family's code: her approved code (AK-4738), otherwise her case number
+const fcode = b => b.fcode || String(b.code ?? "");
+const fcodeIt = it => (it.bid && B.get(it.bid)?.fcode) || String(it.code ?? "");
+const canApproveCodes = () => isMgr() || !!me?.can_approve_codes;
+// a proposal for a family without a code: grade + her group's letter + case number + next number in that group
+const groupOfB = b => GROUPS().find(g => (g.types||[]).includes(b.caseType||"غير محدد")) || null;
+function nextGroupNo(letter, taken){ let m=0; for(const x of B.values()){ if(x.fcodeGroup===letter&&x.fcodeNo>m) m=x.fcodeNo; if(x.fcodeReq?.group===letter&&+x.fcodeReq.no>m) m=+x.fcodeReq.no; } for(const n of taken||[]) if(n>m) m=n; return m+1; }
 async function loadSettings(){ const { data, error } = await sb.from("app_settings").select("*"); if(error||!data) return; APPSET=Object.fromEntries(data.map(r=>[r.key,r.value])); try{ localStorage.setItem("dar-set",JSON.stringify(APPSET)); }catch(e){} changed(); }
 try{ APPSET=JSON.parse(localStorage.getItem("dar-set")||"{}")||{}; }catch(e){}
 const changed = () => { dataVer++; scheduleRender(); saveSnapshotSoon(); };
@@ -344,8 +350,7 @@ async function markReceived(it, v){
 // One case search everywhere (q already norm()'d): part of the name, the national ID, the case number,
 // or 4+ digits of any of her numbers (phone, second phone, WhatsApp).
 const findsCase = (b, q) => { if(!q) return true; const d=q.replace(/^0/,"");
-  const fc=/^[^\d\s]{1,3}\s*-?\s*\d+$/.test(q)?q.replace(/^[^\d]+/,""):null;   // «ك-121» / «ك121»: the family code with its letters
-  if(fc){ const want=q.replace(/[\d\s-]/g,""), has=norm(fcode(b).replace(/[\d\s-]/g,"")); return String(+b.code)===String(+fc) && has.includes(want); }
+  if(b.fcode&&/[a-z]/i.test(q)&&b.fcode.toLowerCase().replace(/-/g,"").includes(q.toLowerCase().replace(/[-\s]/g,""))) return true;   // the family code «AK-4738»
   return norm(b.name).includes(q) || (b.nationalId||"").includes(q) || String(b.code)===q.padStart(3,"0") || String(b.code)===q
     || (d.length>3 && /^\d+$/.test(d) && [b.phone,b.phone2,b.whatsapp].some(p=>cleanPhone(p).includes(d))); };
 // Helpers may undo only their own mark, within 5 minutes; office staff can always (from the full list).
@@ -740,7 +745,7 @@ function vPeople(){
     ${canWrite()?`<button class="btn sm pri" id="addP">${ic("plus")}حالة جديدة</button>`:""}
   </div>
   ${innerWidth>=900&&list.length?`<div class="tbl dt"><table><thead><tr><th>رقم</th><th>الاسم</th><th>الرقم القومي</th><th>التليفون</th><th>النوع</th><th>الحالة</th><th>أفراد</th><th>الدرجة</th><th>الملف</th><th>آخر مراجعة</th><th>آخر استلام</th></tr></thead><tbody>
-    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${phoneIssue(b.phone)==="none"?`<span class="chip red">مفيش رقم</span>`:esc(cleanPhone(b.phone))+(phoneIssue(b.phone)==="bad"?` <span class="chip red">غلط</span>`:"")}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td>${FILE_CHIP[fileState(b)]}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
+    ${(()=>{ const lastAny=lastAnyMap(); return list.slice(0,peopleLimit).map(b=>`<tr data-open="${b.id}" tabindex="0"><td class="n">${esc(b.code)}${b.fcode?`<br><small dir="ltr">${esc(b.fcode)}</small>`:""}</td><td><b>${esc(b.name)}</b></td><td class="n">${esc(b.nationalId)}</td><td class="n">${phoneIssue(b.phone)==="none"?`<span class="chip red">مفيش رقم</span>`:esc(cleanPhone(b.phone))+(phoneIssue(b.phone)==="bad"?` <span class="chip red">غلط</span>`:"")}</td><td>${esc(b.caseType||"—")}</td><td><span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span></td><td class="n">${famSize(b)||"—"}</td><td class="n">${b.score!=null?b.score+"%":b.grade||"—"}</td><td>${FILE_CHIP[fileState(b)]}</td><td class="n">${reviewDue(b)?`<span class="chip red">${b.lastReview?dLabel(b.lastReview):"مفيش"}</span>`:dLabel(b.lastReview)}</td><td class="n">${lastAny.get(b.id)?mLabel(lastAny.get(b.id)):"—"}</td></tr>`).join(""); })()}
   </tbody></table></div>`:""}
   <div class="list" ${innerWidth>=900&&list.length?"hidden":""}>${list.length?list.slice(0,peopleLimit).map(b=>`
     <button class="item" data-open="${b.id}">
@@ -851,17 +856,72 @@ function vReports(){
   ${Object.entries(yT).map(([n,v])=>`<tr><td>${esc(n)}</td><td class="n">${num(v.n)}</td><td class="n">${num(v.p.size)}</td><td class="n">${num(v.total)} ${esc(v.unit)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">لا يوجد صرف معتمد هذه السنة بعد</td></tr>`}
   </tbody></table></div>`;
 }
+/* ---------- family codes (propose → approve) ---------- */
+// one family: see her code, propose one (office), approve / reject a proposal (manager or a designated approver)
+function codeDialog(bid){
+  const b=B.get(bid); if(!b) return; const g=groupOfB(b), req=b.fcodeReq;
+  const sug=g?suggestCode(b.code,b.grade,g.letter,nextGroupNo(g.letter)):"";
+  const w=document.createElement("div"); w.className="ask-scrim";
+  w.innerHTML=`<div class="ask" role="dialog" aria-modal="true" aria-labelledby="cdT"><h2 id="cdT">كود الأسرة — ${esc(b.name)}</h2>
+    <p class="sub" style="margin-top:0">الكود المعتمد: <b dir="ltr">${esc(b.fcode||"لسه مفيش")}</b>${b.fcodeOkBy?` — اعتمده ${esc(who(b.fcodeOkBy))} ${dLabel(b.fcodeOkAt)}`:""}</p>
+    ${req?`<div class="note">${ic("info")} <span>مقترح <b dir="ltr">${esc(req.code)}</b> من ${esc(who(req.by))} — مستني اعتماد.</span></div>
+      ${canApproveCodes()?`<div class="bar"><button class="btn pri" data-a="ok">${ic("check")}اعتماد</button><button class="btn danger" data-a="no">رفض</button></div>`:`<p class="sub">الاعتماد للمدير أو اللي ليه صلاحية اعتماد الأكواد.</p>`}`:""}
+    <label class="f">${req?"غيّر المقترح":"اقترح كود"} <small class="sub">(التقدير + حرف المجموعة + رقمها في الجمعية + رقمها في المجموعة)</small><input type="text" id="cd_c" dir="ltr" value="${esc(req?.code||sug)}" placeholder="AK-4738"></label>
+    ${!g?`<p class="sub">نوع الحالة «${esc(b.caseType||"غير محدد")}» مش في أي مجموعة — حدّد النوع، أو اكتب الكود بإيدك.</p>`:""}
+    <div class="bar"><button class="btn" data-a="req">${ic("save")}ابعت للاعتماد</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+  document.body.appendChild(w);
+  w.onclick=async e=>{ const a=e.target.closest("[data-a]"); if(!a&&e.target!==w) return; const act=a?.dataset.a||"0"; if(act==="0"){ w.remove(); return; }
+    a.disabled=true;
+    if(act==="ok"||act==="no"){ const { error } = await sb.rpc("approve_fcode", { ids:[bid], ok:act==="ok" });
+      if(error){ a.disabled=false; toast(/fcode_taken/.test(error.message||"")?"الكود ده متاخد لأسرة تانية — غيّر المقترح":errMsg(error,"codes","approve")); return; }
+      w.remove(); await refreshPerson(bid); toast(act==="ok"?"الكود اتعتمد ✓":"المقترح اترفض"); return; }
+    const code=w.querySelector("#cd_c").value.trim().toUpperCase().replace(/\s+/g,"");
+    if(!/^[A-Z]{1,4}-\d+$/.test(code)){ a.disabled=false; toast("الكود لازم يبقى زي AK-4738 (حروف إنجليزي، شَرطة، أرقام)"); return; }
+    if([...B.values()].some(x=>x.id!==bid&&(x.fcode===code||x.fcodeReq?.code===code))){ a.disabled=false; toast("الكود ده مستخدم أو مقترح لأسرة تانية"); return; }
+    const m=code.match(/([A-Z])-/), letter=g?.letter||m?.[1]||"", no=g&&code===sug?nextGroupNo(g.letter):(req?.no??null);
+    const { error } = await sb.rpc("request_fcode", { rows:[{ id:bid, code, group:letter, no }] });
+    if(error){ a.disabled=false; toast(errMsg(error,"codes","request")); return; }
+    await logIt("beneficiary",bid,`اقتراح كود الأسرة: ${code}`); w.remove(); await refreshPerson(bid); toast("اتبعت للاعتماد ✓"); };
+}
+// all codes: proposals waiting for approval (approve one / all), and proposing codes for every family that has none
+function codesSheet(){
+  const draw=()=>{ const pend=people().filter(b=>b.fcodeReq).sort(byCode), none=people().filter(b=>!b.fcode&&!b.fcodeReq), noGroup=none.filter(b=>!groupOfB(b)), done=people().filter(b=>b.fcode).length;
+    return `<p class="sub" style="margin-top:0">${num(done)} أسرة ليها كود معتمد · ${num(pend.length)} مستني اعتماد · ${num(none.length)} مالهاش كود${noGroup.length?` (منهم ${num(noGroup.length)} نوع حالتهم مش في أي مجموعة — حدّد نوعهم الأول)`:""}.</p>
+    ${canWrite()&&none.length-noGroup.length?`<div class="bar"><button class="btn" id="cs_prop">${ic("plus")}اقترح أكواد لـ ${num(none.length-noGroup.length)} أسرة مالهاش</button></div>`:""}
+    ${pend.length?`<h3>مستني اعتماد (${num(pend.length)})</h3>${canApproveCodes()?`<div class="bar"><button class="btn pri" id="cs_all">${ic("check")}اعتمد الكل</button></div>`:`<p class="sub">الاعتماد للمدير أو اللي ليه صلاحية اعتماد الأكواد.</p>`}
+      <div class="list">${pend.map(b=>`<div class="item"><span class="code">${esc(b.code)}</span><span class="grow"><span class="nm">${esc(b.name)}</span><br><span class="sub">${esc(b.caseType||"غير محدد")}${b.grade?` · تقدير ${esc(b.grade)}`:""} · اقتراح ${esc(who(b.fcodeReq.by))}</span></span>
+        <b dir="ltr">${esc(b.fcodeReq.code)}</b>${canApproveCodes()?`<button class="btn sm pri" data-cok="${b.id}">اعتماد</button><button class="btn sm danger" data-cno="${b.id}">رفض</button>`:""}</div>`).join("")}</div>`:""}`; };
+  const mount=s=>{
+    const act=async(ids,ok)=>{ const { data, error } = await sb.rpc("approve_fcode", { ids, ok });
+      if(error){ toast(/fcode_taken/.test(error.message||"")?`فيه كود متاخد لأسرة تانية (${(error.message||"").split(" ").pop()}) — عدّله من ملف الأسرة`:errMsg(error,"codes","approve")); refreshSheet(); return; }
+      await Promise.all(ids.map(refreshPerson)); toast(ok?`اتعتمد ${num(data)} ✓`:`اترفض ${num(data)}`); refreshSheet(); };
+    s.querySelectorAll("[data-cok]").forEach(el=>el.onclick=()=>{ el.disabled=true; act([el.dataset.cok],true); });
+    s.querySelectorAll("[data-cno]").forEach(el=>el.onclick=()=>{ el.disabled=true; act([el.dataset.cno],false); });
+    const all=s.querySelector("#cs_all"); if(all) all.onclick=async()=>{ const ids=people().filter(b=>b.fcodeReq).map(b=>b.id); if(!await ask(`هيتعتمد ${num(ids.length)} كود.`,{title:"اعتماد الكل؟",ok:"اعتمد"})) return; all.disabled=true; act(ids,true); };
+    const pr=s.querySelector("#cs_prop"); if(pr) pr.onclick=async()=>{
+      // by case number; each group continues from its last number
+      const taken={}, rows=[];
+      for(const b of people().filter(b=>!b.fcode&&!b.fcodeReq).sort(byCode)){ const g=groupOfB(b); if(!g) continue;
+        const no=nextGroupNo(g.letter, taken[g.letter]||[]); (taken[g.letter]||=[]).push(no); rows.push({ id:b.id, code:suggestCode(b.code,b.grade,g.letter,no), group:g.letter, no }); }
+      const used=new Set([...B.values()].flatMap(x=>[x.fcode,x.fcodeReq?.code]).filter(Boolean)), clash=rows.filter(r=>used.has(r.code));
+      if(clash.length){ toast(`فيه ${num(clash.length)} كود متكرر (${clash[0].code}) — راجع الأرقام`); return; }
+      if(!await ask(`هيتقترح ${num(rows.length)} كود (زي ${rows[0]?.code||""})، وبيستنوا الاعتماد.`,{title:"اقتراح الأكواد؟",ok:"اقترح"})) return;
+      pr.disabled=true; const { error } = await sb.rpc("request_fcode", { rows }); if(error){ pr.disabled=false; toast(errMsg(error,"codes","bulk")); return; }
+      await reload(); toast(`اتقترح ${num(rows.length)} كود ✓ — مستنيين الاعتماد`); refreshSheet(); };
+  };
+  const s=sheet("أكواد الأسر", draw(), mount, ()=>{ const b=s.querySelector(".sh-body"); if(b){ b.innerHTML=draw(); mount(s); } });
+}
 /* Family groups: name, letter and the case types in each, in priority order (first = gets first when there isn't enough).
    Saved for everyone in app_settings. */
 function groupsSheet(){
   let gs=GROUPS().map(g=>({ ...g, types:[...(g.types||[])] }));
-  const draw=()=>`<p class="sub" style="margin-top:0">رتّبهم بالأولوية بالأسهم. الأسرة اللي نوعها في أكتر من مجموعة (زي «أيتام ومرضي») بتاخد الحرفين، وبتترتب مع أعلى مجموعة.</p>
+  const draw=()=>`<p class="sub" style="margin-top:0">رتّبهم بالأولوية بالأسهم. الأسرة اللي نوعها في أكتر من مجموعة (زي «أيتام ومرضي») بتتحسب مع أعلى مجموعة. تغيير الحرف هنا مابيغيّرش الأكواد اللي اتعتمدت قبل كده.</p>
     ${gs.map((g,i)=>`<div class="rulebox"><div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
       <label class="f" style="flex:0 0 70px">الحرف<input type="text" maxlength="2" data-gl="${i}" value="${esc(g.letter)}"></label>
       <label class="f" style="flex:1 1 140px">اسم المجموعة<input type="text" data-gn="${i}" value="${esc(g.name)}"></label>
       <span class="row" style="gap:4px"><button class="btn sm" data-gu="${i}" ${i?"":"disabled"} aria-label="أولوية أعلى">↑</button><button class="btn sm" data-gd="${i}" ${i<gs.length-1?"":"disabled"} aria-label="أولوية أقل">↓</button><button class="btn sm danger" data-gx="${i}" aria-label="شيل">×</button></span></div>
       <div class="checks">${CASE_TYPES.map(t=>`<label><input type="checkbox" data-gt="${i}" value="${esc(t)}" ${g.types.includes(t)?"checked":""}> ${esc(t)}</label>`).join("")}</div>
-      <div class="sub">${i+1}. مثال: ${esc(famCode("121",g.types[0]||"",gs))}</div></div>`).join("")}
+      <div class="sub">${i+1}. مثال: <span dir="ltr">${esc(suggestCode("47","A",g.letter||"?",38))}</span></div></div>`).join("")}
     <div class="bar"><button class="btn sm" id="g_add">${ic("plus")}مجموعة جديدة</button><button class="btn sm" id="g_def">${ic("undo")}الافتراضي</button></div>
     <div class="bar"><button class="btn pri" id="g_save">${ic("save")}حفظ</button></div>`;
   const mount=s=>{ const q=x=>s.querySelector(x), re=()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); };
@@ -900,9 +960,9 @@ function vSettings(){
   return `
   <h2>الإعدادات</h2>
   ${canWrite()?`<h3>كود الأسرة والأولوية</h3>
-  <p class="sub" style="margin-top:0">كل أسرة ليها حرف حسب مجموعتها قبل رقم الحالة (مثلاً <b>${esc(famCode("121","أيتام",GROUPS()))}</b>)، والمجموعات مترتبة بالأولوية: لما الكمية ماتكفيش، الأول بياخد.</p>
+  <p class="sub" style="margin-top:0">كود الأسرة زي <b dir="ltr">AK-4738</b>: التقدير (A) + حرف المجموعة (K كفالات) + رقمها في الجمعية (47) + رقمها في المجموعة (38). الكود بيتعتمد من المدير أو اللي ليه صلاحية اعتماد الأكواد. والمجموعات مترتبة بالأولوية: لما الكمية ماتكفيش، الأول بياخد.</p>
   <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${GROUPS().map((g,i)=>`<span class="chip ${i===0?"red":i===1?"plum":"blue"}"><b>${esc(g.letter)}</b> ${esc(g.name)}</span>${i<GROUPS().length-1?"<span>←</span>":""}`).join("")}</div>
-  <div class="bar"><button class="btn" id="grpEdit">${ic("edit")}عدّل الحروف والأولوية</button></div>`:""}
+  <div class="bar"><button class="btn pri" id="codesOpen">${ic("list")}أكواد الأسر${(()=>{ const n=people().filter(b=>b.fcodeReq).length; return n?` (${num(n)} مستني اعتماد)`:""; })()}</button><button class="btn" id="grpEdit">${ic("edit")}عدّل الحروف والأولوية</button></div>`:""}
   ${isMgr()?`
   <h3>المستخدمين</h3>
   <p class="sub" style="margin-top:0">كل موظف بيدخل برقم تليفونه ورقم سري. إنت اللي بتعمله الحساب من هنا.</p>
@@ -963,7 +1023,7 @@ function bindView(){
   on("#pX","onclick",()=>xlsx({"الحالات":peopleRows(filteredPeople())},"الحالات.xlsx"));
   on("#newK","onclick",()=>newBatch()); on("#mergeK","onclick",()=>copyBatch(null));
   on("#newT","onclick",()=>openType(null));
-  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet()); on("#grpEdit","onclick",()=>groupsSheet());
+  on("#newU","onclick",()=>newUser()); on("#errLog","onclick",()=>errLogSheet()); on("#grpEdit","onclick",()=>groupsSheet()); on("#codesOpen","onclick",()=>codesSheet());
   on("#rT","onchange",e=>{rep.typeId=e.target.value; render();});
   on("#rN","onchange",e=>{rep.months=+e.target.value; render();});
   on("#rM","onchange",e=>{ if(e.target.value){rep.month=e.target.value; render();} });
@@ -1322,12 +1382,13 @@ function viewPerson(id){
     return `
     <div class="row" style="margin-bottom:12px">
       <span class="chip ${b.status==="نشط"?"":b.status==="ملغي"?"red":"gold"}">${esc(b.status)}</span><span class="chip">${esc(b.caseType||"غير محدد")}</span>
+      ${b.fcode?`<span class="chip plum" dir="ltr">${esc(b.fcode)}</span>`:""}${b.fcodeReq?`<span class="chip gold" dir="ltr" title="مستني اعتماد">${esc(b.fcodeReq.code)} ⏳</span>`:""}
       ${b.grade?`<span class="chip gold">تقدير ${esc(b.grade)}</span>`:""}${reviewDue(b)?`<span class="chip red">محتاجة مراجعة</span>`:""}
       ${(b.tags||[]).map(t=>`<span class="chip blue">${esc(t)}</span>`).join("")}
     </div>
     <div class="callbar">${callCell(b.id,validPhone(b.phone)?b.phone:b.phone2,null,true)}${waBtn(b,"cdial wa big")}</div>
     <div class="bar">
-      ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button>`:""}
+      ${canWrite()?`<button class="btn pri" id="v_edit">${ic("edit")}تعديل</button><button class="btn" id="v_rev">${ic("calendar")}تسجيل مراجعة</button><button class="btn" id="v_code">${ic("key")}${B.get(id)?.fcodeReq&&canApproveCodes()?"اعتماد الكود":B.get(id)?.fcode?"الكود":"اقترح كود"}</button>`:""}
       ${isMgr()?`<button class="btn gold" id="v_single">${ic("cash")}صرف فردي</button>`:""}
       <button class="btn" id="v_print">${ic("printer")}طباعة الملف</button>
       ${canWrite()?`<button class="btn" id="v_task">${ic("check")}مهمة للحالة دي</button>`:""}
@@ -1363,6 +1424,7 @@ function viewPerson(id){
   const mount=s=>{
     const q=x=>s.querySelector(x);
     if(q("#v_edit")) q("#v_edit").onclick=()=>editPerson(id);
+    if(q("#v_code")) q("#v_code").onclick=()=>codeDialog(id);
     if(q("#v_rev")) q("#v_rev").onclick=()=>reviewSheet(id);
     if(q("#v_single")) q("#v_single").onclick=()=>singleGive(id);
     q("#v_print").onclick=()=>doPrint(caseHTML(B.get(id),logs||[]), `ملف ${B.get(id).code} ${B.get(id).name}`);
@@ -1853,10 +1915,11 @@ function openUser(uid){
     <label class="f">الاسم<input type="text" id="e_n" value="${esc(u.full_name)}"></label>
     <label class="f">الصلاحية<select id="e_r" ${self?"disabled":""}>${["helper","worker","manager","viewer","pending"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${ROLE_AR[r]}${ROLE_DESC[r]?" — "+ROLE_DESC[r]:""}</option>`).join("")}</select></label>
     <label style="display:flex;gap:8px;align-items:center;margin:6px 0 14px"><input type="checkbox" id="e_a" ${u.active?"checked":""} ${self?"disabled":""} style="width:20px;height:20px"> الحساب شغال</label>
+    ${u.role!=="manager"?`<label style="display:flex;gap:8px;align-items:center;margin:-6px 0 14px"><input type="checkbox" id="e_ca" ${u.can_approve_codes?"checked":""} style="width:20px;height:20px"> يعتمد أكواد الأسر (مختص)</label>`:""}
     <div class="bar"><button class="btn pri" id="e_s">${ic("save")}حفظ</button><button class="btn" id="e_pin">${ic("key")}رقم سري جديد</button></div>
     ${self?`<p class="sub">مينفعش تغيّر صلاحية حسابك أو توقفه بنفسك.</p>`:""}`, s=>{
     const q=x=>s.querySelector(x);
-    q("#e_s").onclick=async()=>{ if(await run(sb.from("profiles").update({full_name:q("#e_n").value.trim(), ...(self?{}:{role:q("#e_r").value, active:q("#e_a").checked})}).eq("id",uid),"تم الحفظ ✓")){ closeSheet(); refreshTable("profiles"); } };
+    q("#e_s").onclick=async()=>{ if(await run(sb.from("profiles").update({full_name:q("#e_n").value.trim(), ...(self?{}:{role:q("#e_r").value, active:q("#e_a").checked}), ...(q("#e_ca")?{ can_approve_codes:q("#e_ca").checked }:{})}).eq("id",uid),"تم الحفظ ✓")){ closeSheet(); refreshTable("profiles"); } };
     q("#e_pin").onclick=async()=>{
       const p=u.role==="manager"?String(Math.floor(10000000+Math.random()*90000000)):String(Math.floor(100000+Math.random()*900000));
       if(!await ask("هيتعمل رقم سري جديد للحساب ده، والقديم مش هيشتغل تاني.",{title:"رقم سري جديد؟",ok:"اعمل رقم جديد"})) return;
@@ -3679,8 +3742,8 @@ function batchXlsx(k){
     catch(e){ toast(`ماقدرناش نعمل الـExcel — ${errMsg(e,"batch","xlsx")}`); } })();
 }
 function peopleRows(list){
-  const rows=[["رقم الحالة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","واتساب","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
-  list.forEach(b=>rows.push([b.code,b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),waNum(b),b.phone2||"",b.phone2Owner||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
+  const rows=[["رقم الحالة","كود الأسرة","الاسم","الرقم القومي","تاريخ الميلاد","السن","التليفون","واتساب","تليفون 2","تليفون 2 رقم مين","نوع الحالة","الحالة","الحالة الاجتماعية","المشروع","المنطقة","العنوان","العمل","الدخل","المعاش","السكن","أفراد الأسرة","عدد الأبناء","التقدير","آخر مراجعة","المراجعة الجاية","ملاحظات"]];
+  list.forEach(b=>rows.push([b.code,b.fcode||"",b.name,b.nationalId||"",b.birth||"",age(b.birth),cleanPhone(b.phone),waNum(b),b.phone2||"",b.phone2Owner||"",b.caseType||"",b.status,b.marital||"",b.project||"",b.area||"",b.address||"",b.job||"",b.income||"",b.pension||"",b.housing||"",b.familySize??"",(b.children||[]).length||"",b.grade||"",b.lastReview||"",b.nextReview||"",b.notes||""]));
   return rows;
 }
 function backup(){

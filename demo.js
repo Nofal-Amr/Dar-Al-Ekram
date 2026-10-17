@@ -177,6 +177,12 @@ export function createDemoClient(){
           return { data: { named, rows }, error: null };
         }catch(e){ const back = JSON.parse(keep); ["donors","items","donations","ledger","stock_moves"].forEach((t, i) => db[t] = back[i]); return { data: null, error: e }; }
       }
+      if(fn === "request_fcode"){ let n = 0; for(const r of args.rows){ const b = db.beneficiaries.find(x => x.id === r.id); if(b){ b.fcode_req = r.code ? { code: r.code, group: r.group, no: r.no, by: session.user.id, at: new Date().toISOString() } : null; n++; } } return { data: n, error: null }; }
+      if(fn === "approve_fcode"){ const me = db.profiles.find(p => p.id === session.user.id); if(!(me?.role === "manager" || me?.can_approve_codes)) return { data: null, error: { message: "not_allowed" } };
+        let n = 0; for(const id of args.ids){ const b = db.beneficiaries.find(x => x.id === id); if(!b?.fcode_req) continue;
+          if(args.ok){ if(db.beneficiaries.some(x => x.fcode === b.fcode_req.code && x.id !== id)) return { data: null, error: { message: "fcode_taken " + b.fcode_req.code } };
+            Object.assign(b, { fcode: b.fcode_req.code, fcode_group: b.fcode_req.group, fcode_no: b.fcode_req.no, fcode_ok_by: session.user.id, fcode_ok_at: new Date().toISOString() }); }
+          b.fcode_req = null; n++; } return { data: n, error: null }; }
       if(fn === "set_positions"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id); if(it){ it.position = r.p; n++; } } return { data: n, error: null }; }
       if(fn === "set_item_counts"){ let n = 0; for(const r of args.rows){ const it = db.batch_items.find(x => x.id === r.id), k = it && db.batches.find(x => x.id === it.batch_id);
           if(!it || it.received || !k || k.archived_at || !["مسودة","معتمد"].includes(k.status)) continue;
