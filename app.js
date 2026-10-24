@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.88";
+export const VERSION = "1.3.89";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -214,7 +214,7 @@ function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout((
 function memo(fn){ let v = -1, out; return () => { if(v !== dataVer){ out = fn(); v = dataVer; } return out; }; }
 
 function setMoney(m = {}){ for(const [t,map] of Object.entries(MONEY_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } }
-function setEvents(m = {}){ for(const [t,map] of Object.entries(EVENT_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } }
+function setEvents(m = {}){ for(const [t,map] of Object.entries(EVENT_TABLES)){ map.clear(); (m[t]||[]).forEach(r=>map.set(r.id,r)); } overlayOutbox(); }
 function setAll(bs, ts, ks, is, ps, cs = [], tk = []){
   B.clear(); bs.forEach(r => B.set(r.id, fromB(r)));
   T.clear(); ts.forEach(r => T.set(r.id, fromT(r)));
@@ -318,7 +318,7 @@ const writeQ = q => { try{ localStorage.setItem(QKEY, JSON.stringify(q)); }catch
 // Each waiting mark carries who made it: another account signing in on this device never sends it under their name.
 const myQ = () => readQ().filter(x => !x.uid || x.uid === me?.id);
 // Marks still waiting to be sent win over whatever the server last said.
-function overlayQueue(){ for(const x of myQ()){ const { it } = findItem(x.id); if(it){ it.received = x.v; it.receivedAt = x.at; it.pending = true; } } }
+function overlayQueue(){ for(const x of myQ()){ const { it } = findItem(x.id); if(it){ it.received = x.v; it.receivedAt = x.at; it.pending = true; } } overlayOutbox(); }
 function findItem(id){ for(const k of K.values()){ const it = k.items.find(x => x.id === id); if(it) return { k, it }; } return {}; }
 const inflight = new Set();   // items being sent right now — a second tap waits for the first answer
 const tLabel = iso => { try{ return new Date(iso).toLocaleTimeString("ar-EG", { hour:"numeric", minute:"2-digit" }); }catch(e){ return ""; } };
@@ -377,7 +377,68 @@ async function flushQueue(){
   if(failed.length) toast(failed.join(" · "));
   else if(sent) toast(`اترفع ${num(sent)} تسليم كانوا مستنيين النت ✓`, null, { quiet:true });
 }
-setInterval(flushQueue, 30000);
+setInterval(() => flushQueue().then(flushOutbox), 30000);
+
+/* ---------- outbox: the other everyday writes, kept on the device while the internet is down ----------
+   Trip-day ticks, RSVP answers, call results, feedback and family counts don't fail when the connection drops:
+   they show at once, wait here (in order) and go out by themselves when it's back. Each op: { kind, key?, uid, at, ... }.
+   Ops with the same key (one family's answer, one item's counts) are merged — only the newest values are sent. */
+const OBKEY = "dar-ob";
+const readOB = () => { try{ return JSON.parse(localStorage.getItem(OBKEY) || "[]"); }catch(e){ return []; } };
+const writeOB = q => { try{ localStorage.setItem(OBKEY, JSON.stringify(q)); }catch(e){} };
+const myOB = () => readOB().filter(x => !x.uid || x.uid === me?.id);
+const pendingCount = () => myQ().length + myOB().length;
+const uuid4 = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+const offlineErr = e => { const k = errKey(e); return k === "offline" || k === "auth_expired"; };
+function enqueue(op){
+  op = { ...op, uid: me?.id, at: op.at || new Date().toISOString(), oid: uuid4() };
+  let q = readOB();
+  const i = op.key ? q.findIndex(x => x.key === op.key && x.uid === op.uid) : -1;
+  if(i >= 0){ const o = q[i];
+    q[i] = { ...o, ...op, args: op.merge ? { ...o.args, ...op.args, rows: mergeRows(o.args?.rows, op.args?.rows) } : op.args, patch: { ...(o.patch||{}), ...(op.patch||{}) }, local: { ...(o.local||{}), ...(op.local||{}) }, logs: [...(o.logs||[]), ...(op.logs||[])] }; }
+  else q = q.concat(op);
+  writeOB(q); netBanner();
+}
+// rows merged by id: the newest values for each item, other columns kept
+function mergeRows(a = [], b = []){ const m = new Map(); for(const r of [...(a||[]), ...(b||[])]) m.set(r.id, { ...(m.get(r.id)||{}), ...r, ...(r.extra && m.get(r.id)?.extra ? { extra: { ...m.get(r.id).extra, ...r.extra } } : {}) }); return [...m.values()]; }
+// After a reload (or the snapshot), what's still waiting wins over what the server last said.
+function overlayOutbox(){
+  for(const x of myOB()){
+    if(x.kind === "ep" || x.kind === "rsvp"){ const r = EP.get(x.id); if(r) EP.set(x.id, { ...r, ...(x.local||{}), ...(x.patch||{}), pending: true }); }
+    else if(x.kind === "call"){ if(!C.has(x.row.id)) C.set(x.row.id, { ...fromC(x.row), pending: true }); }
+    else if(x.kind === "items"){ for(const r of x.args.rows||[]){ const { it } = findItem(r.id); if(!it) continue;
+      if("text" in r) it.feedback = r.text || "";
+      if("family_size" in r) it.familySize = r.family_size ?? ""; if("students" in r) it.students = r.students; if("value" in r) it.value = +r.value;
+      if(r.extra) it.extra = { ...(it.extra||{}), ...r.extra }; it.pending = true; } }
+  }
+}
+const OB_SEND = {
+  ep: x => sb.rpc(x.fn, x.args),
+  rsvp: x => sb.from("event_people").update(x.patch).eq("id", x.id).select().single(),
+  call: x => sb.from("calls").insert(x.row).select().single(),
+  items: x => sb.rpc(x.fn, x.args),
+};
+let flushingOB = false;
+async function flushOutbox(){
+  if(flushingOB || !navigator.onLine || !me) return; if(!myOB().length) return;
+  flushingOB = true; let sent = 0; const failed = [];
+  try{
+    for(const x of myOB()){
+      let { data, error } = await OB_SEND[x.kind](x);
+      if(error && errKey(error) === "auth_expired"){ await sb.auth.refreshSession().catch(() => {}); ({ data, error } = await OB_SEND[x.kind](x)); }
+      if(error && offlineErr(error)) break;                                    // still no connection: stays queued, in order
+      if(error && x.kind === "call" && /duplicate|23505/i.test(String(error.message || error.code))) error = null;   // it got there the first time
+      writeOB(readOB().filter(y => y.oid !== x.oid)); sent++;
+      if(error){ failed.push(`${x.label || ""}: ${report("outbox", x.kind, error, { id: x.id }).text}`); continue; }
+      if(x.kind === "ep" || x.kind === "rsvp"){ if(data) EP.set(data.id, data); }
+      else if(x.kind === "call"){ if(data){ C.set(data.id, fromC(data)); upsertRaw("cs", data); } }
+      for(const l of x.logs || []) await logIt(l.entity, l.id, l.text);
+    }
+  } finally { flushingOB = false; }
+  if(sent){ await reload().catch(() => {}); changed(); netBanner(); refreshSheet(); }
+  if(failed.length) toast(failed.join(" · "));
+  else if(sent) toast(`اترفع ${num(sent)} تعديل كانوا مستنيين النت ✓`, null, { quiet: true });
+}
 
 /* ================= domain ================= */
 // Archived records are hidden everywhere except the archive screen, and never count in history.
@@ -519,7 +580,11 @@ function bindCalls(root, redraw){
   // «ردّت» tapped by mistake (or no call was made): cancel that call — it stays in the database, marked cancelled.
   root.querySelectorAll("[data-ccancel]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const id=b.dataset.ccancel, before=C.get(id);
-    const setCancel=async on=>{ const { data, error } = await sb.from("calls").update({ cancelled_at:on?new Date().toISOString():null, cancelled_by:on?me.id:null }).eq("id",id).select().single();
+    const setCancel=async on=>{
+      const w=readOB().find(x=>x.kind==="call"&&x.id===id&&x.uid===me?.id);
+      if(w&&on){ writeOB(readOB().filter(x=>x.oid!==w.oid)); C.set(id,{ ...C.get(id), cancelledAt:new Date().toISOString(), _ob:w }); netBanner(); changed(); redraw(); return true; }
+      if(!on&&C.get(id)?._ob){ const w0=C.get(id)._ob; writeOB(readOB().concat(w0)); C.set(id,{ ...C.get(id), cancelledAt:null, _ob:null }); netBanner(); changed(); redraw(); return true; }
+      const { data, error } = await sb.from("calls").update({ cancelled_at:on?new Date().toISOString():null, cancelled_by:on?me.id:null }).eq("id",id).select().single();
       if(error||!data){ toast(error?errMsg(error):"مش مسموحلك تمسح المكالمة دي"); return false; } C.set(id, fromC(data)); upsertRaw("cs", data); changed(); redraw(); return true; };
     if(!await setCancel(true)){ b.disabled=false; return; }
     // a «مش هييجي» on a trip list also wrote her answer — cancelling the call puts the answer back
@@ -530,9 +595,11 @@ function bindCalls(root, redraw){
   root.querySelectorAll("[data-cres]").forEach(b=>b.onclick=async()=>{
     b.disabled=true; const bid=b.dataset.cb, batchId=b.dataset.cbatch||null;
     const ctx=batchId?.startsWith("ev:")?{ event_id:batchId.slice(3) }:{ batch_id:batchId };
-    const { data, error } = await sb.from("calls").insert({beneficiary_id:bid, ...ctx, result:b.dataset.cres, by:me.id}).select().single();
+    const row={ id:uuid4(), beneficiary_id:bid, ...ctx, result:b.dataset.cres, by:me.id };
+    let { data, error } = await sb.from("calls").insert(row).select().single();
+    if(error&&offlineErr(error)){ data={ ...row, at:new Date().toISOString() }; enqueue({ kind:"call", row, id:row.id, label:B.get(bid)?.name||"" }); error=null; }
     if(error){ b.disabled=false; toast(errMsg(error)); return; }
-    C.set(data.id, fromC(data)); upsertRaw("cs", data); dialed=null; changed();
+    C.set(data.id, { ...fromC(data), pending:myOB().some(x=>x.id===data.id) }); upsertRaw("cs", data); dialed=null; changed();
     // on a trip list, «مش هيعرف ييجي» is also her answer
     if(ctx.event_id&&b.dataset.cres==="مش هييجي"){ const r=[...EP.values()].find(x=>x.event_id===ctx.event_id&&x.beneficiary_id===bid); if(r&&r.answer!=="مش جاية"){ const next={ answer:"مش جاية", adults:0, kids:0 }; callRsvp.set(data.id,{ id:r.id, prev:{ answer:r.answer, adults:r.adults, kids:r.kids }, next }); await setRsvp(r.id,next); } }
     redraw();
@@ -629,7 +696,7 @@ async function boot(){
   $("#auth").hidden = true; $("#app").hidden = false;
   setWho(); render();
   await reload();
-  subscribeRealtime(); flushQueue();
+  subscribeRealtime(); flushQueue().then(flushOutbox);
   startGo(new URLSearchParams(location.search).get("go"));
 }
 // App-icon shortcuts (manifest "shortcuts") open ?go=give|search|add.
@@ -673,13 +740,14 @@ function setWho(){
   document.querySelectorAll("[data-money]").forEach(b => b.hidden = !seeMoney());
 }
 function netBanner(){
-  const q = myQ().length, off = !navigator.onLine;
+  const q = myQ().length, o = myOB().length, off = !navigator.onLine;
+  const wait = [q ? `<b>${num(q)}</b> تسليم` : "", o ? `<b>${num(o)}</b> تعديل` : ""].filter(Boolean).join(" و");
   $("#net").innerHTML = (DEMO ? `<div class="offline demo">${ic("info")} وضع تجريبي — بيانات وهمية، مفيش أي حاجة بتتحفظ على السيرفر</div>` : "")
-    + (off || fromSnapshot ? `<div class="offline" role="status">${ic("offline")} <span>مفيش إنترنت${fromSnapshot?` — بتشوف آخر نسخة محفوظة (${dLabel(fromSnapshot)})`:""}. التسليم بيتسجل ويترفع لوحده، وباقي التعديلات لما النت يرجع${q?` · <b>${num(q)}</b> تسليم مستني`:""}</span></div>`
-    : q ? `<div class="offline sync" role="status">${ic("refresh")} <span>${num(q)} تسليم مستني يترفع…</span></div>` : "");
+    + (off || fromSnapshot ? `<div class="offline" role="status">${ic("offline")} <span>مفيش إنترنت${fromSnapshot?` — بتشوف آخر نسخة محفوظة (${dLabel(fromSnapshot)})`:""}. كمّل شغلك عادي: التسليم وعلامات الرحلة والردود والمكالمات والتعليقات والأعداد بتتسجل على الموبايل وتترفع لوحدها لما النت يرجع${wait?` · ${wait} مستني`:""}</span></div>`
+    : wait ? `<div class="offline sync" role="status">${ic("refresh")} <span>${wait} مستني يترفع…</span></div>` : "");
   if(me) setWho();
 }
-window.addEventListener("online", () => { netBanner(); if(me){ reload().then(flushQueue); } });
+window.addEventListener("online", () => { netBanner(); if(me){ reload().then(flushQueue).then(flushOutbox); } });
 window.addEventListener("offline", netBanner);
 
 /* ================= render ================= */
@@ -1171,8 +1239,8 @@ function go(what){
 
 let loggingOut=false;
 async function logout(){
-  const q=myQ().length;
-  if(q&&!await ask(`فيه ${num(q)} تسليم لسه ماترفعوش لأن النت كان فاصل.
+  const q=pendingCount();
+  if(q&&!await ask(`فيه ${num(q)} تسليم/تعديل لسه ماترفعوش لأن النت كان فاصل.
 لو خرجت دلوقتي هيضيعوا. استنى لما النت يرجع الأول.`,{title:"استنى شوية",ok:"اخرج برضو",cancel:"استنى",danger:true})) return;
   if(!q&&!await ask("تخرج من الحساب؟",{ok:"خروج"})) return;
   loggingOut=true; await sb.auth.signOut(); loggingOut=false; await clearSnapshot(); writeQ([]); clearAllDrafts(); undoStack.length=0; me=null; loaded=false; snapRaw=null; if(rt){ sb.removeChannel(rt); rt=null; } loginScreen();
@@ -2403,6 +2471,7 @@ function basisText(k){
 const fbOn = k => !!k.feedback;
 async function saveFeedback(id, rows){   // rows: [{ id: item id, text }]
   const { data, error } = await sb.rpc("set_feedback", { rows });
+  if(error&&offlineErr(error)){ enqueue({ kind:"items", fn:"set_feedback", key:"fb:"+id, merge:true, args:{ rows }, id, label:K.get(id)?.title||"" }); overlayOutbox(); changed(); return rows.length; }
   if(error){ toast(`ماتحفظش — ${errMsg(error,"batch","feedback")}`); return 0; }
   logCache.delete("batch"+id); await refreshBatch(id); return data||0;
 }
@@ -2436,7 +2505,7 @@ async function feedbackFromExcel(id, files){
   });
 }
 function openBatch(id, giveMode){
-  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null, enough=0, partsEdit=null, partsOpen=false;
+  let q_="", logs=null, only="all", addQ="", addOpen=false, ruleOpen=false, ruleSplit=!!K.get(id)?.basis?.src, ruleDraft=null, enough=0, partsEdit=null, partsOpen=false, toolsOpen=null;
   // Families taken off this list (from its log), so they can be put back with one tap.
   const removedNames=k=>{ if(!logs) return []; const inIt=new Set(k.items.map(i=>i.bid)), out=[];
     for(const l of logs){ const m=/^استبعاد (.+)$/.exec(l.text||""); if(!m) continue; const b=people().find(p=>p.name===m[1].trim()&&!inIt.has(p.id)); if(b&&!out.includes(b)) out.push(b); } return out; };
@@ -2447,11 +2516,20 @@ function openBatch(id, giveMode){
     let reach=items.length, acc=0; if(enough>0){ reach=0; for(const it of items){ if(acc+(+it.value||0)>enough+1e-9) break; acc+=+it.value||0; reach++; } }
     const qq=norm(q_); const shown=items.map((it,i)=>({it,i})).filter(({it})=>!qq||norm(it.name).includes(qq)||String(it.code)===qq||(it.nationalId||"").includes(qq))
       .filter(({it})=>only==="all"||(only==="left"?!it.received:only==="nocall"?!it.received&&!(it.bid&&lastCall(it.bid,k.id)):true));
+    const tools=canAdjust(k)||canEditList(k)||canDraft()||isMgr()||(fbOn(k)&&canRsvp());
     const members=items.reduce((a,i)=>a+(+i.familySize||1),0), hasStu=items.some(i=>i.students!=null), stuTotal=items.reduce((a,i)=>a+(+i.students||0),0);
     return `
     <div class="row" style="margin-bottom:10px">${statusChip(k.status)}<span class="sub">${mLabel(k.month)}${slotText(k)?` · ${slotText(k)}`:""}${k.donor?` · ${esc(k.donor)}`:""} · ${num(items.length)} أسرة (${num(members)} فرد${hasStu?`، ${num(stuTotal)} طالب`:""}) · ${num(total)} ${esc(k.unit)}${partsOf(k).map(p=>` + ${num(items.reduce((a,it)=>a+partVal(it,p),0))} ${esc(partUnit(p))} ${esc(p.name)}`).join("")}${!draft?` · <b>استلم ${rec} من ${items.length}</b>`:""}</span></div>
     ${k.basis&&!canAdjust(k)?`<p class="sub" style="margin-top:-4px">${esc(basisText(k))}</p>`:""}${sourcesLine(k)}
     ${enough>0?`<div class="note ${reach<items.length?"":"green"}">${ic("info")} <span class="grow">عندك <b>${num(enough)}</b> ${esc(k.unit)}: ${reach>=items.length?`بيكفّوا الكشف كله (${num(acc)}) وفاضل ${num(enough-acc)}`:`بيكفّوا أول <b>${num(reach)}</b> أسرة من ${num(items.length)} — آخر واحدة: ${reach?`${esc(items[reach-1].name)} (${esc(fcodeIt(items[reach-1]))})`:"—"}. الباقي ${num(items.length-reach)} أسرة باهتين تحت.`}</span> <button class="btn sm" id="b_enoughx">شيل</button></div>`:""}
+    <div class="bar">
+      ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
+      ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button>`:""}
+      ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
+      <button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+    </div>
+    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
+    ${tools?`<details class="tools" ${(toolsOpen??draft)?"open":""}><summary>${ic("edit")} أدوات الكشف <span class="sub">(تعديل، حساب الكمية، ترتيب، نسخة، تعليقات، رفع إكسيل…)</span></summary>`:""}
     ${canAdjust(k)?(()=>{ const groups=ruleGroups(k,ruleSplit), bt=k.basis?basisText(k).replace(/^النصيب: /,""):"";
       return `<details class="rulepanel" ${ruleOpen?"open":""}><summary>${ic("cash")} حساب الكمية: <b>${bt?esc(bt.split(" · ")[0]):"بالإيد — اختار قاعدة تحسب لوحدها"}</b></summary>
       ${mergedSources(k)?`<label class="chk"><input type="checkbox" id="rp_split" ${ruleSplit?"checked":""}> كل كشف من الكشوف المدموجة ليه قاعدة لوحده (مش قاعدة واحدة للكل)</label>`:""}
@@ -2469,14 +2547,11 @@ function openBatch(id, giveMode){
       <div class="bar"><button class="btn sm" id="pt_add">${ic("plus")}توزيعة ${pe.length?"تانية":""}</button></div>
       ${pe.length||partsOf(k).length?`<label class="chk"><input type="checkbox" id="pt_fam"> هات عدد الأفراد والطلاب من ملفات الحالات (هيكتب فوق الأعداد اللي في الكشف)</label>
       <div class="bar"><button class="btn pri" id="pt_go">${ic("refresh")}احفظ واحسب للي ما استلموش</button></div>`:""}</details>`; })():""}
-    ${draft?`<div class="note">${isMgr()?"دي مسودة: مش بتتحسب في سجل المساعدات والمساعدين مش شايفينها. عشان تعلّموا مين استلم اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» جنب كل اسم.":"دي مسودة: تقدر تعدّلها وتشيل وتضيف. لما تخلص اضغط «اعتماد الكشف» — بعدها بتظهر زراير «استلم» عشان تعلّموا مين استلم (وبعد الاعتماد التعديل للمدير بس)."}</div>`:""}
     <div class="bar">
-      ${draft&&canDraft()?`<button class="btn pri" id="b_ok">${ic("check")}اعتماد الكشف</button>`:""}
-      ${k.status==="معتمد"&&isMgr()?`<button class="btn gold" id="b_paid">تم الصرف بالكامل</button><button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
-      ${k.status==="مصروف"&&!k.settledAt&&isMgr()&&!k.single&&k.items.some(i=>i.received)?`<button class="btn" id="b_settle">${ic("cash")}سجّل الصرف في الحسابات / المخزن</button>`:""}
-      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canAdjust(k)?`<button class="btn" id="b_sort">${ic("list")}ترتيب الكشف</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة التعليقات</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}<button class="btn" id="b_print">${ic("printer")}طباعة</button>${!draft&&rec&&rec<items.length?`<button class="btn" id="b_printLeft">${ic("printer")}طباعة اللي لسه (${num(items.length-rec)})</button>`:""}<button class="btn" id="b_phones">${ic("phone")}أرقام</button><button class="btn" id="b_xlsx">Excel</button>
+      ${k.status==="معتمد"&&isMgr()?`<button class="btn" id="b_back">إرجاع لمسودة</button>`:""}
+      ${canEditList(k)?`<button class="btn" id="b_edit">${ic("edit")}تعديل</button>`:""}${canAdjust(k)?`<button class="btn" id="b_sort">${ic("list")}ترتيب الكشف</button>`:""}${canDraft()?`<button class="btn" id="b_copy">${ic("copy")}نسخة جديدة</button>`:""}${!fbOn(k)&&canAdjust(k)?`<button class="btn" id="b_addfb">${ic("plus")}ضيف خانة التعليقات</button>`:""}${fbOn(k)&&canRsvp()?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع «${esc(k.feedback)}» (إكسيل)<input type="file" id="b_fb" accept=".xlsx,.xls,.csv" multiple hidden></label>`:""}${canEditList(k)&&k.status!=="مصروف"?`<label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="b_up" accept=".xlsx,.xls,.csv" multiple hidden></label><button class="btn" id="b_paper">${ic("edit")}من ورقة بخط الإيد</button>`:""}
       ${isMgr()?`<button class="btn danger" id="b_del">${ic("archive")}أرشفة</button>`:""}
-    </div>
+    </div>${tools?"</details>":""}
     <input type="search" id="b_q" placeholder="دوّر في الكشف بالاسم أو الرقم" value="${esc(q_)}" style="margin-bottom:10px">
     ${canEditList(k)&&k.status!=="مصروف"?`<details class="addbox" ${addOpen?"open":""}><summary>${ic("plus")} ضيف حالة للكشف (أو رجّع حد اتشال)</summary>
       <input type="search" id="b_add" placeholder="اكتب الاسم أو الرقم القومي أو رقم الحالة" value="${esc(addQ)}" autocomplete="off">
@@ -2521,11 +2596,13 @@ function openBatch(id, giveMode){
         if(same(it[f]===""?null:it[f], v)) continue; prev[f]=it[f]; row[cols[f]]=v; }
       if(!Object.keys(row).length) return true;
       if(row.value!=null&&row.value<0){ toast("الكمية مينفعش تبقى بالسالب"); return false; }
-      const { data, error } = await sb.rpc("set_item_counts", { rows:[{ id:it.id, ...row }] });
+      const lbl={ familySize:"الأفراد", students:"الطلاب", value:k.template==="cash"?"المبلغ":"الكمية", ...Object.fromEntries(partsOf(k).map(p=>["x:"+p.key,p.name])) };
+      const logText=`تعديل ${it.name}: ${Object.keys(prev).map(f=>`${lbl[f]} ${prev[f]??"—"} ← ${patch[f]??"—"}`).join("، ")}`;
+      let { data, error } = await sb.rpc("set_item_counts", { rows:[{ id:it.id, ...row }] });
+      if(error&&offlineErr(error)){ enqueue({ kind:"items", fn:"set_item_counts", key:"cnt:"+it.id, merge:true, args:{ rows:[{ id:it.id, ...row }] }, id:it.id, label:it.name, logs:[{ entity:"batch", id, text:logText }] }); overlayOutbox(); changed(); refreshSheet(); return true; }
       if(error){ toast(`ماتحفظش — ${errMsg(error,"batch","edit_item")}`); refreshSheet(); return false; }
       if(!data){ toast(`${it.name} استلمت خلاص — الأعداد بتاعتها مابقتش تتعدل`); await refreshBatch(id); return false; }
-      const lbl={ familySize:"الأفراد", students:"الطلاب", value:k.template==="cash"?"المبلغ":"الكمية", ...Object.fromEntries(partsOf(k).map(p=>["x:"+p.key,p.name])) };
-      await logIt("batch",id,`تعديل ${it.name}: ${Object.keys(prev).map(f=>`${lbl[f]} ${prev[f]??"—"} ← ${patch[f]??"—"}`).join("، ")}`); logs=await loadLog("batch",id); await refreshBatch(id);
+      await logIt("batch",id,logText); logs=await loadLog("batch",id); await refreshBatch(id);
       undoable(`${it.name}: اتعدلت الأعداد`, ()=>{ const cur=K.get(id)?.items.find(x=>x.id===it.id); if(!cur||cur.received) return false; return saveItem(cur,prev); });
       return true; };
     // Typing a family size or students count changes only that number — never the amount by itself.
@@ -2545,6 +2622,7 @@ function openBatch(id, giveMode){
         if(Object.values(patch).some(v=>v!=null&&(isNaN(v)||v<0))){ toast("اكتب أرقام صحيحة (صفر أو أكتر)"); return; }
         a.disabled=true; if(await saveItem(it,patch)){ w.remove(); toast("اتحفظ ✓"); } else a.disabled=false; };
     });
+    const tl=q("details.tools"); if(tl) tl.ontoggle=()=>{ toolsOpen=tl.open; };
     const rpn=q(".rulepanel"); if(rpn){ rpn.ontoggle=()=>{ ruleOpen=rpn.open; if(!rpn.open) ruleDraft=null; }; bindRuleBoxes(rpn);
       // what's being chosen survives the list redrawing (a save or someone else's change arriving) until «طبّق»
       const ctrls=()=>[...rpn.querySelectorAll("select,input")].filter(x=>x.id!=="rp_split");
@@ -3127,6 +3205,8 @@ function eventTotals(id){
       yes.forEach(r=>kidsComing(r).forEach(k=>{ const c=k.a==null?none:m.get(kidBand(k.a)); for(const x of [c,all]){ x.n++; if(k.sex) x[k.sex]++; } })); return { m, none, all }; })(),
     moms:yes.map(r=>r.mother_age).filter(a=>a!=null) };
 }
+const epName = id => B.get(EP.get(id)?.beneficiary_id)?.name || "";
+const obHas = id => myOB().some(x => x.id === id);   // this family still has saves waiting: new ones queue behind them (never overtake)
 const canRsvp = () => role==="manager"||role==="worker"||role==="helper";
 // Save one family's answer. Taps show at once; the stepper waits half a second so + + + is one save.
 const rsvpTimers=new Map(), rsvpPending=new Map(), rsvpInflight=new Map(), rsvpChain=new Map();
@@ -3135,9 +3215,13 @@ function setRsvp(id, patch, wait){
   const cur=EP.get(id); if(!cur) return; EP.set(id,{ ...cur, ...patch }); changed();
   rsvpPending.set(id,{ ...(rsvpPending.get(id)||{}), ...patch }); clearTimeout(rsvpTimers.get(id));
   return new Promise(res=>rsvpTimers.set(id,setTimeout(()=>{
-    const run=async()=>{ const p=rsvpPending.get(id); if(!p) return; rsvpPending.delete(id); rsvpInflight.set(id,p);
+    const run=async()=>{ const p=rsvpPending.get(id); if(!p) return; rsvpPending.delete(id);
+      const queue=()=>{ enqueue({ kind:"rsvp", key:"rsvp:"+id, id, patch:p, label:epName(id) }); EP.set(id,{ ...EP.get(id), pending:true }); changed(); };
+      if(obHas(id)){ queue(); flushOutbox(); return; }
+      rsvpInflight.set(id,p);
       const { data, error } = await sb.from("event_people").update(p).eq("id",id).select().single();
       rsvpInflight.delete(id);
+      if(error&&offlineErr(error)){ queue(); return; }
       if(error){ toast(errMsg(error)); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,{ ...fresh, ...(rsvpPending.get(id)||{}) }); }
       else if(data) EP.set(id,{ ...data, ...(rsvpPending.get(id)||{}) });
       changed(); };
@@ -3149,7 +3233,11 @@ function setRsvp(id, patch, wait){
 function epTick(id, local, fn, args){
   const cur=EP.get(id); if(!cur) return Promise.resolve(false);
   EP.set(id,{ ...cur, ...local }); changed();
-  const go=async()=>{ const { data, error } = await sb.rpc(fn, { ep:id, ...args });
+  const go=async()=>{
+    const queue=()=>{ enqueue({ kind:"ep", fn, args:{ ep:id, ...args }, id, local, label:epName(id) }); EP.set(id,{ ...EP.get(id), pending:true }); changed(); return true; };
+    if(obHas(id)){ queue(); flushOutbox(); return true; }
+    const { data, error } = await sb.rpc(fn, { ep:id, ...args });
+    if(error&&offlineErr(error)) return queue();
     if(error){ toast(`العلامة ماتسجلتش — ${errMsg(error,"trip",fn)}`); const { data:fresh } = await sb.from("event_people").select("*").eq("id",id).single(); if(fresh) EP.set(id,{ ...fresh, ...(rsvpPending.get(id)||{}) }); changed(); return false; }
     EP.set(id,{ ...data, ...(rsvpPending.get(id)||{}) }); changed(); return true; };
   const next=(rsvpChain.get(id)||Promise.resolve()).then(go,go); rsvpChain.set(id,next); return next;
@@ -4001,7 +4089,7 @@ if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch
 // fail with «مش مسموحلك». Deliveries waiting on this device and form drafts stay; they go up after signing in again.
 sb.auth.onAuthStateChange((ev)=>{
   if(ev==="SIGNED_OUT"){ const was=me; me=null; if(was&&!loggingOut){ authLost=true; closeSheet(); loginScreen(); toast(ERR_TEXT.auth_expired); } }
-  else if(ev==="SIGNED_IN"||ev==="TOKEN_REFRESHED"){ authLost=false; if(me) flushQueue(); }
+  else if(ev==="SIGNED_IN"||ev==="TOKEN_REFRESHED"){ authLost=false; if(me) flushQueue().then(flushOutbox); }
 });
 netBanner();
 boot();
