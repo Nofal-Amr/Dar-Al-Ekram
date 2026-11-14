@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.89";
+export const VERSION = "1.3.90";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -30,7 +30,8 @@ const DN = new Map(), IT = new Map(), DO = new Map(), LG = new Map(), SM = new M
 const MONEY_TABLES = { donors:DN, items:IT, donations:DO, ledger:LG, stock_moves:SM };   // beneficiaries, types, batches(with items), profiles, calls, tasks
 // trips & activities: the event, and one row per invited family (answer + how many adults / kids are coming)
 const EV = new Map(), EP = new Map();
-const EVENT_TABLES = { events:EV, event_people:EP };
+const RS = new Map();   // general lists (كشوف عامة): members, board… — not cases
+const EVENT_TABLES = { events:EV, event_people:EP, rosters:RS };
 const ROW_TABLES = { ...MONEY_TABLES, ...EVENT_TABLES };
 let loaded = false, view = "home", peopleQ = "", peopleF = "all", peopleSort = "code", peopleLimit = 100;
 const PAGE = 100;   // rows drawn at a time — keeps the Windows 7 PC responsive
@@ -830,8 +831,9 @@ function vPeople(){
 }
 let batchTab="lists";
 function vBatches(){
-  const tabs=`<div class="seg" role="tablist"><button class="${batchTab==="lists"?"on":""}" data-btab="lists">${ic("list")} كشوف الصرف</button><button class="${batchTab==="events"?"on":""}" data-btab="events">${ic("users")} رحلات وأنشطة${events().length?` (${num(events().length)})`:""}</button></div>`;
+  const tabs=`<div class="seg" role="tablist"><button class="${batchTab==="lists"?"on":""}" data-btab="lists">${ic("list")} كشوف الصرف</button><button class="${batchTab==="events"?"on":""}" data-btab="events">${ic("users")} رحلات وأنشطة${events().length?` (${num(events().length)})`:""}</button>${seeRosters()?`<button class="${batchTab==="rosters"?"on":""}" data-btab="rosters">${ic("list")} كشوف عامة${rosters().length?` (${num(rosters().length)})`:""}</button>`:""}</div>`;
   if(batchTab==="events") return tabs+vEvents();
+  if(batchTab==="rosters"&&seeRosters()) return tabs+vRosters();
   const list=batches();
   return `${tabs}
   <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف الصرف</h2>${canDraft()?`<span class="row" style="gap:6px"><button class="btn" id="mergeK">${ic("copy")}من كشوف قديمة</button><button class="btn pri" id="newK">${ic("list")}كشف جديد</button></span>`:""}</div>
@@ -1167,6 +1169,9 @@ function bindView(){
   v.querySelectorAll("[data-batch]").forEach(el=>el.onclick=()=>openBatch(el.dataset.batch));
   v.querySelectorAll("[data-btab]").forEach(el=>el.onclick=()=>{ batchTab=el.dataset.btab; render(); });
   v.querySelectorAll("[data-event]").forEach(el=>el.onclick=()=>openEvent(el.dataset.event));
+  v.querySelectorAll("[data-roster]").forEach(el=>el.onclick=()=>openRoster(el.dataset.roster));
+  v.querySelectorAll("[data-rsback]").forEach(el=>el.onclick=async()=>{ if(await saveRoster(el.dataset.rsback,{ archived_at:null }, RS.get(el.dataset.rsback))) toast("رجع ✓"); });
+  const nrs=$("#newRs"); if(nrs) nrs.onclick=()=>newRoster();
   v.querySelectorAll("[data-type]").forEach(el=>el.onclick=()=>openType(el.dataset.type));
   v.querySelectorAll("[data-user]").forEach(el=>el.onclick=()=>openUser(el.dataset.user));
   v.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>go(el.dataset.go));
@@ -1415,7 +1420,7 @@ function sheet(title,body,onMount,refresh){
 }
 function closeSheet(){ const s=$("#scrim"); if(s) s.remove(); document.body.style.overflow=""; sheetRefresh=null; printCtx=null; }
 // Keeps the scroll position, and the cursor in a number box that has data-ei (editing a list's counts: Tab to the next box keeps working).
-function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0, a=document.activeElement, keep=a?.dataset?.ei?`[data-ei="${a.dataset.ei}"][data-ef="${a.dataset.ef}"]`:a?.dataset?.fb?`[data-fb="${a.dataset.fb}"]`:null;
+function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0, a=document.activeElement, keep=a?.dataset?.ei?`[data-ei="${a.dataset.ei}"][data-ef="${a.dataset.ef}"]`:a?.dataset?.fb?`[data-fb="${a.dataset.fb}"]`:a?.dataset?.new?`[data-new="${a.dataset.new}"]`:a?.dataset?.rv?`[data-rv="${a.dataset.rv}"][data-rc="${a.dataset.rc}"]`:null;
   sheetRefresh(); const b=$("#scrim .sh-body"); if(b) b.scrollTop=sc; if(keep){ const n=$("#scrim "+keep); if(n&&document.activeElement!==n) n.focus(); } } }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeSheet(); });
 
@@ -3257,6 +3262,214 @@ function bandsText(bd, html){
   const unk=bd.all.n-bd.all.ولد-bd.all.بنت;
   return `ولاد ${B_(num(bd.all.ولد))} · بنات ${B_(num(bd.all.بنت))}${unk?` · مش محدد ${num(unk)}`:""} — `+[...bd.m].filter(([,c])=>c.n).map(([l,c])=>`${l}: ${B_(num(c.n))}${sx(c)}`).concat(bd.none.n?[`من غير سن: ${num(bd.none.n)}${sx(bd.none)}`]:[]).join(" · ");
 }
+/* ---------- general lists (كشوف عامة) ----------
+   Lists that have nothing to do with the cases: the general assembly's members, the board, volunteers… Each list has its own
+   columns ({ id, name, blank }) and rows ({ id, v: { colId: value } }); «م» is always the row number. A blank column
+   (التوقيع) is printed empty, to be filled by hand. Ticking rows (who actually came) makes a new list from them —
+   e.g. «حضور الجمعية العمومية» with م · الاسم · رقم العضوية · التوقيع. */
+const RS_TEMPLATES = [
+  ["assembly", "أعضاء الجمعية العمومية", [["name","اسم العضو"],["no","رقم العضوية"]]],
+  ["board", "أعضاء مجلس الإدارة", [["name","اسم العضو"],["role","الصفة"],["no","رقم العضوية"]]],
+  ["blank", "كشف فاضي — الأعمدة من عندي", [["name","الاسم"]]],
+];
+const SIG_COL = () => ({ id:"sig", name:"التوقيع", blank:true });
+const rosters = memo(() => [...RS.values()].filter(r=>!r.archived_at).sort((a,b)=>(b.updated_at||"").localeCompare(a.updated_at||"")));
+const rsCols = r => (r.cols||[]).filter(c=>c&&c.id);
+const rsVal = (row, c) => c.blank ? "" : String(row.v?.[c.id] ?? "");
+const canRoster = () => canWrite();
+const seeRosters = () => canWrite() || role === "viewer";
+/* Saves on top of the newest copy in the database: rows and columns are merged by id, so two people adding members
+   at the same time never erase each other. base = what this screen started from. */
+async function saveRoster(id, next, base){
+  const { data:cur, error:e1 } = await sb.from("rosters").select("*").eq("id",id).single();
+  if(e1){ toast(errMsg(e1,"roster","save")); return false; }
+  const patch = { updated_at:new Date().toISOString() };
+  for(const k of ["title","note","archived_at"]) if(k in next) patch[k] = next[k];
+  if(next.rows) patch.rows = mergeById(base?.rows||[], next.rows, cur.rows||[]);
+  if(next.cols){ const order=next.cols.map(c=>c.id), at=c=>{ const i=order.indexOf(c.id); return i<0?order.length:i; };   // the order is the one chosen here
+    patch.cols = mergeById(base?.cols||[], next.cols, cur.cols||[]).sort((a,b)=>at(a)-at(b)); }
+  const { data, error } = await sb.from("rosters").update(patch).eq("id",id).select().single();
+  if(error){ toast(errMsg(error,"roster","save")); return false; }
+  RS.set(id, data); changed(); return data;
+}
+function vRosters(){
+  const list=rosters();
+  return `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">كشوف عامة</h2>${canRoster()?`<button class="btn pri" id="newRs">${ic("plus")}كشف جديد</button>`:""}</div>
+  <p class="sub" style="margin-top:0">كشوف مالهاش علاقة بالحالات: أعضاء الجمعية العمومية، مجلس الإدارة، المتطوعين… بالأعمدة اللي تختارها، ومنها كشف حضور بخانة توقيع.</p>
+  <div class="list">${list.map(r=>`<button class="item" data-roster="${r.id}"><span class="grow"><span class="nm">${esc(r.title||"كشف")}</span><br>
+    <span class="sub">${num((r.rows||[]).length)} اسم · ${esc(rsCols(r).map(c=>c.name).join(" · "))}${r.note?` · ${esc(r.note)}`:""}</span></span></button>`).join("")||`<div class="empty">مفيش كشوف عامة لسه${canRoster()?" — اضغط «كشف جديد»":""}</div>`}</div>
+  ${isMgr()?(()=>{ const old=[...RS.values()].filter(r=>r.archived_at); return old.length?`<details class="addbox"><summary>${ic("archive")} المؤرشفة (${num(old.length)})</summary><div class="list">${old.map(r=>`<div class="item"><span class="grow nm">${esc(r.title)}</span><button class="btn sm" data-rsback="${r.id}">${ic("undo")}رجّعه</button></div>`).join("")}</div></details>`:""; })():""}`;
+}
+function newRoster(from){
+  const src=from?RS.get(from):null;
+  sheet(src?"كشف جديد من «"+src.title+"»":"كشف جديد",`
+    ${src?"":`<div class="seg" role="radiogroup" id="nr_t">${RS_TEMPLATES.map(([k,l],i)=>`<button class="${i?"":"on"}" data-t="${k}">${esc(l)}</button>`).join("")}</div>`}
+    <label class="f">اسم الكشف<input type="text" id="nr_n" value="${esc(src?"حضور — "+src.title:RS_TEMPLATES[0][1])}"></label>
+    <label class="f">سطر تحت العنوان (اختياري)<input type="text" id="nr_note" placeholder="مثال: اجتماع الجمعية العمومية العادي — ${dLabel(today)}" value="${esc(src?"":"")}"></label>
+    <p class="sub">الأعمدة: <b id="nr_cols"></b> — تقدر تغيّرها بعدين من «أدوات الكشف ← الأعمدة».</p>
+    <label class="chk"><input type="checkbox" id="nr_sig" ${src?"checked":""}> ضيف خانة «التوقيع» (بتتطبع فاضية)</label>
+    <div class="bar"><button class="btn pri" id="nr_go">${ic("check")}اعمل الكشف</button></div>`,s=>{
+    const q=x=>s.querySelector(x); let t=RS_TEMPLATES[0];
+    const cols=()=>src?rsCols(src).filter(c=>!c.blank).map(c=>({ ...c })):t[2].map(([id,name])=>({ id, name }));
+    const show=()=>{ q("#nr_cols").textContent=["م",...cols().map(c=>c.name),...(q("#nr_sig").checked?["التوقيع"]:[])].join(" · "); };
+    s.querySelectorAll("#nr_t [data-t]").forEach(b=>b.onclick=()=>{ t=RS_TEMPLATES.find(x=>x[0]===b.dataset.t); s.querySelectorAll("#nr_t [data-t]").forEach(x=>x.classList.toggle("on",x===b)); if(t[0]!=="blank") q("#nr_n").value=t[1]; show(); });
+    q("#nr_sig").onchange=show; show();
+    q("#nr_go").onclick=async()=>{ const title=q("#nr_n").value.trim(); if(!title){ toast("اكتب اسم الكشف"); return; }
+      const cs=[...cols(), ...(q("#nr_sig").checked?[SIG_COL()]:[])];
+      const rows=src?(src.rows||[]).filter(r=>from&&newRoster.pick?.has(r.id)).map(r=>({ id:uuid4(), v:{ ...r.v } })):[];
+      q("#nr_go").disabled=true;
+      const { data, error } = await sb.from("rosters").insert({ title, note:q("#nr_note").value.trim(), cols:cs, rows, source:src?.id||null }).select().single();
+      if(error){ q("#nr_go").disabled=false; toast(errMsg(error,"roster","new")); return; }
+      RS.set(data.id, data); changed(); newRoster.pick=null; openRoster(data.id); toast(src?`اتعمل ✓ — ${num(rows.length)} اسم`:"اتعمل ✓ — ضيف الأسامي أو ارفعها من إكسيل"); };
+  });
+}
+function rosterHTML(r, { cols, rows, title, note, signers }){
+  return `<div class="ps">${hdr()}<h1>${esc(title)}</h1>${note?`<div class="mo">${esc(note)}</div>`:""}
+    <table class="rs"><thead><tr><th style="width:6%">م</th>${cols.map(c=>`<th ${c.blank?`style="width:${c.id==="sig"?22:16}%"`:""}>${esc(c.name)}</th>`).join("")}</tr></thead><tbody>
+    ${rows.map((row,i)=>`<tr><td>${i+1}</td>${cols.map(c=>`<td class="${/اسم/.test(c.name)?"nm":""}">${esc(rsVal(row,c))}</td>`).join("")}</tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="${cols.length+1}">الإجمالي: ${num(rows.length)}</td></tr></tfoot></table>
+    ${signers.length?`<div class="signs">${signers.map(x=>`<div>${esc(x)}<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div>`).join("")}</div>`:""}</div>`;
+}
+// What to print: the title, which columns, extra empty columns (التوقيع…), only the ticked rows, signatures at the bottom.
+function rosterPrint(r, picked, attend){
+  const cols=rsCols(r), hasSig=cols.some(c=>c.blank);
+  const w=document.createElement("div"); w.className="ask-scrim";
+  w.innerHTML=`<div class="ask" role="dialog" aria-modal="true"><h2>${attend?"كشف حضور وتوقيع":"طباعة الكشف"}</h2>
+    <label class="f">العنوان<input type="text" id="rp_t" value="${esc(attend&&!/حضور/.test(r.title)?"كشف حضور "+r.title:r.title)}"></label>
+    <label class="f">سطر تحت العنوان<input type="text" id="rp_no" value="${esc(r.note||"")}" placeholder="مثال: اجتماع ${dLabel(today)}"></label>
+    <div class="checks">${cols.map(c=>`<label><input type="checkbox" data-pc="${esc(c.id)}" checked> ${esc(c.name)}</label>`).join("")}
+      ${hasSig?"":`<label><input type="checkbox" id="rp_sig" ${attend?"checked":""}> التوقيع (فاضية)</label>`}</div>
+    <label class="f">خانات فاضية تانية (افصل بـ ،)<input type="text" id="rp_more" placeholder="مثال: ملاحظات، رقم التليفون"></label>
+    ${picked.size?`<label class="chk"><input type="checkbox" id="rp_pick" checked> المختارين بس (${num(picked.size)} من ${num((r.rows||[]).length)})</label>`:""}
+    <label class="f">توقيعات آخر الورقة (افصل بـ ،)<input type="text" id="rp_sg" value="${attend?"أمين السر، رئيس مجلس الإدارة":""}" placeholder="مثال: أمين السر، رئيس مجلس الإدارة"></label>
+    <div class="bar"><button class="btn pri" data-a="1">${ic("printer")}كمّل</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+  const done=()=>{ w.remove(); document.removeEventListener("keydown",key,true); };
+  const key=e=>{ if(e.key==="Escape"){ e.stopPropagation(); done(); } };
+  const list=t=>t.split(/[،,]/).map(x=>x.trim()).filter(Boolean);
+  w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(!a){ if(e.target===w) done(); return; } if(a.dataset.a!=="1"){ done(); return; }
+    const on=new Set([...w.querySelectorAll("[data-pc]:checked")].map(x=>x.dataset.pc));
+    const cs=[...cols.filter(c=>on.has(c.id)), ...(w.querySelector("#rp_sig")?.checked?[SIG_COL()]:[]), ...list(w.querySelector("#rp_more").value).map((n,i)=>({ id:"x"+i, name:n, blank:true }))];
+    if(!cs.length){ toast("اختار عمود واحد على الأقل"); return; }
+    const rows=(w.querySelector("#rp_pick")?.checked?(r.rows||[]).filter(x=>picked.has(x.id)):(r.rows||[]));
+    const title=w.querySelector("#rp_t").value.trim()||r.title;
+    const html=rosterHTML(r,{ cols:cs, rows, title, note:w.querySelector("#rp_no").value.trim(), signers:list(w.querySelector("#rp_sg").value) });
+    done(); doPrint(html, title); };
+  document.addEventListener("keydown",key,true); document.body.appendChild(w); w.querySelector("#rp_t").focus();
+}
+function rosterXlsx(r){
+  const cols=rsCols(r), rows=[[ORG],[ORG2],[r.title],...(r.note?[[r.note]]:[]),[],["م",...cols.map(c=>c.name)]];
+  (r.rows||[]).forEach((row,i)=>rows.push([i+1,...cols.map(c=>{ const v=rsVal(row,c); return /^\d+$/.test(v)&&v.length<12?+v:v; })]));
+  const box=document.createElement("div"); box.innerHTML=rosterHTML(r,{ cols, rows:r.rows||[], title:r.title, note:r.note, signers:[] });
+  (async()=>{ try{ const sh=htmlToSheet(box,"زي الورقة"), lg=await logoPNG(); if(lg.png) sh.image=lg;
+      saveFile(`${r.title}.xlsx`, new Blob([buildXlsx([sh, plainSheet("بيانات", rows, [6,...cols.map(c=>/اسم/.test(c.name)?32:16)])])],{ type:XLSX_TYPE })); }
+    catch(e){ toast(`ماقدرناش نعمل الـExcel — ${errMsg(e,"roster","xlsx")}`); } })();
+}
+/* Rows from Excel (or pasted from it): the header row is the one with «اسم»; columns are matched by their title,
+   new titles become new columns. A member already on the list (same membership no., or same name) is updated, not doubled. */
+function rowsFromTable(r, table){
+  const cols=rsCols(r).map(c=>({ ...c })), skip=/^(م|مسلسل|المسلسل|#|ن|رقم مسلسل)$/;
+  const hi=table.findIndex(row=>row.some(c=>/اسم/.test(norm(String(c)))));
+  let map;
+  if(hi>=0) map=table[hi].map(c=>{ const h=String(c).trim(); if(!h||skip.test(norm(h))||/توقيع|امضاء|إمضاء/.test(h)) return null;
+    let col=cols.find(c=>norm(c.name)===norm(h))||cols.find(c=>!c.blank&&(norm(c.name).includes(norm(h))||norm(h).includes(norm(c.name))));
+    if(!col){ col={ id:"c"+uuid4().slice(0,6), name:h }; const at=cols.findIndex(c=>c.blank); at<0?cols.push(col):cols.splice(at,0,col); } return col.blank?null:col.id; });
+  const body=hi>=0?table.slice(hi+1):table;
+  if(hi<0){   // no titles: the list's own columns in order; a first column 1, 2, 3… is the «م»
+    const data=cols.filter(c=>!c.blank).map(c=>c.id), serial=body.length>1&&body.every((row,i)=>String(row[0]).trim()===String(i+1));
+    map=serial?[null,...data]:data; }
+  const out=[]; for(const row of body){ const v={}; map.forEach((id,i)=>{ if(id&&String(row[i]??"").trim()) v[id]=String(row[i]).trim(); }); if(Object.keys(v).length) out.push(v); }
+  return { cols, rows:out };
+}
+function mergeRosterRows(r, cols, incoming){
+  const noCol=cols.find(c=>/عضوي|رقم/.test(c.name)&&!c.blank), nameCol=cols.find(c=>/اسم/.test(c.name));
+  const rows=(r.rows||[]).map(x=>({ ...x, v:{ ...x.v } })); let added=0, updated=0;
+  for(const v of incoming){
+    const hit=rows.find(x=>(noCol&&v[noCol.id]&&String(x.v[noCol.id]||"")===v[noCol.id])||(!noCol||!v[noCol.id])&&nameCol&&v[nameCol.id]&&norm(x.v[nameCol.id]||"")===norm(v[nameCol.id]));
+    if(hit){ if(JSON.stringify({ ...hit.v, ...v })!==JSON.stringify(hit.v)){ Object.assign(hit.v, v); updated++; } } else { rows.push({ id:uuid4(), v }); added++; } }
+  return { rows, added, updated };
+}
+function openRoster(id){
+  let q_="", picked=new Set(), toolsOpen=false, draftNew={}, base=JSON.parse(JSON.stringify(RS.get(id)||{}));
+  const edit=()=>canRoster();
+  const draw=()=>{ const r=RS.get(id); if(!r) return `<div class="empty">الكشف ده اتشال</div>`;
+    const cols=rsCols(r), qq=norm(q_), rows=(r.rows||[]).map((x,i)=>({ x, i })).filter(({x})=>!qq||cols.some(c=>norm(rsVal(x,c)).includes(qq)));
+    return `<div class="row" style="margin-bottom:8px"><span class="sub">${num((r.rows||[]).length)} اسم${r.note?` · ${esc(r.note)}`:""}${picked.size?` · <b>مختار ${num(picked.size)}</b>`:""}</span></div>
+    <div class="bar"><button class="btn" id="rs_print">${ic("printer")}طباعة</button><button class="btn pri" id="rs_att">${ic("printer")}كشف حضور بالتوقيع</button><button class="btn" id="rs_xlsx">Excel</button>
+      ${edit()&&picked.size?`<button class="btn gold" id="rs_fromPick">${ic("copy")}كشف جديد من المختارين (${num(picked.size)})</button>`:""}</div>
+    ${edit()?`<details class="tools" ${toolsOpen?"open":""}><summary>${ic("edit")} أدوات الكشف <span class="sub">(الاسم، الأعمدة، رفع إكسيل، لصق، نسخة، أرشفة)</span></summary>
+      <div class="grid2"><label class="f">اسم الكشف<input type="text" id="rs_t" value="${esc(r.title)}"></label><label class="f">سطر تحت العنوان<input type="text" id="rs_no" value="${esc(r.note||"")}"></label></div>
+      <div class="sub" style="margin:6px 0">الأعمدة (م بيتكتب لوحده):</div>
+      ${cols.map((c,i)=>`<div class="row" style="gap:6px;margin-bottom:6px;flex-wrap:nowrap"><input type="text" data-cn="${esc(c.id)}" value="${esc(c.name)}" aria-label="اسم العمود" style="flex:1">
+        <select class="mini" data-ck="${esc(c.id)}" aria-label="نوع العمود"><option value="" ${c.blank?"":"selected"}>بيانات</option><option value="1" ${c.blank?"selected":""}>فاضية للكتابة باليد</option></select>
+        <button class="btn sm" data-cu="${i}" ${i?"":"disabled"} aria-label="قبل">↑</button><button class="btn sm danger" data-cx="${esc(c.id)}" aria-label="شيل العمود">×</button></div>`).join("")}
+      <div class="bar"><button class="btn sm" id="rs_addc">${ic("plus")}عمود</button>${cols.some(c=>c.id==="sig")?"":`<button class="btn sm" id="rs_addsig">${ic("plus")}خانة التوقيع</button>`}<button class="btn sm pri" id="rs_savec">${ic("save")}احفظ الاسم والأعمدة</button></div>
+      <div class="bar"><label class="btn" style="cursor:pointer">${ic("sheet")}رفع إكسيل<input type="file" id="rs_up" accept=".xlsx,.xls,.csv" hidden></label><button class="btn" id="rs_paste">${ic("copy")}الصق من إكسيل</button><button class="btn" id="rs_copy">${ic("copy")}نسخة من الكشف</button>${isMgr()?`<button class="btn danger" id="rs_del">${ic("archive")}أرشفة</button>`:""}</div>
+    </details>`:""}
+    <input type="search" id="rs_q" placeholder="دوّر في الكشف" value="${esc(q_)}" style="margin-bottom:10px">
+    <div class="tbl"><table class="rsT"><thead><tr>${edit()?`<th style="width:34px"><input type="checkbox" id="rs_all" aria-label="اختار الكل" ${picked.size&&picked.size===(r.rows||[]).length?"checked":""}></th>`:""}<th>م</th>${cols.map(c=>`<th>${esc(c.name)}</th>`).join("")}${edit()?"<th></th>":""}</tr></thead><tbody>
+      ${rows.map(({x,i})=>`<tr>${edit()?`<td><input type="checkbox" data-pk="${x.id}" ${picked.has(x.id)?"checked":""} aria-label="اختار"></td>`:""}<td class="n">${i+1}</td>
+        ${cols.map(c=>`<td>${c.blank?`<span class="sub">— باليد —</span>`:edit()?`<input type="text" class="fbin" data-rv="${x.id}" data-rc="${esc(c.id)}" value="${esc(rsVal(x,c))}" aria-label="${esc(c.name)}">`:esc(rsVal(x,c))}</td>`).join("")}
+        ${edit()?`<td><button class="btn sm danger" data-rx="${x.id}" aria-label="شيل">×</button></td>`:""}</tr>`).join("")||`<tr><td colspan="${cols.length+3}" class="empty">${(r.rows||[]).length?"مفيش نتيجة":"الكشف فاضي — ضيف أسامي تحت أو ارفعها من إكسيل"}</td></tr>`}
+      ${edit()?`<tr class="addrow"><td></td><td class="n">+</td>${cols.map(c=>`<td>${c.blank?"":`<input type="text" data-new="${esc(c.id)}" value="${esc(draftNew[c.id]||"")}" placeholder="${esc(c.name)}" aria-label="جديد — ${esc(c.name)}">`}</td>`).join("")}<td><button class="btn sm pri" id="rs_add" aria-label="ضيف">${ic("plus")}</button></td></tr>`:""}
+    </tbody></table></div>`; };
+  const s=sheet(RS.get(id)?.title||"كشف", draw(), mount, ()=>{ s.querySelector(".sh-body").innerHTML=draw(); mount(s); });
+  function re(){ const b=s.querySelector(".sh-body"), sc=b.scrollTop; b.innerHTML=draw(); mount(s); b.scrollTop=sc; }
+  async function save(next, msg){ const d=await saveRoster(id, next, base); if(d){ base=JSON.parse(JSON.stringify(d)); if(msg) toast(msg); re(); } return d; }
+  function mount(s){ const q=x=>s.querySelector(x), r=RS.get(id); if(!r) return;
+    printCtx=()=>({ html:rosterHTML(r,{ cols:rsCols(r), rows:r.rows||[], title:r.title, note:r.note, signers:[] }), title:r.title });
+    q("#rs_print").onclick=()=>rosterPrint(RS.get(id), picked, false);
+    q("#rs_att").onclick=()=>rosterPrint(RS.get(id), picked, true);
+    q("#rs_xlsx").onclick=()=>rosterXlsx(RS.get(id));
+    const sq=q("#rs_q"); sq.oninput=()=>{ q_=sq.value; re(); const n=s.querySelector("#rs_q"); n.focus(); n.setSelectionRange(n.value.length,n.value.length); };
+    if(!edit()) return;
+    const tl=q("details.tools"); if(tl) tl.ontoggle=()=>{ toolsOpen=tl.open; };
+    q("#rs_all").onchange=e=>{ picked=e.target.checked?new Set((r.rows||[]).map(x=>x.id)):new Set(); re(); };
+    s.querySelectorAll("[data-pk]").forEach(el=>el.onchange=()=>{ el.checked?picked.add(el.dataset.pk):picked.delete(el.dataset.pk); re(); });
+    const fp=q("#rs_fromPick"); if(fp) fp.onclick=()=>{ newRoster.pick=new Set(picked); newRoster(id); };
+    s.querySelectorAll("[data-rv]").forEach(el=>el.onchange=async()=>{ const cur=RS.get(id), rows=(cur.rows||[]).map(x=>x.id===el.dataset.rv?{ ...x, v:{ ...x.v, [el.dataset.rc]:el.value.trim() } }:x); await save({ rows }); });
+    s.querySelectorAll("[data-rx]").forEach(el=>el.onclick=async()=>{ const cur=RS.get(id), gone=(cur.rows||[]).find(x=>x.id===el.dataset.rx); if(!gone) return;
+      if(await save({ rows:(cur.rows||[]).filter(x=>x.id!==gone.id) })){ picked.delete(gone.id); const c0=rsCols(cur).find(c=>!c.blank);
+        undoable(`اتشال ${c0?rsVal(gone,c0):""}`, async()=>!!(await save({ rows:[...(RS.get(id).rows||[]), gone] }))); } });
+    const add=async()=>{ const v={}; s.querySelectorAll("[data-new]").forEach(el=>{ if(el.value.trim()) v[el.dataset.new]=el.value.trim(); });
+      if(!Object.keys(v).length){ s.querySelector("[data-new]")?.focus(); return; }
+      draftNew={}; if(await save({ rows:[...(RS.get(id).rows||[]), { id:uuid4(), v }] })) s.querySelector("[data-new]")?.focus(); else draftNew=v; };
+    q("#rs_add").onclick=add; s.querySelectorAll("[data-new]").forEach(el=>{ el.oninput=()=>{ draftNew[el.dataset.new]=el.value; }; el.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); add(); } }; });
+    // columns
+    let cs=rsCols(r).map(c=>({ ...c }));
+    s.querySelectorAll("[data-cn]").forEach(el=>el.oninput=()=>{ cs.find(c=>c.id===el.dataset.cn).name=el.value.trim(); });
+    s.querySelectorAll("[data-ck]").forEach(el=>el.onchange=()=>{ cs.find(c=>c.id===el.dataset.ck).blank=!!el.value; });
+    const saveCols=async(list,msg)=>{ if(list.some(c=>!c.name)){ toast("كل عمود لازم يبقى ليه اسم"); return; }
+      const d=await saveRoster(id,{ title:q("#rs_t").value.trim()||r.title, note:q("#rs_no").value.trim(), cols:list }, base); if(!d) return;
+      base=JSON.parse(JSON.stringify(d)); toast(msg||"اتحفظ ✓"); s.querySelector(".sh-head h2").textContent=d.title; re(); };
+    s.querySelectorAll("[data-cu]").forEach(el=>el.onclick=()=>{ const i=+el.dataset.cu; [cs[i-1],cs[i]]=[cs[i],cs[i-1]]; saveCols(cs); });
+    s.querySelectorAll("[data-cx]").forEach(el=>el.onclick=async()=>{ const c=cs.find(x=>x.id===el.dataset.cx); if(cs.length<2){ toast("لازم يفضل عمود واحد على الأقل"); return; }
+      if(!c.blank&&(r.rows||[]).some(x=>x.v?.[c.id])&&!await ask(`عمود «${c.name}» فيه بيانات. لو شلته هيختفي من الكشف والطباعة (البيانات بتفضل محفوظة لو رجّعته بنفس الاسم من «تراجع»).`,{ ok:"شيل العمود", danger:true })) return;
+      const before=cs.map(x=>({ ...x })); await saveCols(cs.filter(x=>x.id!==c.id), `اتشال عمود «${c.name}»`); undoable(`اتشال عمود «${c.name}»`, async()=>{ const d=await saveRoster(id,{ cols:before }, base); if(d){ base=JSON.parse(JSON.stringify(d)); re(); } return !!d; }); });
+    q("#rs_addc").onclick=()=>{ const c={ id:"c"+uuid4().slice(0,6), name:"عمود "+(cs.length+1) }, at=cs.findIndex(x=>x.blank); saveCols(at<0?[...cs,c]:[...cs.slice(0,at),c,...cs.slice(at)], "اتضاف عمود — غيّر اسمه واحفظ"); };
+    const as=q("#rs_addsig"); if(as) as.onclick=()=>saveCols([...cs, SIG_COL()], "اتضافت خانة التوقيع ✓");
+    q("#rs_savec").onclick=()=>saveCols(cs);
+    const importRows=async table=>{ const { cols, rows }=rowsFromTable(RS.get(id), table); if(!rows.length){ toast("مالقيناش أسامي في الملف"); return; }
+      const m=mergeRosterRows(RS.get(id), cols, rows);
+      const newCols=cols.filter(c=>!rsCols(RS.get(id)).some(x=>x.id===c.id));
+      if(!m.added&&!m.updated&&!newCols.length){ toast(`كل الأسامي اللي في الملف (${num(rows.length)}) موجودة في الكشف — مفيش جديد`); return; }
+      if(!await ask(`هيتضاف ${num(m.added)} اسم${m.updated?` ويتحدّث ${num(m.updated)}`:""}${newCols.length?`، وأعمدة جديدة: ${newCols.map(c=>c.name).join("، ")}`:""}.`,{ ok:"تمام" })) return;
+      const d=await saveRoster(id,{ cols, rows:m.rows }, base); if(d){ base=JSON.parse(JSON.stringify(d)); toast(`اتضاف ${num(m.added)} ✓`); re(); } };
+    q("#rs_up").onchange=async e=>{ const f=e.target.files[0]; if(!f) return;
+      try{ if(!window.XLSX){ toast("بنجهّز قراية الإكسيل…"); await loadXlsx(); } }catch(err){ toast("مقدرناش نقرا الإكسيل — جرّب تاني"); return; }
+      let wb; try{ wb=/\.csv$/i.test(f.name)?XLSX.read(await f.text(),{ type:"string" }):XLSX.read(await f.arrayBuffer(),{ type:"array" }); }catch(err){ toast(`الملف «${f.name}» مش إكسيل`); return; }
+      const table=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{ header:1, raw:false, defval:"" }).filter(row=>row.some(c=>String(c).trim()));
+      importRows(table); };
+    q("#rs_paste").onclick=()=>{ const w=document.createElement("div"); w.className="ask-scrim";
+      w.innerHTML=`<div class="ask" role="dialog" aria-modal="true"><h2>الصق من إكسيل</h2><p class="sub" style="margin-top:0">انسخ الصفوف من الإكسيل (ومعاها صف العناوين لو موجود) والصقها هنا. من غير عناوين، الأعمدة بتتاخد بنفس ترتيب الكشف: ${esc(rsCols(r).filter(c=>!c.blank).map(c=>c.name).join("، "))}.</p>
+        <textarea id="ps_t" rows="8" style="width:100%"></textarea><div class="bar"><button class="btn pri" data-a="1">ضيف</button><button class="btn" data-a="0">رجوع</button></div></div>`;
+      w.onclick=e=>{ const a=e.target.closest("[data-a]"); if(!a){ if(e.target===w) w.remove(); return; } const t=w.querySelector("#ps_t").value; w.remove(); if(a.dataset.a!=="1"||!t.trim()) return;
+        importRows(t.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split("\t"))); };
+      document.body.appendChild(w); w.querySelector("#ps_t").focus(); };
+    q("#rs_copy").onclick=()=>{ newRoster.pick=new Set((r.rows||[]).map(x=>x.id)); newRoster(id); };
+    const del=q("#rs_del"); if(del) del.onclick=async()=>{ if(!await ask(`«${r.title}» هيتنقل للأرشيف (تقدر ترجّعه).`,{ ok:"أرشفة", danger:true })) return;
+      if(await saveRoster(id,{ archived_at:new Date().toISOString() }, base)){ closeSheet(); undoable(`اتأرشف «${r.title}»`, async()=>!!(await saveRoster(id,{ archived_at:null }, RS.get(id)))); } };
+  }
+}
 function vEvents(){
   const list=events();
   return `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">رحلات وأنشطة</h2>${canWrite()?`<button class="btn pri" id="newEv">${ic("plus")}رحلة / نشاط جديد</button>`:""}</div>
@@ -3926,7 +4139,7 @@ let pvClose=null;
 /* Ctrl+P (or the browser's own «Print») used to print an empty page: the pages only exist after tapping «طباعة».
    Now Ctrl+P goes through the same print button of whatever is open (a list, a case, a trip…);
    and the browser menu's Print fills the pages of an open list on the spot. Nothing open → the screen as it is. */
-const PRINT_BTNS=["#b_print","#v_print","#e_print","#d_rep","#su_print","#g_print","#ag_print","#dv_print"];
+const PRINT_BTNS=["#b_print","#rs_print","#v_print","#e_print","#d_rep","#su_print","#g_print","#ag_print","#dv_print"];
 const openPrintBtn=()=>PRINT_BTNS.map(x=>$("#scrim "+x)).find(b=>b&&b.offsetParent);
 let printCtx=null;   // set by an open list: () => { html, title }
 document.addEventListener("keydown",e=>{ if(!(e.ctrlKey||e.metaKey)||e.key.toLowerCase()!=="p"&&e.code!=="KeyP"||e.altKey) return;

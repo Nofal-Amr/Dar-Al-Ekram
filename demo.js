@@ -93,7 +93,10 @@ function makeData(){
     { id: uuid(), item_id: items[1].id, date: "2026-09-01", qty: 40, reason: "جرد", note: "رصيد أول مدة", cancelled_at: null, created_at: "2026-09-01T09:00:00Z" },
   ];
   return { profiles, aid_types, beneficiaries, batches, batch_items, activity_log: [], calls: [], tasks,
-    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], client_errors: [], app_settings: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
+    donors: [], items, donations: [], ledger: [], stock_moves, events: [], event_people: [], client_errors: [],
+    rosters: [{ id: uuid(), title: "أعضاء الجمعية العمومية", note: "", source: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), archived_at: null,
+      cols: [{ id: "name", name: "اسم العضو" }, { id: "no", name: "رقم العضوية" }],
+      rows: ["أحمد محمود السيد", "منى عبد الله حسن", "خالد إبراهيم علي", "سعاد محمد فتحي", "عمرو سامي عبد العزيز", "هالة عادل يوسف"].map((n, i) => ({ id: uuid(), v: { name: n, no: String(101 + i) } })) }], app_settings: [], ids: { manager: managerId, worker: workerId, helper: helperId } };
 }
 
 export function createDemoClient(){
