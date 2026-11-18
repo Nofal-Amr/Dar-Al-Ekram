@@ -4,7 +4,7 @@ import { ic } from "./icons.js";
 import { buildXlsx, colName } from "./xlsxw.js";
 
 /* ================= config ================= */
-export const VERSION = "1.3.90";
+export const VERSION = "1.3.91";
 const SUPABASE_URL = "https://jvgxldhshbyyuftjgfrw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yS3OzVszjySNzCaRAyWpQA_pmKoPZJT";
 const DOMAIN = "daralekram.app";
@@ -661,7 +661,7 @@ async function loginScreen(){
     if(!u || !p){ toast("اكتب رقم التليفون والرقم السري"); return; }
     btn.disabled = true; btn.innerHTML = `<span class="spin" aria-hidden="true"></span>`; btn.setAttribute("aria-busy","true");
     const { error } = await sb.auth.signInWithPassword({ email:`${u}@${DOMAIN}`, password:p });
-    if(error){ btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = "دخول"; toast(/Invalid login/i.test(error.message) ? "الرقم أو الرقم السري غلط" : errMsg(error)); return; }
+    if(error){ btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = "دخول"; toast(/Invalid login/i.test(error.message) ? "الرقم أو الرقم السري غلط" : errKey(error)==="offline" ? "مفيش إنترنت دلوقتي — الدخول محتاج نت. لما النت يرجع دوس «دخول» تاني (لو كنت داخل قبل كده على الجهاز ده، الموقع بيفتح من غير ما تدخل تاني)." : errMsg(error)); return; }
     boot();
   };
 }
@@ -965,12 +965,12 @@ function evalHTML(b, ev){
     <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:10px">
       <table class="kv" style="flex:2"><tbody>
         <tr><td>نوع الكفالة</td><td>${esc(b?.caseType||"")}</td></tr><tr><td>اسم الحالة</td><td>${b?`${esc(b.name)} (${esc(b.fcode||b.code)})`:""}</td></tr>
-        <tr><td>رقم الموبايل</td><td>${esc(b?cleanPhone(b.phone)||"":"")}</td></tr><tr><td>الدرجة ونسبة القبول</td><td>${ev?`${ev.total} من ${max} — ${ev.pct}%${ev.grade?` (${ev.grade})`:" (غير مقبول)"}`:""}</td></tr></tbody></table>
+        <tr><td>رقم الموبايل</td><td>${esc(b?cleanPhone(b.phone)||"":"")}</td></tr><tr><td>الدرجة ونسبة القبول</td><td>${ev?.total!=null?`${ev.total} من ${max} — ${ev.pct}%${ev.grade?` (${ev.grade})`:" (غير مقبول)"}`:""}</td></tr></tbody></table>
       <table style="flex:1"><thead><tr><th>التقدير</th><th>النسبة</th></tr></thead><tbody><tr><td>A</td><td>&gt;= ${bd.A}%</td></tr><tr><td>B</td><td>${bd.B}% — ${bd.A-1}%</td></tr><tr><td>C</td><td>${bd.C}% — ${bd.B-1}%</td></tr></tbody></table></div>
     <table><thead><tr><th>م</th><th>البند</th><th>${max}</th><th>التفصيل</th><th>Sc</th><th>الدرجة</th><th>ملاحظات</th></tr></thead><tbody>
     ${(form.items||[]).map((it,i)=>{ const opts=(it.opts||[]).filter(o=>o[0]!=="0"||o[0]===a[it.key]); return opts.map((o,j)=>`<tr>${j?"":`<td rowspan="${opts.length}">${i+1}</td><td rowspan="${opts.length}" class="l"><b>${esc(it.name)}</b></td><td rowspan="${opts.length}">${itemMax(it)}</td>`}
       <td class="l">${tick(a[it.key]===o[0])} ${esc(o[1])}</td><td>${o[2]}</td><td><b>${a[it.key]===o[0]?o[2]:""}</b></td><td class="l" style="font-size:10px">${esc(o[3]||"")}</td></tr>`).join(""); }).join("")}
-    </tbody><tfoot><tr><td colspan="5">الإجمالي</td><td>${ev?ev.total:""}</td><td>${ev?`${ev.pct}%${ev.grade?` — ${ev.grade}`:""}`:""}</td></tr></tfoot></table>
+    </tbody><tfoot><tr><td colspan="5">الإجمالي</td><td>${ev?.total!=null?ev.total:""}</td><td>${ev?.total!=null?`${ev.pct}%${ev.grade?` — ${ev.grade}`:""}`:""}</td></tr></tfoot></table>
     <div class="signs"><div>القائم بالبحث<span></span><em>الاسم: <i>${esc(ev?.researcher||"")}</i></em><em>التوقيع: <i></i></em></div><div>مدير الجمعية<span></span><em>الاسم: <i></i></em><em>التوقيع: <i></i></em></div></div></div>`;
 }
 /* Editing the form itself (a new version): items, their options with points and notes, the grade bands.
@@ -1423,6 +1423,13 @@ function closeSheet(){ const s=$("#scrim"); if(s) s.remove(); document.body.styl
 function refreshSheet(){ if(sheetRefresh&&$("#scrim")){ const sc=$("#scrim .sh-body")?.scrollTop||0, a=document.activeElement, keep=a?.dataset?.ei?`[data-ei="${a.dataset.ei}"][data-ef="${a.dataset.ef}"]`:a?.dataset?.fb?`[data-fb="${a.dataset.fb}"]`:a?.dataset?.new?`[data-new="${a.dataset.new}"]`:a?.dataset?.rv?`[data-rv="${a.dataset.rv}"][data-rc="${a.dataset.rc}"]`:null;
   sheetRefresh(); const b=$("#scrim .sh-body"); if(b) b.scrollTop=sc; if(keep){ const n=$("#scrim "+keep); if(n&&document.activeElement!==n) n.focus(); } } }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeSheet(); });
+/* Number boxes drop Arabic digits (٢٥٠) without a word — the box just stays empty and then «اكتب المبلغ».
+   Typed or pasted Arabic digits (and the Arabic decimal comma «٫») are turned into 250 as they go in, in every number box. */
+const AR_DIG=/[٠-٩۰-۹٫]/;
+function putLatin(e, text){ const el=e.target; if(!(el instanceof HTMLInputElement)||el.type!=="number"||!text||!AR_DIG.test(text)) return;
+  e.preventDefault(); el.value=el.value+latinDigits(text).replace(/٫/g,".").replace(/[^\d.\-]/g,""); el.dispatchEvent(new Event("input",{ bubbles:true })); }
+document.addEventListener("beforeinput",e=>{ if(e.inputType==="insertText"||e.inputType==="insertReplacementText") putLatin(e, e.data); },true);
+document.addEventListener("paste",e=>putLatin(e, e.clipboardData?.getData("text")),true);
 
 /* ================= case file ================= */
 async function loadLog(entity,id){
@@ -1463,7 +1470,7 @@ async function editPerson(id){
       <label class="f">الدخل الشهري<input type="text" id="p_income" value="${esc(b.income)}"></label>
       <label class="f">المعاش<input type="text" id="p_pension" value="${esc(b.pension)}"></label>
       <label class="f">نوع السكن<input type="text" id="p_housing" value="${esc(b.housing)}" placeholder="إيجار / تمليك / مع الأهل"></label>
-      <label class="f">إجمالي أفراد الأسرة<input type="number" id="p_fam" value="${b.familySize??""}"></label>
+      <label class="f">إجمالي أفراد الأسرة<input type="number" id="p_fam" min="1" max="40" step="1" value="${b.familySize??""}"></label>
       <label class="f">التقدير<select id="p_grade"><option value="">—</option>${["A","B","C"].map(g=>`<option ${b.grade===g?"selected":""}>${g}</option>`).join("")}</select></label>
       <label class="f">تاريخ آخر مراجعة / بحث<input type="date" id="p_last" value="${esc(b.lastReview)}"></label>
       <label class="f">ميعاد المراجعة الجاية<input type="date" id="p_next" value="${esc(b.nextReview)}"></label>
@@ -1518,6 +1525,9 @@ async function editPerson(id){
       const nid=parseNID(rec.nationalId); if(nid.ok) rec.nationalId=nid.nid;
       const future=[rec.birth,...(rec.children||[]).map(k=>k.birth)].find(d=>d&&d>today);
       if(future){ toast(`تاريخ الميلاد ${future} في المستقبل — راجعه`); return; }
+      if(rec.familySize!=null&&(rec.familySize<1||!Number.isInteger(rec.familySize)||rec.familySize>40)){ toast("عدد أفراد الأسرة لازم يبقى رقم صحيح من 1 لـ 40"); q("#p_fam").focus(); return; }
+      const badPh=[["التليفون",rec.phone],["التليفون التاني",rec.phone2],["الواتساب",g("#p_wa")]].filter(([,v])=>v&&phoneIssue(v)==="bad");
+      if(badPh.length&&!await ask(`${badPh.map(([l,v])=>`${l} «${v}»`).join(" و")} شكله ناقص أو غلط — الموبايل 11 رقم ويبدأ بـ 01.\nتحفظ كده برضو؟`,{title:"راجع الرقم",ok:"احفظ برضو",cancel:"أصلّحه"})){ q("#p_phone").focus(); return; }
       if(rec.nationalId&&!nid.ok&&!await ask(`${nid.error}.\nتحفظ كده برضو؟`,{title:"الرقم القومي شكله غلط",ok:"احفظ برضو",cancel:"أصلّحه"})){ q("#p_nid").focus(); return; }
       const changes=[];
       if(prev){ if(prev.status!==rec.status) changes.push(`الحالة: ${prev.status} ← ${rec.status}`); if((prev.familySize??"")!==(rec.familySize??"")) changes.push(`أفراد الأسرة: ${prev.familySize||"—"} ← ${rec.familySize||"—"}`); if((prev.phone||"")!==rec.phone) changes.push("تغيير التليفون"); if((prev.lastReview||"")!==rec.lastReview&&rec.lastReview) changes.push(`مراجعة بتاريخ ${dLabel(rec.lastReview)}`); if((prev.children||[]).length!==rec.children.length) changes.push(`عدد الأبناء: ${(prev.children||[]).length} ← ${rec.children.length}`); }
@@ -2220,6 +2230,7 @@ function newBatch(){
         q("#n_sugg").querySelectorAll("[data-addr]").forEach(el=>el.onclick=()=>{ const id=el.dataset.addr; st.removed.delete(id); if(!st.added.includes(id)) st.added.push(id); draw(); });
       };
       q("#n_save").onclick=async()=>{
+        if([...s.querySelectorAll("[data-rp]")].some(i=>+i.value<0)){ toast("الكمية مينفعش تبقى بالسالب — صلّحها الأول"); return; }
         const sv=q("#n_save"); sv.disabled=true; sv.innerHTML=`<span class="spin"></span>`;
         const week=+st.week||null, distDate=week?weekdaysOf(st.month,st.dow)[week-1]:null;
         const title=`كشف ${t.name}${st.donor?` (${st.donor})`:""} — ${distDate?`${dayLabel(distDate)} ${st.month.slice(0,4)}`:mLabel(st.month)}`;
@@ -2407,7 +2418,7 @@ const bindRuleBoxes=root=>root.querySelectorAll(".rulebox").forEach(box=>{ const
     const lv=box.querySelector("[data-lvbox]"); if(lv) lv.hidden=!(m==="student"||((m==="tiers"||m==="group")&&st));
     const w=tierWords(st?"students":"family"); box.querySelector("[data-tw]").textContent=w.upTo; box.querySelector("[data-tw2]").textContent=w.small; box.querySelector("[data-tw3]").textContent=w.big; };
   sel.onchange=sync; if(tby) tby.onchange=()=>{ const c=box.querySelector('[data-rp="cut"]'); if(c&&(c.value==="3"||c.value==="2")) c.value=tby.value==="students"?"2":"3"; sync(); }; });
-const readRuleBox=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""?null:+v; };
+const readRuleBox=box=>{ const m=box.querySelector("[data-rm2]").value; if(!m) return null; const g=x=>{ const v=box.querySelector(`[data-rp="${x}"]`).value; return v===""||isNaN(+v)?null:Math.max(0,+v); };   // a quantity is never below zero
   const lv=[...box.querySelectorAll("[data-lv]:checked")].map(x=>x.dataset.lv);
   const lvs=lv.length&&lv.length<STU_LEVELS.length?{ levels:lv }:{}, tst=(m==="tiers"||m==="group")&&box.querySelector("[data-tby]")?.value==="students";
   if(m==="group") return { mode:m, every:Math.max(1,g("every")||1), per:g("per")||0, round:box.querySelector("[data-rnd]").value, ...(tst?{ tierBy:"students", stu:true, ...lvs }:{}) };
@@ -2636,7 +2647,7 @@ function openBatch(id, giveMode){
       const keepDraft=()=>{ ruleDraft=ctrls().map(x=>x.type==="checkbox"?x.checked:x.value); };
       rpn.addEventListener("input",keepDraft); rpn.addEventListener("change",e=>{ if(e.target.id!=="rp_split") keepDraft(); });
       const rps=q("#rp_split"); if(rps) rps.onchange=()=>{ ruleSplit=rps.checked; ruleDraft=null; refreshSheet(); };
-      q("#rp_go").onclick=async()=>{ const k=K.get(id), groups=ruleGroups(k,ruleSplit), basis=basisFrom(k,rpn,groups), fromCases=q("#rp_fam").checked, go=q("#rp_go");
+      q("#rp_go").onclick=async()=>{ if([...rpn.querySelectorAll("[data-rp]")].some(i=>+i.value<0)){ toast("الكمية مينفعش تبقى بالسالب — صلّحها الأول"); return; } const k=K.get(id), groups=ruleGroups(k,ruleSplit), basis=basisFrom(k,rpn,groups), fromCases=q("#rp_fam").checked, go=q("#rp_go");
         if(!ruleOf({ ...k, basis },k.items[0]||{})&&!fromCases&&!(basis&&basis.src)){ toast("اختار القاعدة الأول (لكل فرد، ثابتة، …) أو علّم «حدّث عدد الأفراد»"); return; }
         go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
         if(!same(basis,k.basis)){ const { error } = await sb.rpc("set_batch_extras", { batch:id, patch:{ basis } }); if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","rule")); return; }
@@ -2667,7 +2678,7 @@ function openBatch(id, giveMode){
       ppn.addEventListener("input",()=>readBoxes()); ppn.addEventListener("change",e=>{ if(e.target.id!=="pt_fam") readBoxes(); });
       q("#pt_add").onclick=()=>{ readBoxes(); pe().push({ key:"p"+Date.now().toString(36), name:"", unit:"", rule:{ mode:"fixed", per:1 } }); partsOpen=true; refreshSheet(); };
       ppn.querySelectorAll("[data-px]").forEach(el=>el.onclick=e=>{ e.preventDefault(); readBoxes(); pe().splice(+el.dataset.px,1); refreshSheet(); });
-      const go=q("#pt_go"); if(go) go.onclick=async()=>{ readBoxes(); const parts=pe().map(p=>({ key:p.key, name:String(p.name||"").trim(), unit:String(p.unit||"").trim(), rule:p.rule||null })).filter(p=>p.name);
+      const go=q("#pt_go"); if(go) go.onclick=async()=>{ if([...ppn.querySelectorAll("[data-rp]")].some(i=>+i.value<0)){ toast("الكمية مينفعش تبقى بالسالب — صلّحها الأول"); return; } readBoxes(); const parts=pe().map(p=>({ key:p.key, name:String(p.name||"").trim(), unit:String(p.unit||"").trim(), rule:p.rule||null })).filter(p=>p.name);
         go.disabled=true; go.innerHTML=`<span class="spin"></span>`;
         const { error } = await sb.rpc("set_batch_extras", { batch:id, patch:{ parts } });
         if(error){ go.disabled=false; refreshSheet(); toast(errMsg(error,"batch","parts")); return; }
@@ -3037,6 +3048,7 @@ function donationSheet(){
     q("#d_save").onclick=async()=>{
       const kind=q("#d_kind").value, name=q("#d_name").value.trim(), amount=+q("#d_amt").value||0, qty=+q("#d_qty").value||0;
       if(kind==="نقدي"&&amount<=0){ toast("اكتب المبلغ"); return; } if(kind==="عيني"&&qty<=0){ toast("اكتب الكمية"); return; }
+      if(kind==="نقدي"&&!await bigOk(amount)) return;
       q("#d_save").disabled=true;
       try{
         const ops=[], donor=name?donors().find(x=>norm(x.name)===norm(name)):null;
@@ -3068,18 +3080,21 @@ function entrySheet(dir){
     <label class="f">ملاحظة<input type="text" id="e_note"></label>
     <div class="bar"><button class="btn pri" id="e_save">${ic("save")}حفظ</button></div>`, s=>{
     const q=x=>s.querySelector(x);
-    q("#e_save").onclick=async()=>{ const amount=+q("#e_amt").value||0; if(amount<=0){ toast("اكتب المبلغ"); return; }
+    q("#e_save").onclick=async()=>{ const amount=+q("#e_amt").value||0; if(amount<=0){ toast("اكتب المبلغ"); return; } if(!await bigOk(amount)) return;
       if(dir==="out"&&amount>(balances()[q("#e_acc").value]||0)&&!await ask(`الرصيد في ${q("#e_acc").value} ${money(balances()[q("#e_acc").value]||0)} بس.`,{title:"الرصيد مش مكفي",ok:"سجّل برضو"})) return;
       q("#e_save").disabled=true;
       try{ await ins("ledger",{ date:q("#e_date").value||today, direction:dir, amount, account:q("#e_acc").value, category:q("#e_cat").value.trim()||"أخرى", party:q("#e_party").value.trim(), note:q("#e_note").value.trim(), created_by:me.id }); changed(); closeSheet(); toast("اتسجل ✓"); }
       catch(e){ q("#e_save").disabled=false; toast(`ماتسجلش — ${errMsg(e,"money","entry")}`); } };
   });
 }
+// An amount far bigger than usual is most likely an extra zero: ask before saving it.
+const bigOk = async amount => amount < 1e6 || ask(`المبلغ ${money(amount)} — كبير قوي. متأكد إنه مش زيادة صفر؟`,{ title:"راجع المبلغ", ok:"أيوه، سجّل", cancel:"أصلّحه" });
 function transferSheet(){
   sheet("تحويل بين الخزينة والبنك",`<div class="grid2"><label class="f">من<select id="t_from">${ACCOUNTS.map(a=>`<option>${a}</option>`).join("")}</select></label><label class="f">المبلغ<input type="number" id="t_amt" min="0" step="any"></label>
     <label class="f">التاريخ<input type="date" id="t_date" value="${today}"></label></div><div class="bar"><button class="btn pri" id="t_go">تحويل</button></div>`, s=>{
     const q=x=>s.querySelector(x);
     q("#t_go").onclick=async()=>{ const amount=+q("#t_amt").value||0, from=q("#t_from").value, to=ACCOUNTS.find(a=>a!==from); if(amount<=0){ toast("اكتب المبلغ"); return; }
+      if(amount>(balances()[from]||0)&&!await ask(`الرصيد في ${from} ${money(balances()[from]||0)} بس — التحويل هيخليه بالسالب.`,{ title:"الرصيد مش مكفي", ok:"حوّل برضو", cancel:"رجوع" })) return;
       q("#t_go").disabled=true; const date=q("#t_date").value||today;
       try{ await writeMany([{ t:"ledger", op:"insert", row:{ date, direction:"out", amount, account:from, category:"تحويل", party:to, note:`تحويل لـ${to}`, created_by:me.id } },
           { t:"ledger", op:"insert", row:{ date, direction:"in", amount, account:to, category:"تحويل", party:from, note:`تحويل من ${from}`, created_by:me.id } }]); changed(); closeSheet(); toast("اتحول ✓"); }
@@ -3199,7 +3214,8 @@ const RSV_WHY = ["مش من الأسرة","فوق السن","تحت السن","�
 const reserveOf = r => Array.from({length:+r.reserve||0},(_,i)=>{ const x=(r.reserve_list||[])[i]||{}; return { who:x.who??(i===0?r.reserve_who||"":""), age:x.age??null, stage:x.stage||"", why:x.why||"", coming:x.coming??null }; });
 const reserveText = r => reserveOf(r).map(x=>[x.who||"؟",x.stage||(x.age!=null?`${x.age} سنة`:""),x.why?`(${x.why})`:"",x.coming===true?"— جاي ✓":x.coming===false?"— مش جاي":""].filter(Boolean).join(" ")).join("، ");
 const ageTxt = k => k.stage?`${k.stage}${k.a!=null?` (${k.a} سنة)`:""}`:k.a!=null?`سن ${k.a}`:"السن ؟";
-const kidsText = r => kidsComing(r).map(k=>`${k.name?k.name+" ":""}${k.stage||(k.a??"؟")}${k.sex?" "+k.sex:""}`).join("، ");
+const kidsText = r => { const ks=kidsComing(r), known=ks.map(k=>[k.name, k.stage||k.a, k.sex].filter(x=>x!=null&&x!=="").join(" ")).filter(Boolean), n=ks.length-known.length;
+  return [...known, ...(n?[`${num(n)} من غير بيانات`]:[])].join("، "); };   // a child with nothing on file is counted, not printed as «؟»
 function eventTotals(id){
   const rs=rsvps(id), yes=rs.filter(r=>r.answer==="جاية"), maybe=rs.filter(r=>r.answer==="مش متأكدة");
   const sum=(a,f)=>a.reduce((s,r)=>s+(+r[f]||0),0);
@@ -3499,7 +3515,7 @@ function newEvent(){
     s.querySelectorAll("[data-ty]").forEach(el=>el.onclick=()=>{ const t=el.dataset.ty; st.types.has(t)?st.types.delete(t):st.types.add(t); el.classList.toggle("on"); cnt(); });
     q("#ev_act").onchange=e=>{ st.activeOnly=e.target.checked; cnt(); }; q("#ev_kids").onchange=e=>{ st.kidsOnly=e.target.checked; cnt(); }; cnt();
     q("#ev_go").onclick=async()=>{ const title=q("#ev_t").value.trim(); if(!title){ toast("اكتب اسم الرحلة"); return; } const fams=pick(); const go=q("#ev_go"); go.disabled=true;
-      try{ const e=await ins("events",{ title, date:q("#ev_d").value||null, place:q("#ev_p").value.trim(), capacity:+q("#ev_c").value||null, notes:q("#ev_notes").value.trim() });
+      try{ const e=await ins("events",{ title, date:q("#ev_d").value||null, place:q("#ev_p").value.trim(), capacity:Math.max(0,Math.round(+q("#ev_c").value||0))||null, notes:q("#ev_notes").value.trim() });
         for(let i=0;i<fams.length;i+=300){ const { data, error } = await sb.from("event_people").insert(fams.slice(i,i+300).map(b=>({ event_id:e.id, beneficiary_id:b.id }))).select(); if(error) throw error; data.forEach(r=>EP.set(r.id,r)); }
         await logIt("event",e.id,`رحلة جديدة: ${title} (${fams.length} أسرة)`); changed(); openEvent(e.id); toast(`اتعمل ✓ ${num(fams.length)} أسرة`); }
       catch(err){ go.disabled=false; toast(errMsg(err)); } };
@@ -3538,7 +3554,7 @@ function editEvent(id){
     <div class="bar"><button class="btn pri" id="ee_go">${ic("save")}حفظ</button><button class="btn" id="ee_back">رجوع</button><span class="grow"></span><button class="btn danger" id="ee_arch">${ic("archive")}أرشفة الرحلة</button></div>`, s=>{
     const q=x=>s.querySelector(x);
     q("#ee_back").onclick=()=>openEvent(id);
-    q("#ee_go").onclick=async()=>{ const patch={ title:q("#ee_t").value.trim()||e.title, date:q("#ee_d").value||null, place:q("#ee_p").value.trim(), capacity:+q("#ee_c").value||null, buses:Math.max(1,Math.min(20,+q("#ee_b").value||2)), notes:q("#ee_n").value.trim() };
+    q("#ee_go").onclick=async()=>{ const patch={ title:q("#ee_t").value.trim()||e.title, date:q("#ee_d").value||null, place:q("#ee_p").value.trim(), capacity:Math.max(0,Math.round(+q("#ee_c").value||0))||null, buses:Math.max(1,Math.min(20,+q("#ee_b").value||2)), notes:q("#ee_n").value.trim() };
       const { data, error } = await sb.from("events").update(patch).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; } EV.set(id,data); changed(); openEvent(id); toast("اتحفظ ✓"); };
     q("#ee_arch").onclick=async()=>{ if(!await ask("الرحلة هتختفي من القايمة. تقدر ترجّعها بـ«تراجع».",{title:"أرشفة الرحلة؟",ok:"أرشفة"})) return;
       const { data, error } = await sb.from("events").update({ archived_at:new Date().toISOString(), archived_by:me.id }).eq("id",id).select().single(); if(error){ toast(errMsg(error)); return; }
@@ -3768,7 +3784,7 @@ function bindDay(s, id, setF, setQ){
   s.querySelectorAll("[data-dp]").forEach(el=>el.onchange=()=>{ const r=EP.get(el.dataset.dp), g=el.dataset.g, i=+el.dataset.i, c=JSON.parse(JSON.stringify(r.came||{}));
     const len=g==="a"?+r.adults||0:g==="k"?+r.kids||0:+r.reserve||0; c[g]=Array.from({length:len},(_,j)=>(c[g]||[])[j]??false); c[g][i]=el.checked;
     epTick(r.id,{ came:c },"ep_came",{ grp:g, idx:i, len, val:el.checked }); });
-  s.querySelectorAll("[data-dprint]").forEach(el=>el.onclick=()=>doPrint(eventHTML(id,"fam",true,false,+el.dataset.dprint,dayOrder(id)), `${EV.get(id).title} — باص ${el.dataset.dprint}`));
+  s.querySelectorAll("[data-dprint]").forEach(el=>el.onclick=()=>!rsvps(id).some(r=>r.answer==="جاية"&&r.bus===+el.dataset.dprint)?toast(`مفيش أسر في باص ${el.dataset.dprint} لسه — وزّع الأسر على الباصات الأول`):doPrint(eventHTML(id,"fam",true,false,+el.dataset.dprint,dayOrder(id)), `${EV.get(id).title} — باص ${el.dataset.dprint}`));
   const rp=s.querySelector("#d_rep"); if(rp) rp.onclick=()=>doPrint(attendanceHTML(id), `${EV.get(id).title} — الحضور`);
   const dx=s.querySelector("#d_x"); if(dx) dx.onclick=()=>attendanceXlsx(id);
 }
@@ -3967,7 +3983,7 @@ function eventHTML(id, mode="normal", rsv=true, nid=false, bus=null, order=null)
     </tbody></table>
     <p><b>الإجمالي:</b> ${num(t.yes)} أسرة · ${num(t.adults)} مسؤول · ${num(t.kids)} من الأبناء${rsv&&t.rsvYes?` · ${num(t.rsvYes)} احتياطي جاي`:""} = ${num(total)}${rsv&&wait?` · احتياطي مستني ${num(wait)}`:""}</p>${signsHTML()}</div>`; }
   return `${head}
-    <table><thead><tr><th>م</th><th>رقم الحالة</th><th>الاسم</th>${nid?"<th>الرقم القومي</th>":""}<th>التليفون</th><th>المسؤول</th><th>سن المسؤولة</th><th>الأبناء</th><th>الأبناء (الاسم والسن)</th><th>الإجمالي</th>${rsv?"<th>احتياطي</th>":""}<th>ملاحظة</th><th>حضر</th></tr></thead><tbody>
+    <table class="tripT"><thead><tr><th style="width:4%">م</th><th style="width:6%">رقم الحالة</th><th style="width:${nid?15:18}%">الاسم</th>${nid?`<th style="width:12%">الرقم القومي</th>`:""}<th style="width:11%">التليفون</th><th style="width:5%">المسؤول</th><th style="width:5%">سن المسؤولة</th><th style="width:5%">الأبناء</th><th>الأبناء (الاسم والسن)</th><th style="width:6%">الإجمالي</th>${rsv?`<th style="width:8%">احتياطي</th>`:""}<th style="width:8%">ملاحظة</th><th style="width:5%">حضر</th></tr></thead><tbody>
     ${rows.map(({r,b},i)=>`<tr><td>${i+1}</td><td>${esc(b.code)}</td><td class="nm">${esc(b.name)}${r.sure?" ✓✓":""}</td>${nid?`<td>${esc(b.nationalId||"")}</td>`:""}<td>${esc(cleanPhone(b.phone))}</td><td>${num(+r.adults||0)}</td><td>${r.mother_age??""}</td><td>${num(+r.kids||0)}</td><td>${esc(kidsText(r))}</td><td>${num(cnt(r))}</td>${rsv?`<td>${+r.reserve?`${num(+r.reserve)}: ${esc(reserveText(r))}`:""}</td>`:""}<td>${esc(r.note||"")}</td><td class="sig"></td></tr>`).join("")}
     </tbody><tfoot><tr><td colspan="${nid?5:4}">الإجمالي: ${num(t.yes)} أسرة</td><td>${num(t.adults)}</td><td></td><td>${num(t.kids)}</td><td></td><td>${num(total)}</td>${rsv?`<td>${t.reserve?num(t.reserve):""}</td>`:""}<td colspan="2">${e.capacity?`الكراسي: ${num(e.capacity)}`:""}</td></tr></tfoot></table>
     ${t.kids?`<p><b>الأبناء:</b> ${bandsText(t.bands)}${rsvLine}</p>`:""}
@@ -4062,6 +4078,7 @@ const PRINT_CSS=`
 .ps th,.ps td{border:1px solid #000;padding:5px 6px;text-align:center}.ps th{background:#eee}
 .ps td.nm,.ps td.l{text-align:right}.ps table.bt{table-layout:fixed}.ps .bt .cn{width:4%}.ps .bt .cc{width:8%;font-size:11px}.ps .bt .cid{width:15%;font-size:11.5px}.ps .bt .cf{width:6%}.ps .bt .cv{width:8%}.ps .bt .fbc{width:15%}.ps .bt .sig{width:12%}.ps .bt th{font-size:10.5px;padding:3px 2px;white-space:normal;overflow-wrap:anywhere;line-height:1.25}.ps .bt td.nm{overflow-wrap:anywhere}.ps .sig{height:26px}.ps .tg{font-size:9.5px;color:#444;font-weight:normal}.ps .fbc{text-align:right}
 .ps .tot{margin-top:10px;display:flex;gap:30px;font-weight:600}
+.ps table.tripT{table-layout:fixed}.ps .tripT th{font-size:10px;padding:3px 2px;white-space:normal;line-height:1.25;overflow-wrap:anywhere}.ps .tripT td{font-size:11px;padding:4px 3px;overflow-wrap:anywhere}
 .ps .signs{display:flex;justify-content:space-between;gap:16px;margin-top:26px;page-break-inside:avoid}.ps .signs div{text-align:center;flex:1;font-weight:700}
 .ps .signs span{display:block;height:34px}.ps .signs em{display:flex;align-items:flex-end;gap:6px;font-style:normal;font-weight:400;margin-top:10px}
 .ps .signs em i{flex:1;border-bottom:1px solid #000;height:1em}
